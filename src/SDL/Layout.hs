@@ -1,5 +1,5 @@
--- | Terminal layout configuration: panel widths, column sizing, and scenario display options.
-module Terminal.Layout
+-- | Layout configuration: panel sizing and scenario display options.
+module SDL.Layout
   ( LayoutConfig (..)
   , defaultLayout
   , ScenarioDisplay (..)

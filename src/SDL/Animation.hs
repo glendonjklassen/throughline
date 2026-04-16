@@ -10,10 +10,9 @@ import           System.Random   (randomRIO)
 import qualified SDL
 import           SDL.FontContext
 import           SDL.Palette
-import           SDL.InputHandler (pollQuit)
+import           SDL.InputHandler (waitOrKey)
+import           SDL.Text (stripAnsi, wrapWords)
 import           Engine.Core.NarrativeMessage
-import           Terminal.ANSI (stripAnsi)
-import           Terminal.Display (buildHistoryLinesWith)
 
 -- ---------------------------------------------------------------------------
 -- Typewriter
@@ -35,7 +34,7 @@ typewriteLines _  _    []   _  _  _  _    _        = pure False
 typewriteLines fc rend msgs allMsgs rightW startCol maxRows startRow = do
   let labelW = maximum (0 : map (length . neTimeLabel) allMsgs)
       newLines = concatMap (\entry ->
-        map (entry,) (buildHistoryLinesWith (fromIntegral rightW) labelW [entry])
+        map (entry,) (fmtEntryPlain (fromIntegral rightW) labelW entry)
         ) msgs
   go startRow newLines
   where
@@ -44,10 +43,9 @@ typewriteLines fc rend msgs allMsgs rightW startCol maxRows startRow = do
       | row >= maxRows = go maxRows rest  -- scroll not implemented yet, just cap
       | otherwise = do
           let delay   = beatDelay (neMessage entry)
-              plain   = stripAnsi line
               tension = neTension entry
               color   = messageColor (neMessage entry) tension
-          typewriteOneLine fc rend plain color startCol row delay
+          typewriteOneLine fc rend line color startCol row delay
           go (row + 1) rest
 
     beatDelay :: NarrativeMessage -> Int
@@ -64,6 +62,37 @@ typewriteLines fc rend msgs allMsgs rightW startCol maxRows startRow = do
     messageColor (MsgEffect _)   t = tensionColor t
     messageColor (MsgDialogue _) _ = dialogueColor
 
+-- | Format a single entry into plain-text lines (no ANSI codes).
+fmtEntryPlain :: Int -> Int -> NarrativeEntry -> [String]
+fmtEntryPlain contentW labelW entry =
+  let label   = neTimeLabel entry
+      raw     = msgLinesPlain (neMessage entry)
+      wrapped = concatMap (wrapWords (max 10 (contentW - labelW - 2))) raw
+      pad     = replicate (labelW + 2) ' '
+      labelPad = padToN (labelW + 2) label
+  in case wrapped of
+       []     -> []
+       (l:ls) -> (labelPad <> l) : map (pad <>) ls
+
+msgLinesPlain :: NarrativeMessage -> [String]
+msgLinesPlain (MsgSay _ sName _ lNames text) =
+  [sName <> fmtLis lNames <> ": " <> text]
+msgLinesPlain (MsgThink _ text)     = ["~ " <> text]
+msgLinesPlain (MsgNarrate text)     = ["> " <> stripAnsi text]
+msgLinesPlain (MsgEffect text)      = ["  " <> stripAnsi text]
+msgLinesPlain (MsgDialogue dls)     = map fmtDL dls
+  where fmtDL (_, sName, _, lNames, text) =
+          sName <> fmtLis lNames <> ": " <> text
+
+fmtLis :: [String] -> String
+fmtLis [] = ""
+fmtLis ns = " (to " <> unwords ns <> ")"
+
+padToN :: Int -> String -> String
+padToN n s
+  | length s >= n = s
+  | otherwise     = s <> replicate (n - length s) ' '
+
 -- | Type a single line character by character.
 -- Re-renders the full accumulated prefix each frame so that
 -- double-buffered back-buffer swaps never lose prior characters.
@@ -77,14 +106,12 @@ typewriteOneLine fc rend str color startCol row delayMs = go [] str
       let typed' = c : typed  -- prepend for O(1), reverse on render
       renderText fc (reverse typed') color (startCol, row)
       SDL.present rend
-      quit <- pollQuit
-      if quit
+      skip <- waitOrKey delayMs
+      if skip
         then do
           renderText fc (reverse typed' ++ cs) color (startCol, row)
           SDL.present rend
-        else do
-          SDL.delay (fromIntegral delayMs)
-          go typed' cs
+        else go typed' cs
 
 -- ---------------------------------------------------------------------------
 -- Glitch

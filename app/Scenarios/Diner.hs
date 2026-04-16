@@ -1,8 +1,8 @@
 module Scenarios.Diner (diner, dinerDisplay) where
 
 import           Engine.Core.Conditions (checkCondition)
-import           Terminal.Layout
-import           Terminal.ANSI
+import           SDL.Layout
+import           SDL.Text
 import           GameTypes
 import           Scenarios.Diner.Axioms    (allAxioms, dawnRule)
 import           Scenarios.Diner.Constants (initialWorld, visitor,

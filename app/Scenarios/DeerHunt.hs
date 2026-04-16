@@ -1,8 +1,8 @@
 module Scenarios.DeerHunt (deerHunt, deerHuntDisplay) where
 
 import           Engine.Core.Conditions (checkCondition)
-import           Terminal.Layout
-import           Terminal.ANSI
+import           SDL.Layout
+import           SDL.Text
 import           GameTypes
 import           Scenarios.DeerHunt.Actions   (allActions)
 import           Scenarios.DeerHunt.Axioms    (allAxioms, dawnRule,

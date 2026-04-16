@@ -1,8 +1,8 @@
 module Scenarios.TopBuy (topBuy, topBuyDisplay) where
 
 import           Engine.Core.Conditions (checkCondition)
-import           Terminal.Layout
-import           Terminal.ANSI
+import           SDL.Layout
+import           SDL.Text
 import           GameTypes
 import           Scenarios.TopBuy.Actions   (allActions)
 import           Scenarios.TopBuy.Axioms    (allAxioms, smallAskRule,

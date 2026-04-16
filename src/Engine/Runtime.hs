@@ -17,6 +17,7 @@ import           System.Environment     (getArgs)
 import           Text.Read              (readMaybe)
 
 import           Engine.Core.Axioms     (systemMergeAxioms)
+import           Engine.Core.Conditions (checkCondition)
 import           Engine.Core.Effects    (executeEffectOnce, mergeWorlds)
 import           Engine.Sync.Causality  (buildMergeDiff, runMergeAxioms, runMergeRules)
 import           Engine.Sync.EventLog   (fileLogStore, mergeLogs, nullLogStore, replayFrom)
@@ -96,7 +97,10 @@ runScenario ui mkScenario = do
     case result of
       Left err          -> uiOnError ui (show err)
       Right (_, finalW) -> do
-        uiOnEnd ui finalW
+        -- Only show end screen if the scenario reached a terminal condition.
+        -- If the player quit (q), skip it — immediate exit.
+        when (checkCondition finalW (scenarioTerminal scenario)) $
+          uiOnEnd ui finalW
         finalLog <- lsLoadOwn store
         lsSaveSnap store (Snapshot finalW (length finalLog)
                            (scenarioActions scenario)

@@ -1,7 +1,8 @@
+{-# LANGUAGE TupleSections #-}
 -- | SDL2 game runner: constructs a RuntimeUI that renders to an SDL2 window.
 module SDL.Runner (sdlUI) where
 
-import           Control.Monad           (when)
+import           Control.Monad           (unless, when)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Reader   (asks)
 import           Control.Monad.State    (get)
@@ -11,6 +12,7 @@ import qualified SDL
 
 import           Engine.Core.NarrativeMessage (NarrativeEntry(..), neTimeLabel,
                                                NarrativeMessage(..))
+import           Engine.Core.Conditions (checkCondition)
 import           Engine.Headless       (ActionSource, StepHook, coreLoop)
 import           Engine.Runtime        (RuntimeUI(..))
 import           GameTypes
@@ -21,11 +23,10 @@ import           SDL.FontContext
 import           SDL.InputHandler
 import           SDL.Palette
 import           SDL.Renderer
-
-import           Terminal.ANSI         (stripAnsi, wrapWords)
-import           Terminal.Display      (safeIndex)
-import           Terminal.Debug        (cycleDebug, learningModeLines)
-import           Terminal.Layout       (ScenarioDisplay(..), LayoutConfig(..))
+import           SDL.SpatialHUD        (SpatialHUD(..), layoutHUD)
+import           SDL.Text              (stripAnsi, wrapWords)
+import           SDL.Debug             (cycleDebug, learningModeLines)
+import           SDL.Layout            (ScenarioDisplay(..), LayoutConfig(..))
 
 -- | Font asset path (relative to working directory).
 fontPath :: FilePath
@@ -102,11 +103,14 @@ sdlActionSource ctx layout statusLine countRef actionsRef actions = do
   traceRef <- asks envAxiomTrace
   -- Stash current actions for the step hook
   liftIO $ writeIORef actionsRef actions
-  -- Render the world with actions
+  -- Render the world with actions (twice to populate both back buffers)
+  liftIO $ renderWorldSDL ctx layout statusLine you world actions logRef debugRef traceRef
   liftIO $ renderWorldSDL ctx layout statusLine you world actions logRef debugRef traceRef
   -- Update message count
   msgs <- liftIO $ readIORef logRef
   liftIO $ writeIORef countRef (length msgs)
+  -- Drain stale events (e.g. from typewriter skip) before awaiting fresh input
+  liftIO drainSDLEvents
   -- Await input
   liftIO (awaitKeyLoop actions debugRef)
   where
@@ -138,7 +142,11 @@ sdlStepHook ctx layout statusLine countRef actionsRef _before after _diff = do
   traceRef <- asks envAxiomTrace
   allMsgs  <- liftIO $ readIORef logRef
   prevCount <- liftIO $ readIORef countRef
-  lastActions <- liftIO $ readIORef actionsRef
+  -- Compute fresh actions for the post-step world so the HUD matches
+  -- what the next sdlActionSource call will show (no flicker/double-change).
+  allActs  <- asks envActions
+  let lastActions = filter (checkCondition after . anyActionCondition) allActs
+  liftIO $ writeIORef actionsRef lastActions
   let newCount = length allMsgs
       newMsgs  = reverse (take (newCount - prevCount) allMsgs)
       tension  = getTension after
@@ -149,93 +157,131 @@ sdlStepHook ctx layout statusLine countRef actionsRef _before after _diff = do
       when (tension >= 4) $
         glitchFrame (sdlFont ctx) (sdlRenderer ctx) tension
           (fromIntegral (gridCols ctx)) (fromIntegral (gridRows ctx))
-      -- Render the frame with OLD messages only (so we can typewrite new ones)
-      -- Use the stashed actions to keep the HUD stable
-      let oldMsgs = drop (newCount - prevCount) allMsgs  -- allMsgs is newest-first
-      oldLogRef <- newIORef oldMsgs
-      renderWorldSDL ctx layout statusLine you after lastActions oldLogRef debugRef traceRef
-      -- Second render: populates both SDL2 back buffers with the static UI.
-      -- With double buffering, one render only populates one buffer. The typewriter
-      -- then alternates between a buffer with the compass and one without.
-      renderWorldSDL ctx layout statusLine you after lastActions oldLogRef debugRef traceRef
-      -- Typewrite new messages into the history area
-      debugMode     <- readIORef debugRef
-      traces        <- readIORef traceRef
-      let learnRowCount = if debugMode == Learning
-                            then length (learningModeLines traces you after)
-                            else 0
+      -- Typewrite: each tick re-renders the FULL frame from scratch so both
+      -- back buffers always have consistent content.  No partial-buffer flicker.
       let cols     = gridCols ctx
-          rows     = gridRows ctx
           contentW = cols - 4 - 8
           allOrdered = reverse allMsgs
           labelW   = maximum (0 : map (length . neTimeLabel) allOrdered)
-          -- Replicate the HUD start row calculation from renderWorldSDL
-          actionLabels  = zipWith (\n a -> show n <> ") " <> stripAnsi (anyActionLabel a))
-                            [1 :: Int ..] lastActions
-          maxLabelLen   = if null actionLabels then 0 else maximum (map length actionLabels)
-          colWidth      = maxLabelLen + 3
-          numCols       = max 1 ((cols - 4) `div` max 1 colWidth)
-          actionRowCount = length (chunksOf numCols actionLabels)
-          hudRows       = 2 + actionRowCount
-          hudStartRow   = rows - hudRows
-          -- histTop mirrors what renderWorldSDL computes (topBarRows + debug lines)
-          histTop    = topBarRows + learnRowCount
-          histAvail  = hudStartRow - histTop - 1
-          -- Old history lines, capped to what is actually visible
-          oldOrdered = reverse oldMsgs
-          oldLines   = concatMap (fmtEntryPlain contentW labelW) oldOrdered
-          visibleOldCount = min (length oldLines) (max 0 histAvail)
-          startRow   = fromIntegral (histTop + visibleOldCount)
-          fc         = sdlFont ctx
-          rend       = sdlRenderer ctx
-      -- Typewrite each new message
-      typewriteNewMessages fc rend newMsgs contentW labelW startRow
+          fc       = sdlFont ctx
+      -- Build the list of (entry, plain lines) for the new messages
+      let newEntryLines = concatMap (\entry ->
+            let ls  = fmtOneEntry contentW labelW entry
+                clr = msgColorSDL (neMessage entry) (neTension entry)
+                del = beatDelay (neMessage entry)
+            in map (clr, del,) ls
+            ) newMsgs
+      -- Typewrite: reveal one character at a time, full re-render each tick.
+      -- Pass old messages only so renderWorldFrame doesn't show new ones in history.
+      let oldMsgs = drop (newCount - prevCount) allMsgs  -- allMsgs is newest-first
+      oldLogRef <- newIORef oldMsgs
+      typewriteFullFrame ctx layout statusLine you after lastActions
+                         oldLogRef debugRef traceRef
+                         fc labelW newEntryLines
+      -- Drain lingering key events, brief pause, then done
+      drainSDLEvents
       SDL.delay 400
   liftIO $ writeIORef countRef newCount
 
--- | Typewrite new messages character by character onto the rendered frame.
-typewriteNewMessages :: FontContext -> SDL.Renderer -> [NarrativeEntry]
-                     -> Int -> Int -> CInt -> IO ()
-typewriteNewMessages _  _    []         _  _  _   = pure ()
-typewriteNewMessages fc rend (msg:rest) cw lw row = do
-  let color   = msgColorSDL (neMessage msg) (neTension msg)
-      lines'  = fmtOneEntry cw lw msg
-      delay   = beatDelay (neMessage msg)
-  nextRow <- typewriteEntryLines fc rend lines' color delay 2 row
-  typewriteNewMessages fc rend rest cw lw nextRow
+-- ---------------------------------------------------------------------------
+-- Full-frame typewriter: re-renders the entire screen each tick so both
+-- back buffers always have consistent content.  Zero flicker.
+-- ---------------------------------------------------------------------------
 
--- | Typewrite formatted lines for one entry, return the next row.
-typewriteEntryLines :: FontContext -> SDL.Renderer -> [String] -> Color
-                    -> Int -> CInt -> CInt -> IO CInt
-typewriteEntryLines _  _    []     _     _     _   row = pure row
-typewriteEntryLines fc rend (l:ls) color delay col row = do
-  typewriteString fc rend l color col row delay
-  typewriteEntryLines fc rend ls color delay col (row + 1)
-
--- | Typewrite a single string character by character.
--- Accumulates typed characters and re-renders the full prefix each frame
--- so that double-buffered back-buffer swaps never lose prior characters.
-typewriteString :: FontContext -> SDL.Renderer -> String -> Color
-                -> CInt -> CInt -> Int -> IO ()
-typewriteString _  _    []  _     _   _   _     = pure ()
-typewriteString fc rend str color col row delay = go [] str
+-- | Typewrite new messages by revealing one character at a time.
+-- Each tick: renderWorldFrame (full clear+render) → overlay partial text → present.
+-- A keypress skips to showing all text immediately.
+typewriteFullFrame
+  :: SDLContext -> LayoutConfig -> (GameWorld -> Maybe String)
+  -> CharId -> GameWorld -> [AnyAction]
+  -> IORef [NarrativeEntry] -> IORef DebugMode -> IORef [AxiomTrace]
+  -> FontContext -> Int
+  -> [(Color, Int, String)]   -- ^ (color, delayMs, plainLine) for each new line
+  -> IO ()
+typewriteFullFrame _   _      _          _   _     _           _      _        _        _  _      []    = pure ()
+typewriteFullFrame ctx layout statusLine you world actions logRef debugRef traceRef fc labelW newLines = do
+  let cols     = gridCols ctx
+      -- Compute where the history area starts (mirrors renderWorldFrame)
+      rows     = gridRows ctx
+      contentW = cols - fromIntegral marginLeft * 2 - 8
+  debugMode <- readIORef debugRef
+  traces    <- readIORef traceRef
+  allMsgs   <- readIORef logRef
+  let learnRowCount = if debugMode == Learning
+                        then length (learningModeLines traces you world)
+                        else 0
+      hud          = layoutHUD you world actions cols
+      hasSpatial   = not (null (shSpatialCells hud))
+      genLabels    = shGeneralLabels hud
+      maxGenLen    = if null genLabels then 0 else maximum (map length genLabels)
+      genColW      = maxGenLen + 3
+      genNumCols   = max 1 ((cols - 4) `div` max 1 genColW)
+      genRowCount  = length (chunksOf genNumCols genLabels)
+      spatialH     = if hasSpatial then shBoxHeight hud else 0
+      hudRows'     = 1 + 1 + genRowCount
+                       + (if hasSpatial then 1 + spatialH else 0) + 1
+      hudStartRow  = rows - hudRows'
+      histTop      = topBarRows + learnRowCount
+      histAvail    = hudStartRow - histTop - 1
+      -- How many old history lines are visible
+      allOrdered   = reverse allMsgs
+      oldLabelW    = maximum (0 : map (length . neTimeLabel) allOrdered)
+      useLabelW    = max labelW oldLabelW
+      oldDispLines = concatMap (fmtOneEntry contentW useLabelW) allOrdered
+      oldVisCount  = min (length oldDispLines) (max 0 histAvail)
+      -- Row where new typewriter text starts
+      twStartRow   = fromIntegral (histTop + oldVisCount)
+  -- Flatten new lines into individual characters with their screen row
+  let charSteps = buildCharSteps newLines twStartRow
+  go charSteps
   where
-    go typed [] = do
-      renderText fc (reverse typed) color (col, row)
-      SDL.present rend
-    go typed (c:cs) = do
-      let typed' = c : typed  -- prepend for O(1), reverse on render
-      renderText fc (reverse typed') color (col, row)
-      SDL.present rend
-      quit <- pollQuit
-      if quit
+    -- Render one frame: full world + all revealed characters so far
+    renderTick :: [(Color, String, CInt)] -> IO ()
+    renderTick revealed = do
+      renderWorldFrame ctx layout statusLine you world actions logRef debugRef traceRef
+      mapM_ (\(clr, txt, row) ->
+        renderText fc txt clr (marginLeft, row)
+        ) revealed
+      presentSDL ctx
+
+    go :: [(Color, Int, Char, CInt, String)] -> IO ()
+    go [] = pure ()
+    go steps = goInner [] steps
+
+    -- Process one character at a time, accumulating revealed text
+    goInner :: [(Color, String, CInt)] -> [(Color, Int, Char, CInt, String)] -> IO ()
+    goInner revealed [] = renderTick revealed  -- final frame with all text
+    goInner revealed ((clr, delay, _ch, row, soFar) : rest) = do
+      let revealed' = updateRevealed revealed clr row soFar
+      renderTick revealed'
+      skip <- waitOrKey delay
+      if skip
         then do
-          -- Finish the rest instantly
-          renderText fc (reverse typed' ++ cs) color (col, row)
-          SDL.present rend
-        else do
-          SDL.delay (fromIntegral delay)
-          go typed' cs
+          -- Dump everything: build final revealed state
+          let final = foldl (\acc (c, _, _, r, s) -> updateRevealed acc c r s) revealed' rest
+          renderTick final
+        else goInner revealed' rest
+
+    -- Update the revealed lines: replace or add the line for this row
+    updateRevealed :: [(Color, String, CInt)] -> Color -> CInt -> String -> [(Color, String, CInt)]
+    updateRevealed [] clr row txt = [(clr, txt, row)]
+    updateRevealed ((_c, _, r):xs) clr row txt
+      | r == row  = (clr, txt, row) : xs
+    updateRevealed (x:xs) clr row txt = x : updateRevealed xs clr row txt
+
+-- | Expand lines into per-character steps: (color, delay, char, row, prefixSoFar)
+buildCharSteps :: [(Color, Int, String)] -> CInt -> [(Color, Int, Char, CInt, String)]
+buildCharSteps [] _ = []
+buildCharSteps ((_, _, []):rest) row = buildCharSteps rest (row + 1)
+buildCharSteps ((clr, delay, line):rest) row =
+  let steps = [ (clr, delay, c, row, take i line) | (i, c) <- zip [1..] line ]
+  in steps ++ buildCharSteps rest (row + 1)
+
+-- | Drain all pending SDL events so stale keypresses don't leak.
+drainSDLEvents :: IO ()
+drainSDLEvents = do
+  events <- SDL.pollEvents
+  unless (null events) drainSDLEvents
 
 -- | Format a single entry into plain strings (no ANSI).
 fmtOneEntry :: Int -> Int -> NarrativeEntry -> [String]
@@ -248,10 +294,6 @@ fmtOneEntry contentW labelW entry =
   in case wrapped of
        []     -> []
        (l:ls) -> (labelPad <> l) : map (pad <>) ls
-
--- | Same as fmtOneEntry but returns (Color, String) pairs.
-fmtEntryPlain :: Int -> Int -> NarrativeEntry -> [String]
-fmtEntryPlain = fmtOneEntry
 
 -- | Extract raw text lines from a message.
 msgLinesPlain :: NarrativeMessage -> [String]
