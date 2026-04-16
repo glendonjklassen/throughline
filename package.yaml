@@ -1,0 +1,180 @@
+name:                throughline
+version:             0.10.0
+homepage:            "https://github.com/glendonjklassen/throughline"
+license:             MIT
+author:              "Glendon Klassen"
+maintainer:          "Glendon Klassen"
+copyright:           "2026 Glendon Klassen"
+
+extra-source-files:
+- README.md
+
+description:         A narrative engine written in Haskell for modeling experience with specificity through composable effects and world state.
+
+dependencies:
+- base >= 4.7 && < 5
+- mtl
+- transformers
+- containers
+- terminal-size
+- aeson
+- text
+- bytestring
+- directory
+- filepath
+- uuid
+- crypton
+- memory
+- random
+- deepseq
+- time
+- sdl2
+- sdl2-ttf
+
+ghc-options:
+- -Wall
+- -Werror
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wmissing-export-lists
+- -Wmissing-home-modules
+- -Wpartial-fields
+- -Wredundant-constraints
+- -Wno-missing-export-lists
+
+library:
+  source-dirs: src
+
+executables:
+  throughline-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - throughline
+
+tests:
+  throughline-test:
+    main:                Spec.hs
+    source-dirs:
+    - test
+    - app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - throughline
+    - hspec
+    - QuickCheck
+    other-modules:
+    - TestFixtures
+    - Generators
+    - Scenarios.Customer
+    - Scenarios.Customer.Constants
+    - Scenarios.Customer.WalkScene
+    - Scenarios.Diner
+    - Scenarios.Diner.Axioms
+    - Scenarios.Diner.Constants
+    - Scenarios.Diner.MayaAxioms
+    - Scenarios.Diner.MayaScenes
+    - Scenarios.Diner.Scenes
+    - Scenarios.Diner.Scenes.Booth
+    - Scenarios.Diner.Scenes.Counter
+    - Scenarios.Diner.Scenes.MayaCounter
+    - Scenarios.Diner.Scenes.MayaOutside
+    - Scenarios.Diner.Scenes.Outside
+    - Scenarios.DinerMaya
+    - Scenarios.TopBuy
+    - Scenarios.TopBuy.Actions
+    - Scenarios.TopBuy.Axioms
+    - Scenarios.TopBuy.Constants
+    - Scenarios.TopBuy.HomeScene
+    - Scenarios.TopBuy.Locations
+    - Scenarios.TopBuy.SalesFloorScene
+    - Scenarios.DeerHunt
+    - Scenarios.DeerHunt.Actions
+    - Scenarios.DeerHunt.Axioms
+    - Scenarios.DeerHunt.Constants
+    - Scenarios.DeerHunt.Locations
+    - Scenarios.DeerHunt.Probability
+    - Scenarios.DeerHuntSpec
+    - Scenarios.DeerHuntPlaythrough
+    - Scenarios.DeerHuntSyncSpec
+    - Scenarios.DinerSpec
+    - Scenarios.DinerSyncSpec
+    - Scenarios.DinerInterleaveSpec
+    - Scenarios.TopBuySpec
+    - Scenarios.CustomerSyncSpec
+    - Scenarios.CoLocationSpec
+    - Engine.ChainSpec
+    - Engine.DiffPropSpec
+    - Engine.JSONRoundTripSpec
+    - Engine.Author.CommonAxiomsSpec
+    - Engine.Author.DSLSpec
+    - Engine.Author.SceneSpec
+    - Engine.Author.NarrativeSpec
+    - Engine.CRDT.ORSetSpec
+    - Engine.CRDT.ORSetPropSpec
+    - Engine.CRDT.PNCounterSpec
+    - Engine.CRDT.PNCounterPropSpec
+    - Engine.Core.AxiomsSpec
+    - Engine.Core.SystemAxiomsSpec
+    - Engine.Core.ConditionsSpec
+    - Engine.Core.EffectsSpec
+    - Engine.Core.WorldSpec
+    - Engine.Sync.CausalitySpec
+    - Engine.Sync.ConvergenceSpec
+    - Engine.Sync.EventLogSpec
+    - Engine.Sync.IdentitySpec
+    - Terminal.ANSISpec
+    - Terminal.DisplaySpec
+    - Terminal.RenderSpec
+
+benchmarks:
+  throughline-bench:
+    main: BenchMain.hs
+    source-dirs:
+    - bench
+    - app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -O2
+    dependencies:
+    - throughline
+    - tasty-bench
+    - tasty
+    other-modules:
+    - Fixtures
+    - EngineBench
+    - IntegrationBench
+    - Scenarios.Customer
+    - Scenarios.Customer.Constants
+    - Scenarios.Customer.WalkScene
+    - Scenarios.Diner
+    - Scenarios.Diner.Axioms
+    - Scenarios.Diner.Constants
+    - Scenarios.Diner.Scenes
+    - Scenarios.Diner.Scenes.Booth
+    - Scenarios.Diner.Scenes.Counter
+    - Scenarios.Diner.Scenes.Outside
+    - Scenarios.TopBuy
+    - Scenarios.TopBuy.Actions
+    - Scenarios.TopBuy.Axioms
+    - Scenarios.TopBuy.Constants
+    - Scenarios.TopBuy.Locations
+    - Scenarios.TopBuy.SalesFloorScene
+    - Scenarios.TopBuy.HomeScene
+    - Scenarios.DeerHunt
+    - Scenarios.DeerHunt.Actions
+    - Scenarios.DeerHunt.Axioms
+    - Scenarios.DeerHunt.Constants
+    - Scenarios.DeerHunt.Locations
+    - Scenarios.DeerHunt.Probability

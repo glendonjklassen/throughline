@@ -1,0 +1,26 @@
+Name,Mean (ps),2*Stdev (ps)
+All.Engine.diffWorlds.5 characters,15348673,1474054
+All.Engine.diffWorlds.20 characters,64797840,1346128
+All.Engine.diffWorlds.50 characters,157056018,8226816
+All.Engine.diffWorlds.100 characters,333032005,24078384
+All.Engine.checkCondition.depth 5,13030129,746068
+All.Engine.checkCondition.depth 10,457488102,22761170
+All.Engine.checkCondition.depth 15,17518573900,1387154608
+All.Engine.checkCondition.width 10,3200515,83436
+All.Engine.checkCondition.width 50,21683975,779952
+All.Engine.checkCondition.width 100,46285928,3383524
+All.Engine.runAxioms.system axioms only,209689,19558
+All.Engine.runAxioms.10 scenario axioms,657216,48710
+All.Engine.runAxioms.50 scenario axioms,2251632,187368
+"All.Engine.mergeLogs.100 entries, 50 shared",30359136,2929808
+"All.Engine.mergeLogs.500 entries, 250 shared",160227666,15156344
+"All.Engine.mergeLogs.1000 entries, 500 shared",331055773,23092502
+All.Engine.mergeWorlds.5 characters,6165151,477430
+All.Engine.mergeWorlds.20 characters,26935415,1011264
+All.Engine.mergeWorlds.50 characters,63526388,4274300
+All.Integration.Scenario.Customer 50 ticks,469835790,33659690
+All.Integration.Scenario.Customer 200 ticks,1829097906,92037954
+All.Integration.Scenario.TopBuy 50 ticks,1646168668,88684244
+All.Integration.Scenario.TopBuy 200 ticks,1696108275,97265938
+All.Integration.Replay.replay 50 entries,88606914,4217974
+All.Integration.Replay.replay 200 entries,363541081,30609772

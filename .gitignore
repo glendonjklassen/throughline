@@ -1,0 +1,29 @@
+# Stack build artifacts
+.stack-work/
+*.cabal
+stack.yaml.lock
+
+# Haskell build outputs
+*.hi
+*.o
+*.dyn_hi
+*.dyn_o
+*.chi
+*.chs.h
+
+# Game sessions
+sessions/
+
+# Editor/IDE
+*~
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/settings.local.json

@@ -1,0 +1,550 @@
+{-# OPTIONS_GHC -fno-hpc     #-}
+{-# LANGUAGE DataKinds      #-}
+{-# LANGUAGE DeriveGeneric  #-}
+{-# LANGUAGE GADTs          #-}
+{-# LANGUAGE KindSignatures #-}
+-- | Core domain types: characters, effects, actions, conditions, tags, stats, relationships, and world state.
+module GameTypes.Types where
+
+import           Control.DeepSeq (NFData(rnf))
+import           Data.List.NonEmpty (NonEmpty)
+import qualified Data.Map.Strict as Map
+import qualified Data.Set        as Set
+import           GHC.Generics    (Generic)
+import qualified Data.ByteString as BS
+import           Data.UUID       (UUID)
+
+import           Engine.CRDT.ORSet
+import           Engine.CRDT.PNCounter
+
+-- ---------------------------------------------------------------------------
+-- Event log
+-- ---------------------------------------------------------------------------
+
+-- | The latest entry seen from each sync partner at the time of a log entry.
+-- Empty for entries created during pure local play (no syncs yet).
+type CausalFrontier = Map.Map PlayerId String
+
+newtype PlayerId = PlayerId String
+  deriving (Show, Eq, Ord, Generic)
+
+data LamportClock = LamportClock
+  { lcTick     :: Int
+  , lcPlayerId :: PlayerId
+  } deriving (Show, Eq, Ord, Generic)
+
+data LogEntry = LogEntry
+  { entryId        :: String
+  , entryClock     :: LamportClock
+  , entryPlayerId  :: PlayerId
+  , entryActionId  :: ActionId
+  , entryDiff      :: WorldDiff
+  , entrySignature :: Maybe BS.ByteString
+  , entryFrontier  :: CausalFrontier
+  } deriving (Show, Eq, Generic)
+
+-- ---------------------------------------------------------------------------
+-- Identifiers & Tags
+-- ---------------------------------------------------------------------------
+
+data CharId = Named String | Truth
+  deriving (Eq, Ord, Generic)
+
+-- | An entity that can be the target of an action.
+-- Starts as just characters; extensible to locations, objects, etc.
+newtype Entity = ECharacter CharId
+  deriving (Show, Eq, Ord, Generic)
+
+instance Show CharId where
+  show (Named s) = s
+  show Truth     = "Truth"
+
+data Tag
+  = EngineTag EngineTag
+  | ScenarioTag ScenarioTagValue
+  deriving (Show, Eq, Ord, Generic)
+
+-- | Opaque wrapper for scenario-defined tags. Scenarios construct these
+-- via the scenarioTag helper using their own ADTs.
+newtype ScenarioTagValue = MkScenarioTag String
+  deriving (Show, Eq, Ord, Generic)
+
+data ClockTag
+  = TimeOfDay Int
+  | DayOfWeek Int
+  | LunarPhase Int
+  | Season Int
+  | DayNumber Int
+  deriving (Show, Eq, Ord, Generic)
+
+newtype ActionId = ActionId { actionIdText :: String }
+  deriving (Eq, Ord, Generic)
+
+instance Show ActionId where
+  show (ActionId s) = s
+
+newtype WeatherDesc = WeatherDesc { weatherName :: String }
+  deriving (Eq, Ord, Generic)
+
+instance Show WeatherDesc where
+  show (WeatherDesc s) = s
+
+data FatigueLevel = Rested | Tired | Exhausted
+  deriving (Show, Read, Eq, Ord, Enum, Bounded, Generic)
+
+data HungerLevel = Satiated | Peckish | Hungry
+  deriving (Show, Read, Eq, Ord, Enum, Bounded, Generic)
+
+data SocialEnergyLevel = Energized | Neutral | Drained
+  deriving (Show, Read, Eq, Ord, Enum, Bounded, Generic)
+
+data EngineTag
+  = ActionTaken ActionId
+  | Weather WeatherDesc
+  | Clock ClockTag
+  | DialogueInProgress
+  | Tension Int
+  | Fatigue FatigueLevel
+  | HungerState HungerLevel
+  | Sleeping
+  | SocialEnergy SocialEnergyLevel
+  | ForeignOrigin PlayerId
+  deriving (Show, Eq, Ord, Generic)
+
+-- ---------------------------------------------------------------------------
+-- Locations
+-- ---------------------------------------------------------------------------
+
+newtype Location = Location { locationName :: String }
+  deriving (Eq, Ord, Generic)
+
+instance Show Location where
+  show (Location s) = s
+
+newtype Region = Region { regionName :: String }
+  deriving (Eq, Ord, Show, Read, Generic)
+
+data LocationGraph = LocationGraph
+  { lgEdges   :: Set.Set (Location, Location)
+  , lgRegions :: Map.Map Location Region
+  , lgCoords  :: Map.Map Location (Double, Double)
+  } deriving (Show, Eq, Generic)
+
+emptyLocationGraph :: LocationGraph
+emptyLocationGraph = LocationGraph
+  { lgEdges   = Set.empty
+  , lgRegions = Map.empty
+  , lgCoords  = Map.empty
+  }
+
+-- ---------------------------------------------------------------------------
+-- Narration
+-- ---------------------------------------------------------------------------
+
+data Narration
+  = Static String
+  | Conditional [(Condition, String)] String   -- [(guard, text)] with fallback
+  | NarrationPool Int [String]                 -- salt + variants, picked by PRNG
+  deriving (Show, Eq, Generic)
+
+-- ---------------------------------------------------------------------------
+-- Stats
+-- ---------------------------------------------------------------------------
+
+data CapacityStat = Intelligence | Strength | Charisma | Understanding | Hunger | SocialStamina | Stillness
+  deriving (Show, Read, Eq, Ord, Enum, Bounded, Generic)
+
+data StatType
+  = Capacity CapacityStat
+  | Trust
+  | Perceived CapacityStat
+  deriving (Show, Read, Eq, Ord, Generic)
+
+-- ---------------------------------------------------------------------------
+-- Characters & Relationships
+-- ---------------------------------------------------------------------------
+
+newtype Relationship = Relationship
+  { relStats :: Map.Map StatType (PNCounter PlayerId)
+  } deriving (Show, Eq, Generic)
+
+type RelationshipGraph = Map.Map CharId (Map.Map CharId Relationship)
+
+data Character = Character
+  { charId      :: CharId
+  , charName    :: String
+  , charEffects :: [Effect]
+  , charTags    :: ORSet Tag
+  } deriving (Generic)
+
+-- ---------------------------------------------------------------------------
+-- World
+-- ---------------------------------------------------------------------------
+
+data GameWorld = GameWorld
+  { worldCharacters    :: Map.Map CharId Character
+  , worldGraph         :: RelationshipGraph
+  , worldLocations     :: Map.Map CharId Location
+  , worldActiveEffects :: [LiveEffect]
+  , worldTags          :: ORSet Tag
+  , worldClock         :: LamportClock
+  , worldLocationGraph :: LocationGraph
+  , worldSeed          :: Int
+  } deriving (Generic)
+
+-- ---------------------------------------------------------------------------
+-- Conditions
+-- ---------------------------------------------------------------------------
+
+data Condition
+  = HasTag CharId Tag
+  | HasWorldTag Tag
+  | RelationAbove CharId CharId StatType Int
+  | AtLocation CharId Location
+  | CoLocated CharId CharId
+  | InRegion CharId Region
+  | InSameRegion CharId CharId
+  | Chance Int Double
+  | HasCoLocated CharId [CharId]   -- ^ character has at least one co-located
+                                   -- character, excluding those listed
+  | Not Condition
+  | All [Condition]
+  | Any [Condition]
+  deriving (Show, Eq, Generic)
+
+-- ---------------------------------------------------------------------------
+-- Effects
+-- ---------------------------------------------------------------------------
+
+-- | The body of an effect — what it /does/ each tick it is alive.
+--
+-- Simple constructors fire once per tick. Compound constructors ('OnExpire',
+-- 'Cycle', 'CycleMany') compose bodies over time and carry runtime
+-- preconditions on their numeric arguments; prefer the DSL helpers in
+-- "Engine.Author.DSL" which enforce those preconditions at construction time.
+data EffectBody
+  = -- | Attach a 'Tag' to a character.
+    AddTag CharId Tag
+    -- | Attach a 'Tag' to the world.
+  | AddWorldTag Tag
+    -- | Remove a 'Tag' from a character.
+  | RemoveTag CharId Tag
+    -- | Remove a 'Tag' from the world.
+  | RemoveWorldTag Tag
+    -- | Adjust a directed relationship stat by a signed delta.
+  | ModifyRelation CharId CharId StatType Int
+    -- | Spoken dialogue attributed to a character, optionally directed at listeners.
+    -- [] = said to the room (announcement, mutter). Non-empty = addressed to specific people.
+  | Say CharId [CharId] String
+    -- | Internal thought attributed to a character.
+  | Think CharId String
+    -- | Narrator prose with no speaker.
+  | Narrate String
+    -- | Narrator prose picked from a pool by deterministic PRNG.
+    -- The salt + world clock tick select which variant fires.
+  | NarratePool Int [String]
+    -- | Move a character to a new 'Location'.
+  | SetLocation CharId Location
+    -- | Executes @inner@ for the effect's lifetime, then spawns @child@ on
+    -- expiry. Use 'Engine.Author.DSL.ifItPersists' for condition-gated chains.
+  | OnExpire EffectBody Effect
+    -- | Rotates through @bodies@ every @interval@ ticks.
+    -- @interval@ must be >= 1. Use 'Engine.Author.DSL.effectCycleMany' for
+    -- convenient construction.
+  | CycleMany Int (NonEmpty EffectBody)
+    -- | Alternates between @body1@ and @body2@ every @interval@ ticks.
+    -- @interval@ must be >= 1. Use 'Engine.Author.DSL.effectCycle' for
+    -- convenient construction.
+  | Cycle     Int EffectBody EffectBody
+    -- | A sequence of dialogue lines rendered as a block.
+    -- Each triple: (speaker, listeners, text).
+  | Dialogue (NonEmpty (CharId, [CharId], String))
+    -- | Move character to a random location from the given list.
+    -- Salt + Lamport clock determines the choice.
+  | SetLocationRandom CharId Int [Location]
+    -- | Move character to a random adjacent location (reads worldLocationGraph).
+    -- Salt + Lamport clock determines the choice.
+  | SetLocationAdjacent CharId Int
+    -- | Move character to a random adjacent location, preferring locations in
+    -- the given region. Salt + Lamport clock determines the choice.
+  | SetLocationAdjacentPrefer CharId Int Region
+    -- | No-op placeholder; useful as a default or in conditional branches.
+  | DoNothing
+  deriving (Show, Eq, Generic)
+
+data Effect = Effect
+  { effectBody      :: EffectBody
+  , effectLifetime  :: Maybe Int
+  , effectCondition :: Condition
+  , effectNarrative :: Maybe String
+  } deriving (Show, Eq, Generic)
+
+data LiveEffect = LiveEffect
+  { liveId         :: UUID
+  , liveEffect     :: Effect
+  , liveBirthClock :: LamportClock
+  } deriving (Show, Eq, Generic)
+
+-- ---------------------------------------------------------------------------
+-- Actions
+-- ---------------------------------------------------------------------------
+
+data Frequency = Once | Repeatable
+  deriving (Show, Eq, Ord)
+
+data Action (f :: Frequency) = Action
+  { actionId        :: ActionId
+  , actionLabel     :: String
+  , actionTarget    :: Maybe Entity
+  , actionCondition :: Condition
+  , actionEffects   :: [Effect]
+  } deriving (Show, Eq, Generic)
+
+data AnyAction where
+  AnyAction :: Action f -> AnyAction
+
+instance Show AnyAction where
+  show (AnyAction a) = show a
+
+instance Eq AnyAction where
+  AnyAction a == AnyAction b =
+    actionId a == actionId b && actionLabel a == actionLabel b
+    && actionTarget a == actionTarget b
+    && actionCondition a == actionCondition b && actionEffects a == actionEffects b
+
+-- ---------------------------------------------------------------------------
+-- World diff
+-- ---------------------------------------------------------------------------
+
+data StatDelta = StatDelta
+  { statDeltaChar   :: CharId
+  , statDeltaStat   :: StatType
+  , statDeltaOld    :: Int
+  , statDeltaNew    :: Int
+  , statDeltaPlayer :: PlayerId
+  } deriving (Show, Eq, Generic)
+
+data RelationDelta = RelationDelta
+  { relationDeltaFrom   :: CharId
+  , relationDeltaTo     :: CharId
+  , relationDeltaStat   :: StatType
+  , relationDeltaOld    :: Int
+  , relationDeltaNew    :: Int
+  , relationDeltaPlayer :: PlayerId
+  } deriving (Show, Eq, Generic)
+
+data LocationDelta = LocationDelta
+  { locationDeltaChar :: CharId
+  , locationDeltaFrom :: Location
+  , locationDeltaTo   :: Location
+  } deriving (Show, Eq, Generic)
+
+data WorldDiff = WorldDiff
+  { diffStats            :: [StatDelta]
+  , diffRelations        :: [RelationDelta]
+  , diffTagsAdded        :: [(CharId, Tag)]
+  , diffTagsRemoved      :: [(CharId, Tag)]
+  , diffWorldTagsAdded   :: [Tag]
+  , diffWorldTagsRemoved :: [Tag]
+  , diffLocations        :: [LocationDelta]
+  } deriving (Show, Eq, Generic)
+
+-- ---------------------------------------------------------------------------
+-- Axioms
+-- ---------------------------------------------------------------------------
+
+data AxiomId
+  = SystemAxiom  String    -- ^ Engine-owned axiom (runs in every scenario)
+  | ScenarioAxiom String   -- ^ Scenario-authored axiom
+  deriving (Show, Read, Eq, Ord, Generic)
+
+data Axiom = Axiom
+  { axiomId       :: AxiomId
+  , axiomPriority :: Int
+  , axiomEvaluate :: GameWorld -> [AnyAction] -> WorldDiff -> [Effect]
+  }
+
+-- ---------------------------------------------------------------------------
+-- Merge causality
+-- ---------------------------------------------------------------------------
+
+-- | Whether the origin of a merged change knew about our state.
+data Provenance = Aware | Unaware | Stale
+  deriving (Show, Read, Eq, Ord, Generic)
+
+-- | A single delta annotated with who caused it and whether they knew about us.
+data MergeDelta a = MergeDelta
+  { mdValue      :: a
+  , mdOrigin     :: PlayerId
+  , mdProvenance :: Provenance
+  } deriving (Show, Eq, Generic)
+
+-- | What changed as a result of absorbing foreign state, with provenance.
+data MergeDiff = MergeDiff
+  { mergeStats     :: [MergeDelta StatDelta]
+  , mergeRelations :: [MergeDelta RelationDelta]
+  , mergeTags      :: [MergeDelta (CharId, Tag)]
+  , mergeWorldTags :: [MergeDelta Tag]
+  , mergeLocations :: [MergeDelta LocationDelta]
+  } deriving (Show, Eq, Generic)
+
+-- | Axiom that fires once per merge (not per tick).
+data MergeAxiom = MergeAxiom
+  { mergeAxiomId       :: AxiomId
+  , mergeAxiomPriority :: Int
+  , mergeAxiomEvaluate :: GameWorld -> MergeDiff -> [Effect]
+  }
+
+-- ---------------------------------------------------------------------------
+-- Declarative axiom rules (serializable)
+-- ---------------------------------------------------------------------------
+
+-- | Sentinel CharId for rules that target multiple characters.
+-- The rule evaluator substitutes this with the actual CharId.
+self :: CharId
+self = Named "\xa7self"
+
+data Trigger
+  = WhenTagAdded Tag
+  | WhenWorldTagAdded Tag
+  | WhenStatChanged StatType
+  | WhenRelationChanged StatType
+  | WhenLocationChanged
+  | EveryTick
+  deriving (Show, Eq, Generic)
+
+data Target
+  = EachCharacter
+  | SpecificChar CharId
+  | ChangedChars
+  | CoLocatedWith CharId
+  | CharsAtLocation Location
+  deriving (Show, Eq, Generic)
+
+data AxiomRule = AxiomRule
+  { ruleId       :: AxiomId
+  , rulePriority :: Int
+  , ruleTrigger  :: Trigger
+  , ruleGuard    :: Condition
+  , ruleTarget   :: Target
+  , ruleEffects  :: [Effect]
+  } deriving (Show, Eq, Generic)
+
+data MergeTrigger
+  = WhenMergeRelationChanged
+  | WhenMergeLocationChanged
+  | WhenMergeTagChanged
+  | WhenMergeWorldTagChanged
+  | OnAnyMerge
+  deriving (Show, Eq, Generic)
+
+data MergeAxiomRule = MergeAxiomRule
+  { mergeRuleId         :: AxiomId
+  , mergeRulePriority   :: Int
+  , mergeRuleTrigger    :: MergeTrigger
+  , mergeRuleProvenance :: Maybe Provenance
+  , mergeRuleGuard      :: Condition
+  , mergeRuleEffects    :: [Effect]
+  } deriving (Show, Eq, Generic)
+
+-- ---------------------------------------------------------------------------
+-- Snapshots
+-- ---------------------------------------------------------------------------
+
+data Snapshot = Snapshot
+  { snapWorld      :: GameWorld
+  , snapOffset     :: Int
+  , snapActions    :: [AnyAction]
+  , snapRules      :: [AxiomRule]
+  , snapMergeRules :: [MergeAxiomRule]
+  } deriving (Generic)
+
+-- ---------------------------------------------------------------------------
+-- LogStore abstraction
+-- ---------------------------------------------------------------------------
+
+-- | Abstract log persistence. The engine writes entries through this interface;
+-- the concrete implementation decides where they go (filesystem, network, memory).
+data LogStore = LogStore
+  { lsAppend      :: LogEntry -> IO ()                            -- ^ persist one entry
+  , lsLoadOwn     :: IO [LogEntry]                                -- ^ load this player's log
+  , lsForeignLogs :: IO [(PlayerId, [LogEntry], Maybe Snapshot)]  -- ^ discover and load other players' logs + snapshots
+  , lsLoadSnap    :: IO (Maybe Snapshot)                          -- ^ load this player's snapshot
+  , lsSaveSnap    :: Snapshot -> IO ()                             -- ^ save this player's snapshot
+  , lsReset       :: IO ()                                         -- ^ delete log and snapshot (for --new-session)
+  }
+
+-- ---------------------------------------------------------------------------
+-- Scenarios
+-- ---------------------------------------------------------------------------
+
+data DebugMode = Off | Before | After | Diff | Learning deriving (Eq)
+
+data AxiomTrace = AxiomTrace
+  { traceAxiomId  :: AxiomId
+  , tracePriority :: Int
+  , traceEffects  :: [Effect]
+  } deriving (Show, Generic)
+
+data Scenario = Scenario
+  { scenarioName         :: String
+  , scenarioInitial      :: GameWorld
+  , scenarioActions      :: [AnyAction]
+  , scenarioAxioms       :: [Axiom]
+  , scenarioMergeAxioms  :: [MergeAxiom]
+  , scenarioRules        :: [AxiomRule]
+  , scenarioMergeRules   :: [MergeAxiomRule]
+  , scenarioTerminal     :: Condition
+  , scenarioDebugDefault :: DebugMode
+  , scenarioPlayerCharId :: CharId
+  }
+
+-- ---------------------------------------------------------------------------
+-- NFData instances (via Generic, for benchmarking)
+-- ---------------------------------------------------------------------------
+
+instance NFData PlayerId
+instance NFData LamportClock
+instance NFData CharId
+instance NFData Entity
+instance NFData ClockTag
+instance NFData ActionId
+instance NFData WeatherDesc
+instance NFData FatigueLevel
+instance NFData HungerLevel
+instance NFData SocialEnergyLevel
+instance NFData EngineTag
+instance NFData ScenarioTagValue
+instance NFData Tag
+instance NFData Location
+instance NFData Region
+instance NFData LocationGraph
+instance NFData Narration
+instance NFData CapacityStat
+instance NFData StatType
+instance NFData Relationship
+instance NFData Character
+instance NFData Condition
+instance NFData EffectBody
+instance NFData Effect
+instance NFData LiveEffect
+instance NFData GameWorld
+instance NFData AxiomId
+instance NFData AxiomTrace
+instance NFData (Action f)
+instance NFData AnyAction where
+  rnf (AnyAction a) = rnf a
+instance NFData StatDelta
+instance NFData RelationDelta
+instance NFData LocationDelta
+instance NFData WorldDiff
+instance NFData LogEntry
+instance NFData Provenance
+instance NFData a => NFData (MergeDelta a)
+instance NFData MergeDiff
+instance NFData Trigger
+instance NFData Target
+instance NFData AxiomRule
+instance NFData MergeTrigger
+instance NFData MergeAxiomRule
+instance NFData Snapshot
