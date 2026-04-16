@@ -1,10 +1,10 @@
-module Terminal.ANSISpec (spec) where
+module SDL.TextSpec (spec) where
 
 import           Test.Hspec
-import           Terminal.ANSI
+import           SDL.Text
 
 spec :: Spec
-spec = describe "Terminal.ANSI" $ do
+spec = describe "SDL.Text" $ do
 
   -- -------------------------------------------------------------------------
   -- Colour wrappers (yellow, red — uncovered by other modules)

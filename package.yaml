@@ -16,7 +16,6 @@ dependencies:
 - mtl
 - transformers
 - containers
-- terminal-size
 - aeson
 - text
 - bytestring
@@ -132,9 +131,7 @@ tests:
     - Engine.Sync.ConvergenceSpec
     - Engine.Sync.EventLogSpec
     - Engine.Sync.IdentitySpec
-    - Terminal.ANSISpec
-    - Terminal.DisplaySpec
-    - Terminal.RenderSpec
+    - SDL.TextSpec
 
 benchmarks:
   throughline-bench:

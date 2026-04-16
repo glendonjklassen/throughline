@@ -19,9 +19,7 @@ import qualified Engine.Sync.ConvergenceSpec
 import qualified Engine.CRDT.ORSetPropSpec
 import qualified Engine.CRDT.PNCounterPropSpec
 import qualified Engine.JSONRoundTripSpec
-import qualified Terminal.ANSISpec
-import qualified Terminal.DisplaySpec
-import qualified Terminal.RenderSpec
+import qualified SDL.TextSpec
 import qualified Engine.DiffPropSpec
 import qualified Engine.Core.WorldSpec
 import qualified Scenarios.CustomerSyncSpec
@@ -55,9 +53,7 @@ main = hspec $ do
   Engine.CRDT.ORSetPropSpec.spec
   Engine.CRDT.PNCounterPropSpec.spec
   Engine.JSONRoundTripSpec.spec
-  Terminal.ANSISpec.spec
-  Terminal.DisplaySpec.spec
-  Terminal.RenderSpec.spec
+  SDL.TextSpec.spec
   Engine.DiffPropSpec.spec
   Engine.Core.WorldSpec.spec
   Scenarios.DeerHuntSpec.spec

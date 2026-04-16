@@ -1,8 +1,8 @@
 module Scenarios.DinerMaya (dinerMaya, dinerMayaDisplay) where
 
 import           Engine.Core.Conditions (checkCondition)
-import           Terminal.Layout
-import           Terminal.ANSI
+import           SDL.Layout
+import           SDL.Text
 import           GameTypes
 import           Scenarios.Diner.MayaAxioms  (allAxiomsMaya, allRulesMaya)
 import           Scenarios.Diner.Constants   (initialWorld, maya, mayaDawn,

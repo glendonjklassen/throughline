@@ -49,76 +49,315 @@ moveNarr from to =
 edgeSalt :: Location -> Location -> Int
 edgeSalt (Location a) (Location b) = sum (map fromEnum a) + sum (map fromEnum b) * 31
 
+-- | Per-location narration for intra-zone movement.
+-- Three variants per location, each grounded in what that spot actually is.
 withinZoneNarr :: Zone -> Location -> [String]
-withinZoneNarr z (Location name) = case z of
-  NorthRoad ->
-    [ "Gravel crunches under your boots. " <> name <> "."
-    , "Loose rock on the shoulder. You keep to the edge. " <> name <> "."
-    , "The road stretches ahead, empty both ways. " <> name <> "."
+withinZoneNarr _z loc
+  -- Roads — North
+  | loc == truckNorth =
+    [ "Your truck sits where you left it. Frost on the windshield."
+    , "The truck's still there. Tailgate down, thermos on the bumper."
+    , "Back at the truck. Engine's cold. You can see your breath."
     ]
-  SouthRoad ->
-    [ "You walk the shoulder. " <> name <> "."
-    , "Tire ruts frozen in the mud. " <> name <> "."
-    , "Dust kicked up behind you settles slow. " <> name <> "."
+  | loc == ditchNorth =
+    [ "You drop down into the north ditch. Frozen cattails snap underfoot."
+    , "The ditch is knee-deep here. Ice in the puddles."
+    , "Down in the ditch. Dead grass and old fence wire."
     ]
-  WestRoad ->
-    [ "You follow the ditch line. " <> name <> "."
-    , "Cattails in the ditch, ice on the puddles. " <> name <> "."
-    , "The road bends ahead. Fence posts leaning. " <> name <> "."
+  -- Roads — South
+  | loc == truckSouth =
+    [ "The south truck sits on the shoulder. Mud on the wheel wells."
+    , "Back at the truck. Someone's tire tracks in the gravel beside yours."
+    , "Your truck. The cab will be warm for about two minutes."
     ]
-  NorthField ->
-    [ "Wheat stubble cracks underfoot. " <> name <> "."
-    , "Stubble rows stretch to the treeline. " <> name <> "."
-    , "Frost on the stubble catches the light. " <> name <> "."
+  | loc == ditchSouth =
+    [ "South ditch. Deeper than the north one. Water at the bottom."
+    , "You follow the south ditch. Tall grass, a few old beer cans."
+    , "The ditch runs along the section. Quiet down here."
     ]
-  SouthField ->
-    [ "Canola stubble stretches flat ahead. " <> name <> "."
-    , "Short stubble, wide open. Nowhere to hide. " <> name <> "."
-    , "The field is quiet. Wind moves through the stubble. " <> name <> "."
+  -- Roads — West
+  | loc == truckWest =
+    [ "The west truck. Parked tight to the fence line."
+    , "Back at the truck. Sun's low through the windshield."
+    , "Your truck on the west road. Gravel dust on everything."
     ]
-  BushEdge ->
-    [ "Thin branches scratch your jacket. " <> name <> "."
-    , "Deadfall underfoot. You step over a downed birch. " <> name <> "."
-    , "The bush thickens here. Slower going. " <> name <> "."
+  | loc == ditchWest =
+    [ "West ditch. Cattails thick on both sides."
+    , "The ditch here is shallow. More of a low spot than a channel."
+    , "You step down into the west ditch. Ice crunches."
     ]
-  OakRidge ->
-    [ "You work through thick oaks. " <> name <> "."
-    , "Oak leaves underfoot, still damp. " <> name <> "."
-    , "Heavy timber. You duck under a low branch. " <> name <> "."
+  -- North Field
+  | loc == nFieldEdge =
+    [ "The field edge. Stubble meets treeline. Transition ground."
+    , "You stop at the field edge. Open country ahead."
+    , "Edge of the north field. Wind hits you as you leave the trees."
     ]
-  WillowBottom ->
-    [ "Your boots sink in. " <> name <> "."
-    , "Soft ground. Water seeping into your tracks. " <> name <> "."
-    , "Willow branches brush your shoulders. Wet underfoot. " <> name <> "."
+  | loc == stubbleRows =
+    [ "Wheat stubble in rows. Dry stalks crack underfoot."
+    , "Through the stubble rows. Each step crunches loud in the cold air."
+    , "Stubble rows running north-south. Frost on the broken stems."
     ]
-  PoplarStand ->
-    [ "Open poplar, light through bare branches. " <> name <> "."
-    , "Poplar trunks, pale and straight. Easy walking. " <> name <> "."
-    , "Leaves long gone. The poplars stand bare. " <> name <> "."
+  | loc == hayBale =
+    [ "A round bale, half-frozen to the ground. Good cover."
+    , "The hay bale. Mice have been at it. You crouch behind it."
+    , "Big round bale. You lean against it. Cold through your jacket."
     ]
+  | loc == drainageDitch =
+    [ "The drainage ditch cuts across the field. Thin ice on standing water."
+    , "A low drainage channel. Your boots break through the ice crust."
+    , "The ditch. Frozen mud and dead cattails. Lower than the field."
+    ]
+  -- South Field
+  | loc == sFieldEdge =
+    [ "South field edge. Flat and wide open."
+    , "You reach the edge of the south field. Exposed."
+    , "The south field stretches ahead. Nothing taller than your knees."
+    ]
+  | loc == stubbleFlat =
+    [ "Canola stubble, flat as a table. You can see for half a mile."
+    , "The stubble flat. Wind pushes across it unbroken."
+    , "Short stubble. Nowhere to hide out here."
+    ]
+  | loc == fenceLine =
+    [ "Old barbed wire on leaning posts. You follow it south."
+    , "The fence line. Wire's loose between the posts."
+    , "Along the fence. A meadowlark sitting on a post watches you pass."
+    ]
+  | loc == sloughEdge =
+    [ "The slough. Frozen over but you don't trust it. Cattails at the edge."
+    , "Edge of the slough. Dead reeds and thin ice."
+    , "The slough is iced over. Muskrat push-ups dot the surface."
+    ]
+  -- Bush Edge
+  | loc == thinPoplars =
+    [ "Thin poplars, barely more than saplings. You can still see the field behind you."
+    , "Young poplar grove. The trunks are close together."
+    , "Into the thin poplars. Leaves gone, but the branches tangle overhead."
+    ]
+  | loc == brushPile =
+    [ "Somebody piled brush here years ago. It's head-high now, frozen solid."
+    , "The brush pile. Deadfall and old slash heaped together."
+    , "A big brush pile. Rabbits have been using it — tracks everywhere."
+    ]
+  | loc == gameTrailEntrance =
+    [ "A worn trail cuts into the heavier bush. Tracks in the mud."
+    , "The game trail entrance. Branches broken at shoulder height."
+    , "Where the game trail starts. The ground is packed hard."
+    ]
+  | loc == oldFence =
+    [ "An old fence, half-collapsed. Wire rusted through in places."
+    , "The old fence line. Posts gray and split. Property line, maybe."
+    , "Rotting fence posts and sagging wire. The bush is taking it back."
+    ]
+  | loc == clearing =
+    [ "A small clearing. Grass and sky. Quieter here."
+    , "The clearing opens up. Sun hits the ground. A few stumps."
+    , "You step into the clearing. Open ground in every direction."
+    ]
+  | loc == deadfall =
+    [ "A big poplar came down here. Root ball sticking up six feet."
+    , "The deadfall. You climb over the trunk. Bark peeling off in sheets."
+    , "Downed tree blocking the way. You work around the root ball."
+    ]
+  -- Oak Ridge
+  | loc == ridgeTop =
+    [ "The ridge top. You can see over the canopy. Fields to the north, bush in every other direction."
+    , "Up on the ridge. Wind is stronger here. The oaks are shorter, wind-bent."
+    , "Top of the ridge. Good vantage. You catch your breath."
+    ]
+  | loc == oakThicket =
+    [ "Dense oaks. Trunks close together, branches low."
+    , "The thicket. You push through. Jacket catching on everything."
+    , "Thick oaks. Dark under the canopy even with the leaves gone."
+    ]
+  | loc == scrapeLine =
+    [ "A line of scrapes along the ridge. Dirt torn up in a row."
+    , "The scrape line. Ground worked over by antlers. This is his territory."
+    , "Scrapes in the dirt, one after another. The bark on the saplings is shredded."
+    ]
+  | loc == mossyHollow =
+    [ "A dip in the ridge. Moss on everything. Damp and still."
+    , "The hollow. Moss-covered rocks, standing water, old leaves."
+    , "Down in the mossy hollow. Sheltered from the wind. Quiet."
+    ]
+  | loc == blowdown =
+    [ "Storm damage. Three oaks down across each other."
+    , "The blowdown. Trees snapped off at the base, roots in the air."
+    , "Tangled blowdown. You pick your way through broken branches."
+    ]
+  | loc == deerTrail =
+    [ "A deer trail worn smooth. Easy walking if you watch your head."
+    , "The deer trail. Packed dirt, low tunnel through the brush."
+    , "You follow the deer trail. Tracks everywhere. Fresh ones on top of old."
+    ]
+  -- Willow Bottom
+  | loc == cattailMarsh =
+    [ "Cattails as far as you can see. Your boots are wet immediately."
+    , "The marsh. Brown cattail heads heavy with frost. Water under the ice."
+    , "Into the cattails. Something moves ahead of you — muskrat, probably."
+    ]
+  | loc == willowTangle =
+    [ "Willows grown together into a wall. You push through."
+    , "The tangle. Willow whips everywhere. Wet branches across your face."
+    , "Willow tangle. You can barely see ten feet ahead."
+    ]
+  | loc == creekCrossing =
+    [ "The creek. Ankle-deep, running clear over round stones."
+    , "You cross the creek. Water fills your boot prints on the other side."
+    , "Creek crossing. Ice along the edges, open water in the middle."
+    ]
+  | loc == mudFlat =
+    [ "Mud flat. Every step sucks at your boots."
+    , "The mud flat. Goose tracks and old deer prints frozen in the muck."
+    , "Flat mud, cracked where it's dried. Your boot prints fill with water."
+    ]
+  | loc == beaverDam =
+    [ "The beaver dam. Sticks and mud piled four feet high. Water behind it."
+    , "A beaver dam. You walk across the top, testing each step."
+    , "The dam. Chewed sticks and packed mud. Pond backing up behind it."
+    ]
+  | loc == dryHummock =
+    [ "A raised hummock. Dry ground at last. Grass and a few scrubby willows."
+    , "Up on the hummock. Your boots stop squelching. Solid ground."
+    , "The hummock. An island of dry ground in the wet. Good spot to rest."
+    ]
+  -- Poplar Stand
+  | loc == poplarAlley =
+    [ "Tall poplars in a line, like a hallway. Light through the canopy."
+    , "The poplar alley. White trunks in a row. Easy walking on the packed leaves."
+    , "Between the poplars. The trunks are straight and pale. Your footsteps echo."
+    ]
+  | loc == birchClump =
+    [ "A clump of birch mixed with the poplars. White bark peeling."
+    , "Birch trees here. Paper bark curling off in sheets."
+    , "The birch clump. Thinner trunks, more light getting through."
+    ]
+  | loc == rubLine =
+    [ "Rubs on the saplings. Bark stripped clean. He's been working this line."
+    , "The rub line. Every third sapling is scarred. Fresh wood showing."
+    , "Rub marks on the trees. Velvet shreds hanging from the bark."
+    ]
+  | loc == openUnderstory =
+    [ "Open understory. Big poplars, nothing beneath them but old leaves."
+    , "The canopy is high here. Easy walking. Ground is soft and quiet."
+    , "Under the big poplars. Open and still. You can see a long way through the trunks."
+    ]
+  | loc == gameTrailFork =
+    [ "The trail splits here. One way north into the bush, one south toward the poplar."
+    , "A fork in the game trail. Both paths well-worn."
+    , "Trail fork. Tracks going both directions. Fresh droppings at the junction."
+    ]
+  | loc == windbreak =
+    [ "The windbreak. Two rows of spruce planted as a shelterbelt."
+    , "Behind the windbreak. Sheltered from the west wind. Quiet."
+    , "Dense spruce windbreak. Dark underneath. Needles soft underfoot."
+    ]
+  | otherwise =
+    let Location name = loc
+    in [ "You keep moving. " <> name <> "."
+       , "You push on. " <> name <> "."
+       , "Onward. " <> name <> "."
+       ]
 
+-- | Narration for crossing between zones. Location-specific where it matters,
+-- with zone-generic fallbacks.
 crossZoneNarr :: Zone -> Zone -> Location -> [String]
-crossZoneNarr from to (Location name) = case (from, to) of
-  (_, z) | isRoadZone z ->
-    [ "You step back out onto the road. " <> name <> "."
-    , "Gravel again. You're back on the road. " <> name <> "."
+crossZoneNarr from to loc = case (from, to, loc) of
+  -- Specific cross-zone transitions
+  (NorthRoad, NorthField, _) ->
+    [ "You climb down off the road into the field. Stubble stretches ahead."
+    , "Off the gravel, into the field. The ground changes under your boots."
     ]
-  (z, _) | isRoadZone z ->
-    [ "You leave the road and head into the section. " <> name <> "."
-    , "Off the road. Rougher ground now. " <> name <> "."
+  (NorthField, NorthRoad, _) ->
+    [ "You step back up onto the road grade. Gravel underfoot again."
+    , "Back to the road. Your boots are muddy."
     ]
-  (_, z) | isFieldZone z ->
-    [ "The bush opens up into stubble field. " <> name <> "."
-    , "Trees thin out. Open field ahead. " <> name <> "."
+  (NorthField, BushEdge, _) ->
+    [ "The field ends and the bush begins. You push through the first branches."
+    , "Stubble gives way to saplings. The treeline closes in."
     ]
-  (z, _) | isFieldZone z ->
-    [ "You leave the open field and push into cover. " <> name <> "."
-    , "Out of the open. Brush closes in around you. " <> name <> "."
+  (BushEdge, NorthField, _) ->
+    [ "The bush opens up. Open field, flat to the road."
+    , "You step out of the trees. Wide open ahead. Wind hits you."
     ]
-  _ ->
-    [ "The terrain changes. " <> name <> "."
-    , "Different ground now. " <> name <> "."
+  (BushEdge, OakRidge, _) ->
+    [ "The ground rises. Oaks replace the poplars. Heavier timber."
+    , "Uphill now, into the oaks. The ridge is ahead."
     ]
+  (OakRidge, BushEdge, _) ->
+    [ "Down off the ridge. The oaks thin to mixed bush."
+    , "You come down off the ridge. Lighter timber, easier walking."
+    ]
+  (BushEdge, PoplarStand, _) ->
+    [ "South through the bush edge into taller poplars."
+    , "The bush changes character. Poplars now, taller and straighter."
+    ]
+  (PoplarStand, BushEdge, _) ->
+    [ "North out of the poplars. Mixed bush again."
+    , "The poplars give way to scrubby mixed brush."
+    ]
+  (OakRidge, WillowBottom, _) ->
+    [ "The ridge drops off. Wet ground ahead. You can smell the marsh."
+    , "Down into the bottom. The ground goes soft immediately."
+    ]
+  (WillowBottom, OakRidge, _) ->
+    [ "Uphill out of the wet. The ground firms up. Oaks overhead."
+    , "You climb out of the bottom. Dry ground and oak trees."
+    ]
+  (PoplarStand, WillowBottom, _) ->
+    [ "The poplars end at the creek. Wet ground beyond."
+    , "Out of the poplar and into the willows. Boots sinking."
+    ]
+  (WillowBottom, PoplarStand, _) ->
+    [ "You leave the wet ground and climb into the poplar stand."
+    , "Up out of the bottom. Dry leaves and pale trunks."
+    ]
+  (SouthField, PoplarStand, _) ->
+    [ "You leave the open field and push into the poplar stand."
+    , "Out of the stubble and into cover. Poplars close overhead."
+    ]
+  (PoplarStand, SouthField, _) ->
+    [ "The poplars end. Open stubble field stretches ahead."
+    , "Trees thin out. Wide open. You can see the road."
+    ]
+  (WestRoad, SouthField, _) ->
+    [ "You leave the road and head east into the field."
+    , "Off the west road. Stubble underfoot."
+    ]
+  (SouthField, WestRoad, _) ->
+    [ "You walk out to the west road. Gravel again."
+    , "Back on the road. Your boots leave mud on the gravel."
+    ]
+  (SouthRoad, SouthField, _) ->
+    [ "North off the south road into the field."
+    , "You leave the road and head into the stubble."
+    ]
+  (SouthField, SouthRoad, _) ->
+    [ "South to the road. Open ground the whole way."
+    , "You walk back out to the south road."
+    ]
+  -- Generic fallbacks by zone type
+  _ -> let Location name = loc in case (from, to) of
+    (_, z) | isRoadZone z ->
+      [ "You step back out onto the road. " <> name <> "."
+      , "Gravel again. You're back on the road. " <> name <> "."
+      ]
+    (z, _) | isRoadZone z ->
+      [ "You leave the road and head into the section. " <> name <> "."
+      , "Off the road. Rougher ground now. " <> name <> "."
+      ]
+    (_, z) | isFieldZone z ->
+      [ "The bush opens up into stubble field. " <> name <> "."
+      , "Trees thin out. Open field ahead. " <> name <> "."
+      ]
+    (z, _) | isFieldZone z ->
+      [ "You leave the open field and push into cover. " <> name <> "."
+      , "Out of the open. Brush closes in around you. " <> name <> "."
+      ]
+    _ ->
+      [ "The terrain changes. " <> name <> "."
+      , "Different ground now. " <> name <> "."
+      ]
 
 -- ---------------------------------------------------------------------------
 -- Orientation — directional hints about adjacent zones

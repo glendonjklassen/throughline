@@ -45,7 +45,10 @@ locationTransitionAxiom :: Axiom
 locationTransitionAxiom = Axiom
   { axiomId       = SystemAxiom "locationTransition"
   , axiomPriority = 1
-  , axiomEvaluate = \_world _actions _diff -> []
+  , axiomEvaluate = \_world _actions diff ->
+      [ immediate (Narrate (show cid <> " \8594 " <> locationName newLoc))
+      | LocationDelta cid _oldLoc newLoc <- diffLocations diff
+      ]
   }
 
 -- | Advances DayNumber, DayOfWeek, LunarPhase, and Season when midnight ticks.
