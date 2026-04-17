@@ -107,6 +107,11 @@ withinZoneNarr _z loc
     , "A low drainage channel. Your boots break through the ice crust."
     , "The ditch. Frozen mud and dead cattails. Lower than the field."
     ]
+  | loc == cornStubbleStrip =
+    [ "A strip of corn stubble, broken stalks knee-high. Cobs on the ground."
+    , "Corn stubble. The deer come for the leftover kernels. Droppings everywhere."
+    , "You walk the stubble strip. Dry leaves rattle when the wind moves through."
+    ]
   -- South Field
   | loc == sFieldEdge =
     [ "South field edge. Flat and wide open."
@@ -127,6 +132,11 @@ withinZoneNarr _z loc
     [ "The slough. Frozen over but you don't trust it. Cattails at the edge."
     , "Edge of the slough. Dead reeds and thin ice."
     , "The slough is iced over. Muskrat push-ups dot the surface."
+    ]
+  | loc == sunflowerStubble =
+    [ "Sunflower stubble. Broken heads on the ground, empty of seeds."
+    , "The sunflower field after harvest. Dry stems snap as you step past."
+    , "Sunflower stalks chest-high. A pheasant bolts up in front of you."
     ]
   -- Bush Edge
   | loc == thinPoplars =
@@ -159,6 +169,16 @@ withinZoneNarr _z loc
     , "The deadfall. You climb over the trunk. Bark peeling off in sheets."
     , "Downed tree blocking the way. You work around the root ball."
     ]
+  | loc == stumpField =
+    [ "Old cut block. Stumps in rows, some rotten through, some hard as bone."
+    , "The stump field. Logging happened here years back. New growth coming up."
+    , "You pick your way through the stumps. Every step tests for rot."
+    ]
+  | loc == hazelClump =
+    [ "A thick clump of hazel brush. Nuts scattered in the leaf litter."
+    , "Hazel bush, head-high and tangled. You have to duck under."
+    , "The hazel clump. Branches whip across your face if you're not careful."
+    ]
   -- Oak Ridge
   | loc == ridgeTop =
     [ "The ridge top. You can see over the canopy. Fields to the north, bush in every other direction."
@@ -189,6 +209,16 @@ withinZoneNarr _z loc
     [ "A deer trail worn smooth. Easy walking if you watch your head."
     , "The deer trail. Packed dirt, low tunnel through the brush."
     , "You follow the deer trail. Tracks everywhere. Fresh ones on top of old."
+    ]
+  | loc == acornGround =
+    [ "Ground under the oaks is littered with acorns. Sign of feeding everywhere."
+    , "Acorns underfoot. The shells crack when you step on them."
+    , "The deer have been digging here. Torn leaves, acorn caps, fresh droppings."
+    ]
+  | loc == rockOutcrop =
+    [ "A limestone outcrop juts out of the ridge. Lichen crusts the cold rock."
+    , "Rock outcrop. You climb up a couple steps for the view. Wind hits harder up here."
+    , "Grey stone pushing through the moss. A raven watches you from the top."
     ]
   -- Willow Bottom
   | loc == cattailMarsh =
@@ -221,6 +251,16 @@ withinZoneNarr _z loc
     , "Up on the hummock. Your boots stop squelching. Solid ground."
     , "The hummock. An island of dry ground in the wet. Good spot to rest."
     ]
+  | loc == sedgeMeadow =
+    [ "A sedge meadow, tawny grass bent flat by the wind."
+    , "The sedge is thigh-high and soft underfoot. Quiet walking."
+    , "Sedge meadow. Frost still on the blades where the sun hasn't hit."
+    ]
+  | loc == islandWillow =
+    [ "A clump of willows on a small island in the wet. You wade the last few steps."
+    , "The island willow. Tight-grown stems, a cleared bed inside — deer bed, recent."
+    , "You push into the island stand. Dry ground in the middle, wet all around."
+    ]
   -- Poplar Stand
   | loc == poplarAlley =
     [ "Tall poplars in a line, like a hallway. Light through the canopy."
@@ -251,6 +291,63 @@ withinZoneNarr _z loc
     [ "The windbreak. Two rows of spruce planted as a shelterbelt."
     , "Behind the windbreak. Sheltered from the west wind. Quiet."
     , "Dense spruce windbreak. Dark underneath. Needles soft underfoot."
+    ]
+  | loc == aspenGrove =
+    [ "A grove of young aspen, trunks pale and close. Leaves long fallen."
+    , "The aspen grove. Small trees, thick stand. You have to turn sideways in places."
+    , "Aspens shiver overhead where the wind catches the tops. Quieter down below."
+    ]
+  | loc == stumpRow =
+    [ "A row of old cut stumps, lined up where somebody pulled a fence."
+    , "The stump row. Half-rotted, moss on the north sides."
+    , "Stumps in a line. You step from one to the next to keep your boots dry."
+    ]
+  -- Field Break
+  | loc == lonePoplar =
+    [ "A single old poplar, twice the size of anything around it. Crows roost here."
+    , "The lone poplar. Landmark tree. You can see it from either field."
+    , "Under the big poplar. Bark black with age. Deer have rubbed the base smooth."
+    ]
+  | loc == stoneRow =
+    [ "A row of field stones piled by some old farmer. Moss and lichen now."
+    , "The stone row. Rocks cleared off the field decades back. Good rest against."
+    , "Old stone pile. Voles running between the rocks. Fox sign on top."
+    ]
+  | loc == brushyGap =
+    [ "A brushy gap between the fields. Wild rose and saskatoon grown up thick."
+    , "The gap. Low brush, thorns catching your sleeves. Deer move through here."
+    , "Brushy ground. Chest-high cover in places. Tracks in the bare patches."
+    ]
+  | loc == fenceCorner =
+    [ "The corner where two fences meet. Wire twisted around a rotting post."
+    , "Fence corner. Old wire coiled in the grass. Ground packed hard at the post."
+    , "The corner post leans. Staples rusted through. Deer cross right here every time."
+    ]
+  -- Creek Bed
+  | loc == creekMouth =
+    [ "Where the creek runs out of the poplar stand into the bottom. Wet mud."
+    , "The creek mouth. Cold water seeping over your boot tops."
+    , "Creek flattens out here. Slow water, fine silt, deer tracks along the bank."
+    ]
+  | loc == gravelBar =
+    [ "A gravel bar on the inside of the bend. Round stones, all sizes."
+    , "The gravel bar. Dry footing in the middle of the wet. Worth resting on."
+    , "Gravel pushed up by last spring's flood. Tracks in the sand between the stones."
+    ]
+  | loc == alderThicket =
+    [ "Alder thick along the creek. Branches low, leaves stuck to everything."
+    , "The alder thicket. Stems crossed and tangled. You break your way through."
+    , "Alder bush. Rabbit tracks everywhere in the mud. Deer came through too."
+    ]
+  | loc == creekBend =
+    [ "The creek bends sharp here. Deep water on the outside, shallow on the inside."
+    , "Bend in the creek. Undercut bank, roots hanging into the water."
+    , "Sharp bend. Current slows. A trout hangs in the deep pool, watching."
+    ]
+  | loc == driftwoodPile =
+    [ "A tangle of driftwood jammed up against the bank. Old flood wrack."
+    , "The driftwood pile. Bleached logs and branches, higher than your head."
+    , "Driftwood heaped on a snag. Mink sign in the mud beside it."
     ]
   | otherwise =
     let Location name = loc
@@ -336,6 +433,46 @@ crossZoneNarr from to loc = case (from, to, loc) of
     [ "South to the road. Open ground the whole way."
     , "You walk back out to the south road."
     ]
+  (NorthField, FieldBreak, _) ->
+    [ "The stubble ends at a narrow belt of trees. You step into cover."
+    , "South off the north field, into the tree break. Wind drops behind the poplars."
+    ]
+  (FieldBreak, NorthField, _) ->
+    [ "Out of the tree break. North field opens ahead. Stubble and sky."
+    , "You leave the brushy belt. Open field again, wind picking up."
+    ]
+  (SouthField, FieldBreak, _) ->
+    [ "Off the south field and into the tree break. Cover at last."
+    , "You climb the shallow bank into the belt of trees between the fields."
+    ]
+  (FieldBreak, SouthField, _) ->
+    [ "Out of the break. South field stretches away, flat to the road."
+    , "You step out of the trees. Open stubble ahead."
+    ]
+  (BushEdge, FieldBreak, _) ->
+    [ "The bush thins into the narrow break between the fields."
+    , "West through scrub into the tree belt. Ground opens up a little."
+    ]
+  (FieldBreak, BushEdge, _) ->
+    [ "East out of the break, into heavier bush."
+    , "The tree belt ends and the bush thickens. Deeper cover now."
+    ]
+  (PoplarStand, CreekBed, _) ->
+    [ "The poplars drop away into the creek bed. Water audible ahead."
+    , "Down off the poplar flat, into the creek. Wet ground starts here."
+    ]
+  (CreekBed, PoplarStand, _) ->
+    [ "Up out of the creek bed. Dry leaves and poplar trunks ahead."
+    , "You climb the bank out of the creek. Boots muddy, trees close in."
+    ]
+  (WillowBottom, CreekBed, _) ->
+    [ "The willows open at the creek. You follow the bank upstream."
+    , "Out of the tangle, down to the creek itself. Water running clear."
+    ]
+  (CreekBed, WillowBottom, _) ->
+    [ "Off the creek bank, into the willow tangle. Stems close in fast."
+    , "You leave the creek bed. Willow whips across your face."
+    ]
   -- Generic fallbacks by zone type
   _ -> let Location name = loc in case (from, to) of
     (_, z) | isRoadZone z ->
@@ -402,6 +539,20 @@ zoneDirection from to = case (from, to) of
   (PoplarStand, BushEdge)     -> Just "Bush edge to the north."
   (PoplarStand, SouthField)   -> Just "Open field to the west."
   (PoplarStand, WillowBottom) -> Just "Willow bottom to the east."
+  (PoplarStand, CreekBed)     -> Just "Creek bed to the east."
+  -- From Field Break
+  (FieldBreak, NorthField)    -> Just "North field to the north."
+  (FieldBreak, SouthField)    -> Just "South field to the south."
+  (FieldBreak, BushEdge)      -> Just "Bush edge to the east."
+  -- To Field Break
+  (NorthField, FieldBreak)    -> Just "Tree break to the south."
+  (SouthField, FieldBreak)    -> Just "Tree break to the north."
+  (BushEdge, FieldBreak)      -> Just "Tree break to the west."
+  -- From Creek Bed
+  (CreekBed, PoplarStand)     -> Just "Poplar stand to the west."
+  (CreekBed, WillowBottom)    -> Just "Willow bottom to the east."
+  -- To Creek Bed
+  (WillowBottom, CreekBed)    -> Just "Creek bed to the west."
   _ -> Nothing
 
 -- ---------------------------------------------------------------------------

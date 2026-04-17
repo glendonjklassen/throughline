@@ -119,6 +119,7 @@ renderWorldSDL
   :: SDLContext
   -> LayoutConfig
   -> (GameWorld -> Maybe String)
+  -> (Location -> Int)
   -> CharId
   -> GameWorld
   -> [AnyAction]
@@ -126,7 +127,7 @@ renderWorldSDL
   -> IORef DebugMode
   -> IORef [AxiomTrace]
   -> IO ()
-renderWorldSDL ctx _layout statusLine you world actions logRef debugRef traceRef = do
+renderWorldSDL ctx _layout statusLine sparkleFn you world actions logRef debugRef traceRef = do
   clearSDL ctx
   allMsgs   <- readIORef logRef
   debugMode <- readIORef debugRef
@@ -212,12 +213,20 @@ renderWorldSDL ctx _layout statusLine you world actions logRef debugRef traceRef
         markerCol  = max 0 (pcol - length markerText `div` 2)
     renderText fc markerText dimText
       (spatialLeft + fromIntegral markerCol, spatialTopRow + fromIntegral prow)
-    -- Movement action labels
-    mapM_ (\cell ->
-      renderText fc (hudLabel cell) greyText
-        (spatialLeft + fromIntegral (hudCol cell),
-         spatialTopRow + fromIntegral (hudRow cell))
+    -- Movement action labels, with optional sparkle glyph in front when
+    -- the scenario's sparkle function reports a non-zero level for the
+    -- target location.
+    mapM_ (\cell -> do
+      let row = spatialTopRow + fromIntegral (hudRow cell)
+          col = spatialLeft + fromIntegral (hudCol cell)
+      renderText fc (hudLabel cell) greyText (col, row)
       ) (shSpatialCells hud)
+    mapM_ (\(cell, level, glyph) -> do
+      let row = spatialTopRow + fromIntegral (hudRow cell)
+          col = spatialLeft + fromIntegral (hudCol cell)
+          gCol = max 0 (col - fromIntegral (length glyph) - 1)
+      renderText fc glyph (sparkleColor level) (gCol, row)
+      ) (cellSparkles sparkleFn (shSpatialCells hud))
 
   -- -----------------------------------------------------------------------
   -- Learning mode (optional, between top bar and history)
@@ -240,12 +249,12 @@ renderWorldSDL ctx _layout statusLine you world actions logRef debugRef traceRef
       allOrdered   = reverse allMsgs
       labelW       = maximum (0 : map (length . neTimeLabel) allOrdered)
       dispLines    = concatMap (fmtEntry contentW labelW) allOrdered
-      -- Take the last N lines that fit
       visible      = takeLast historyRows dispLines
+      faded        = ageFadeVisible visible
 
   mapM_ (\(idx, (color, line)) ->
     renderText fc (take (cols - 2) line) color (marginLeft, fromIntegral (historyTop + idx))
-    ) (zip [0 :: Int ..] visible)
+    ) (zip [0 :: Int ..] faded)
 
   -- Scenario status line (if any) — render in the top bar area
   case statusLine world of
@@ -260,6 +269,7 @@ renderWorldFrame
   :: SDLContext
   -> LayoutConfig
   -> (GameWorld -> Maybe String)
+  -> (Location -> Int)
   -> CharId
   -> GameWorld
   -> [AnyAction]
@@ -267,7 +277,7 @@ renderWorldFrame
   -> IORef DebugMode
   -> IORef [AxiomTrace]
   -> IO ()
-renderWorldFrame ctx _layout statusLine you world actions logRef debugRef traceRef = do
+renderWorldFrame ctx _layout statusLine sparkleFn you world actions logRef debugRef traceRef = do
   clearSDL ctx
   allMsgs   <- readIORef logRef
   debugMode <- readIORef debugRef
@@ -335,11 +345,17 @@ renderWorldFrame ctx _layout statusLine you world actions logRef debugRef traceR
         markerCol  = max 0 (pcol - length markerText `div` 2)
     renderText fc markerText dimText
       (spatialLeft + fromIntegral markerCol, spatialTopRow + fromIntegral prow)
-    mapM_ (\cell ->
-      renderText fc (hudLabel cell) greyText
-        (spatialLeft + fromIntegral (hudCol cell),
-         spatialTopRow + fromIntegral (hudRow cell))
+    mapM_ (\cell -> do
+      let row = spatialTopRow + fromIntegral (hudRow cell)
+          col = spatialLeft + fromIntegral (hudCol cell)
+      renderText fc (hudLabel cell) greyText (col, row)
       ) (shSpatialCells hud)
+    mapM_ (\(cell, level, glyph) -> do
+      let row = spatialTopRow + fromIntegral (hudRow cell)
+          col = spatialLeft + fromIntegral (hudCol cell)
+          gCol = max 0 (col - fromIntegral (length glyph) - 1)
+      renderText fc glyph (sparkleColor level) (gCol, row)
+      ) (cellSparkles sparkleFn (shSpatialCells hud))
 
   -- Learning mode
   let learnLines = if debugMode == Learning
@@ -357,13 +373,53 @@ renderWorldFrame ctx _layout statusLine you world actions logRef debugRef traceR
       labelW       = maximum (0 : map (length . neTimeLabel) allOrdered)
       dispLines    = concatMap (fmtEntry contentW labelW) allOrdered
       visible      = takeLast historyRows dispLines
+      faded        = ageFadeVisible visible
   mapM_ (\(idx, (color, line)) ->
     renderText fc (take (cols - 2) line) color (marginLeft, fromIntegral (historyTop + idx))
-    ) (zip [0 :: Int ..] visible)
+    ) (zip [0 :: Int ..] faded)
 
   case statusLine world of
     Just s  -> renderText fc s dimText (marginLeft, 1)
     Nothing -> pure ()
+
+-- ---------------------------------------------------------------------------
+-- History age-fade
+-- ---------------------------------------------------------------------------
+
+-- | Fade older visible history lines toward the background while
+-- keeping the newest lines at full brightness. Input is the list of
+-- visible (color, line) pairs in oldest-first order.
+-- The top (oldest) line lands at ~0.55 of full tone; the bottom
+-- (newest) keeps its full colour. The gradient is linear in between.
+ageFadeVisible :: [(Color, String)] -> [(Color, String)]
+ageFadeVisible xs =
+  let n = length xs
+      floorFade = 0.55 :: Double
+      peakFade  = 1.0  :: Double
+      factor i
+        | n <= 1    = peakFade
+        | otherwise =
+            floorFade + (peakFade - floorFade)
+              * fromIntegral i / fromIntegral (n - 1)
+  in [ (ageFadeColor c (factor i), s)
+     | (i, (c, s)) <- zip [0 :: Int ..] xs ]
+
+-- ---------------------------------------------------------------------------
+-- Sparkle overlay
+-- ---------------------------------------------------------------------------
+
+-- | Compute sparkle glyphs for movement cells that have a target location
+-- and a non-zero sparkle level. Returns each cell paired with its level
+-- and the glyph string to render.
+cellSparkles :: (Location -> Int) -> [HUDCell] -> [(HUDCell, Int, String)]
+cellSparkles sparkle = foldr step []
+  where
+    step cell acc = case hudTarget cell of
+      Just loc ->
+        let lvl = sparkle loc
+            g   = sparkleGlyph lvl
+        in if lvl > 0 && not (null g) then (cell, lvl, g) : acc else acc
+      Nothing -> acc
 
 -- ---------------------------------------------------------------------------
 -- Message formatting (SDL-native, no ANSI codes)
@@ -376,7 +432,7 @@ fmtEntry contentW labelW entry =
   let tension = neTension entry
       label   = neTimeLabel entry
       color   = msgColor (neMessage entry) tension
-      raw     = msgLines (neMessage entry)
+      raw     = msgLines tension (neMessage entry)
       wrapped = concatMap (wrapWords (max 10 (contentW - labelW - 2))) raw
       pad     = replicate (labelW + 2) ' '
       labelPad = padTo (labelW + 2) label
@@ -393,15 +449,29 @@ msgColor (MsgEffect _)   t = tensionColor t
 msgColor (MsgDialogue _) _ = dialogueColor
 
 -- | Extract raw text lines from a message (before word-wrapping).
-msgLines :: NarrativeMessage -> [String]
-msgLines (MsgSay _ sName _ lNames text) =
+-- Narrator and effect lines pick up a tension-keyed gutter glyph so
+-- calm ambient prose, alert moments, and peak-tension beats all carry
+-- a different visual signature at the left margin.
+msgLines :: Int -> NarrativeMessage -> [String]
+msgLines _ (MsgSay _ sName _ lNames text) =
   [sName <> fmtListeners lNames <> ": " <> text]
-msgLines (MsgThink _ text)     = ["~ " <> text]
-msgLines (MsgNarrate text)     = ["> " <> text]
-msgLines (MsgEffect text)      = ["  " <> text]
-msgLines (MsgDialogue dls)     = map fmtDLine dls
+msgLines _ (MsgThink _ text)     = ["~ " <> text]
+msgLines t (MsgNarrate text)     = [tensionGlyph t <> " " <> text]
+msgLines t (MsgEffect text)      = [tensionGlyph t <> " " <> text]
+msgLines _ (MsgDialogue dls)     = map fmtDLine dls
   where fmtDLine (_, sName, _, lNames, text) =
           sName <> fmtListeners lNames <> ": " <> text
+
+-- | Gutter glyph for narrator/effect lines, keyed by tension (0-10).
+-- Mirrors the narrator colour progression so the visual weight rises
+-- with the tension.  Peak tension gets a bang to pop in peripheral
+-- vision.
+tensionGlyph :: Int -> String
+tensionGlyph t
+  | t <= 2    = "\x00b7"   -- middle dot, calm
+  | t <= 5    = ">"        -- alert
+  | t <= 8    = "\x00bb"   -- double-angle, tense
+  | otherwise = "!"        -- peak — shot taken, spooked, etc.
 
 fmtListeners :: [String] -> String
 fmtListeners [] = ""

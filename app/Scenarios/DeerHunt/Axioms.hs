@@ -31,6 +31,7 @@ allAxioms you =
   , deerMovementAxiom
   , spookAxiom you
   , signPlacementAxiom you
+  , signDiscoveryAxiom you
   , deerPresenceAxiom you
   , stillnessAxiom you
   , experienceAxiom you
@@ -222,31 +223,101 @@ deerPresenceAxiom you = Axiom
 -- Sign placement
 -- ---------------------------------------------------------------------------
 
--- | Place sign at locations based on deer behavior.
--- Tracks: when the deer moves, leave tracks at the old location (expire 24 ticks).
--- Scrapes: when the deer leaves a location, leave a scrape (expire 12 ticks).
--- Beds/rubs are computed by lookForDeer based on deer movement history
--- (not as world tags — too many location × type combinations).
+-- | Zone-wide "fresh sign" hint when the deer actually walks through
+-- the player's current location.
+--
+-- The durable, location-specific "treasure" signs are seeded at
+-- scenario start (see 'initialSignTags' in Constants) and are never
+-- produced by this axiom. This axiom only drops the legacy global
+-- signTracks/signScrape tags, and only when the deer's recent move
+-- touches the player's spot, so lookForDeer's "fresh tracks in the
+-- mud" branch still has a trigger.
 signPlacementAxiom :: CharId -> Axiom
-signPlacementAxiom _you = Axiom
+signPlacementAxiom you = Axiom
   { axiomId       = ScenarioAxiom "signPlacement"
   , axiomPriority = 3
   , axiomEvaluate = \world _actions diff ->
       if huntOver world then [] else
-      let deerMoved = [ ld | ld <- diffLocations diff, locationDeltaChar ld == deer ]
-          -- Weather affects track duration: snow = 12 ticks, otherwise 24
-          isSnow = any (\t -> t == weatherTag (WeatherDesc "Light Snow")) (orToList (worldTags world))
-          trackDuration = if isSnow then 12 else 24
+      let playerLoc = charLocation you world
+          deerTouchedHere =
+            [ ()
+            | ld <- diffLocations diff
+            , locationDeltaChar ld == deer
+            , Just (locationDeltaFrom ld) == playerLoc
+                || Just (locationDeltaTo ld)   == playerLoc
+            ]
+          isSnow = weatherTag (WeatherDesc "Light Snow")
+                     `elem` orToList (worldTags world)
+          trackDuration  = if isSnow then 12 else 24
           scrapeDuration = 12
       in concatMap (const
-           [ timed trackDuration (AddWorldTag signTracks)
+           [ timed trackDuration  (AddWorldTag signTracks)
            , timed scrapeDuration (AddWorldTag signScrape)
-           ]) deerMoved
+           ]) deerTouchedHere
   }
 
 -- ---------------------------------------------------------------------------
--- Stillness
+-- Sign discovery — automatic on arrival
 -- ---------------------------------------------------------------------------
+
+-- | When the player arrives at a location that holds one or more
+-- undiscovered "treasure" signs (seeded at scenario init), mark them
+-- discovered and narrate what they notice. Detail scales with the
+-- player's Understanding stat.
+--
+-- No dedicated action is needed: walking in is enough. The axiom
+-- fires on the tick where the diff contains a LocationDelta for the
+-- player, so it never duplicates for a subsequent no-move tick.
+signDiscoveryAxiom :: CharId -> Axiom
+signDiscoveryAxiom you = Axiom
+  { axiomId       = ScenarioAxiom "signDiscovery"
+  , axiomPriority = 3
+  , axiomEvaluate = \world _actions diff ->
+      if huntOver world then [] else
+      let arrivals =
+            [ locationDeltaTo ld
+            | ld <- diffLocations diff
+            , locationDeltaChar ld == you
+            ]
+          exp' = experience you world
+      in concatMap (discoverAt exp' world) arrivals
+  }
+  where
+    discoverAt exp' world loc =
+      let present = signsAt world loc
+          found   = foundSignsAt world loc
+          fresh   = [ t | t <- present, t `notElem` found ]
+      in concatMap (discover loc exp') fresh
+
+    discover loc exp' t =
+      [ immediate (AddWorldTag (foundSignAt t loc))
+      , immediate (Narrate (signProse exp' t))
+      ]
+
+    signProse e STracks
+      | e <= 2    = "Hoof marks in the dirt. Something came through."
+      | e <= 5    = "Tracks. Two-toed, pointed — deer. Older than today."
+      | otherwise = "Tracks. A mature buck by the size. The drag between hoofs says he's not in a hurry."
+    signProse e SScrape
+      | e <= 2    = "Ground torn up. Something's been digging."
+      | e <= 5    = "A scrape. Fresh dirt turned up. Buck territory."
+      | otherwise = "Scrape line. He works this spot regularly. Urine-damp earth at the centre."
+    signProse e SBed
+      | e <= 2    = "A flat oval in the grass. Something slept here."
+      | e <= 5    = "A bed. Deer-shaped, matted flat, hair in the grass."
+      | otherwise = "A bed. Cold — he's been up hours. Body-sized oval pressed into the leaves."
+    signProse e SRub
+      | e <= 2    = "Bark stripped off a sapling. Scars on the wood."
+      | e <= 5    = "A rub. Antler scars on the sapling, bark curled at the edges."
+      | otherwise = "Rub line. Velvet shreds on the bark. He works this corridor when the rut starts."
+    signProse e SDroppings
+      | e <= 2    = "Dark pellets on the ground. Animal."
+      | e <= 5    = "Droppings. Deer — oval pellets, dry on top."
+      | otherwise = "Droppings. Dry on top, damp underneath. Yesterday at most."
+    signProse e SHair
+      | e <= 2    = "Hair caught on a branch."
+      | e <= 5    = "Deer hair. Hollow-cored, brown with a grey tip. Buck coat."
+      | otherwise = "Hair snagged on the wire. Coarse, tipped grey — mature buck, rubbing through."
 
 -- | Track stillness while sitting. Increments each tick while PlayerSitting
 -- is active, resets to 0 when the player moves.
@@ -363,6 +434,8 @@ nearestTruck loc = case locationZone loc of
   PoplarStand  -> truckWest
   WillowBottom -> truckSouth
   SouthRoad    -> truckSouth
+  FieldBreak   -> truckNorth    -- belt between the fields, closest to north road
+  CreekBed     -> truckSouth    -- drains down toward south
 
 -- ---------------------------------------------------------------------------
 -- Tension

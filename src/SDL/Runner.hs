@@ -39,7 +39,7 @@ sdlUI display = RuntimeUI
   , uiTeardown  = pure ()
   , uiGameLoop  = \env world -> do
       ctx <- initSDL fontPath
-      result <- runApp env world (sdlGameLoop ctx (sdLayout display) (sdStatusLine display))
+      result <- runApp env world (sdlGameLoop ctx display)
       freeSDL ctx
       pure result
   , uiOnEnd     = \finalW -> do
@@ -84,28 +84,31 @@ sdlUI display = RuntimeUI
 -- Game loop
 -- ---------------------------------------------------------------------------
 
-sdlGameLoop :: SDLContext -> LayoutConfig -> (GameWorld -> Maybe String) -> App ()
-sdlGameLoop ctx layout statusLine = do
+sdlGameLoop :: SDLContext -> ScenarioDisplay -> App ()
+sdlGameLoop ctx display = do
   msgCountRef <- liftIO $ newIORef (0 :: Int)
   -- Stash last-rendered actions so the step hook can keep the HUD stable
   actionsRef  <- liftIO $ newIORef ([] :: [AnyAction])
-  coreLoop (sdlStepHook ctx layout statusLine msgCountRef actionsRef)
-           (sdlActionSource ctx layout statusLine msgCountRef actionsRef)
+  coreLoop (sdlStepHook ctx display msgCountRef actionsRef)
+           (sdlActionSource ctx display msgCountRef actionsRef)
 
 -- | Action source: render the world, await a keypress, map to an action.
-sdlActionSource :: SDLContext -> LayoutConfig -> (GameWorld -> Maybe String)
+sdlActionSource :: SDLContext -> ScenarioDisplay
                 -> IORef Int -> IORef [AnyAction] -> ActionSource
-sdlActionSource ctx layout statusLine countRef actionsRef actions = do
+sdlActionSource ctx display countRef actionsRef actions = do
   world    <- get
   you      <- asks envPlayerCharId
   logRef   <- asks envMessageLog
   debugRef <- asks envDebug
   traceRef <- asks envAxiomTrace
+  let layout     = sdLayout display
+      statusLine = sdStatusLine display
+      sparkleFn  = sdLocationSparkle display world you
   -- Stash current actions for the step hook
   liftIO $ writeIORef actionsRef actions
   -- Render the world with actions (twice to populate both back buffers)
-  liftIO $ renderWorldSDL ctx layout statusLine you world actions logRef debugRef traceRef
-  liftIO $ renderWorldSDL ctx layout statusLine you world actions logRef debugRef traceRef
+  liftIO $ renderWorldSDL ctx layout statusLine sparkleFn you world actions logRef debugRef traceRef
+  liftIO $ renderWorldSDL ctx layout statusLine sparkleFn you world actions logRef debugRef traceRef
   -- Update message count
   msgs <- liftIO $ readIORef logRef
   liftIO $ writeIORef countRef (length msgs)
@@ -133,9 +136,9 @@ sdlActionSource ctx layout statusLine countRef actionsRef actions = do
 -- Step hook: typewriter new messages onto the existing frame
 -- ---------------------------------------------------------------------------
 
-sdlStepHook :: SDLContext -> LayoutConfig -> (GameWorld -> Maybe String)
+sdlStepHook :: SDLContext -> ScenarioDisplay
             -> IORef Int -> IORef [AnyAction] -> StepHook
-sdlStepHook ctx layout statusLine countRef actionsRef _before after _diff = do
+sdlStepHook ctx display countRef actionsRef _before after _diff = do
   you      <- asks envPlayerCharId
   logRef   <- asks envMessageLog
   debugRef <- asks envDebug
@@ -174,8 +177,11 @@ sdlStepHook ctx layout statusLine countRef actionsRef _before after _diff = do
       -- Typewrite: reveal one character at a time, full re-render each tick.
       -- Pass old messages only so renderWorldFrame doesn't show new ones in history.
       let oldMsgs = drop (newCount - prevCount) allMsgs  -- allMsgs is newest-first
+          layout     = sdLayout display
+          statusLine = sdStatusLine display
+          sparkleFn  = sdLocationSparkle display after you
       oldLogRef <- newIORef oldMsgs
-      typewriteFullFrame ctx layout statusLine you after lastActions
+      typewriteFullFrame ctx layout statusLine sparkleFn you after lastActions
                          oldLogRef debugRef traceRef
                          fc labelW newEntryLines
       -- Drain lingering key events, brief pause, then done
@@ -193,13 +199,14 @@ sdlStepHook ctx layout statusLine countRef actionsRef _before after _diff = do
 -- A keypress skips to showing all text immediately.
 typewriteFullFrame
   :: SDLContext -> LayoutConfig -> (GameWorld -> Maybe String)
+  -> (Location -> Int)
   -> CharId -> GameWorld -> [AnyAction]
   -> IORef [NarrativeEntry] -> IORef DebugMode -> IORef [AxiomTrace]
   -> FontContext -> Int
   -> [(Color, Int, String)]   -- ^ (color, delayMs, plainLine) for each new line
   -> IO ()
-typewriteFullFrame _   _      _          _   _     _           _      _        _        _  _      []    = pure ()
-typewriteFullFrame ctx layout statusLine you world actions logRef debugRef traceRef fc labelW newLines = do
+typewriteFullFrame _   _      _          _         _   _     _           _      _        _        _  _      []    = pure ()
+typewriteFullFrame ctx layout statusLine sparkleFn you world actions logRef debugRef traceRef fc labelW newLines = do
   let cols     = gridCols ctx
       -- Compute where the history area starts (mirrors renderWorldFrame)
       rows     = gridRows ctx
@@ -238,7 +245,7 @@ typewriteFullFrame ctx layout statusLine you world actions logRef debugRef trace
     -- Render one frame: full world + all revealed characters so far
     renderTick :: [(Color, String, CInt)] -> IO ()
     renderTick revealed = do
-      renderWorldFrame ctx layout statusLine you world actions logRef debugRef traceRef
+      renderWorldFrame ctx layout statusLine sparkleFn you world actions logRef debugRef traceRef
       mapM_ (\(clr, txt, row) ->
         renderText fc txt clr (marginLeft, row)
         ) revealed

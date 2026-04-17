@@ -6,7 +6,7 @@ module SDL.Layout
   , defaultDisplay
   ) where
 
-import GameTypes.Types (GameWorld)
+import GameTypes.Types (CharId, GameWorld, Location)
 
 data LayoutConfig = LayoutConfig
   { layoutLeftMaxWidth  :: Int  -- ^ hard cap on left panel width (columns)
@@ -25,15 +25,22 @@ defaultLayout = LayoutConfig
 
 -- | Display configuration for a scenario, separate from the engine's Scenario type.
 data ScenarioDisplay = ScenarioDisplay
-  { sdEndScreen  :: GameWorld -> [String]
-  , sdStatusLine :: GameWorld -> Maybe String
-  , sdLayout     :: LayoutConfig
+  { sdEndScreen       :: GameWorld -> [String]
+  , sdStatusLine      :: GameWorld -> Maybe String
+  , sdLayout          :: LayoutConfig
+  , sdLocationSparkle :: GameWorld -> CharId -> Location -> Int
+    -- ^ "shiny-sense" level for a location, shown on the spatial HUD.
+    -- 0 = no sparkle, 1 = faint hint, 2 = clear sign, 3 = strong pull.
+    -- Scenarios use this to hint at deer presence or other points of
+    -- interest based on world state, player experience, and noise.
   }
 
--- | Sensible defaults: no end screen, no status line, default layout.
+-- | Sensible defaults: no end screen, no status line, default layout,
+-- no sparkle hints.
 defaultDisplay :: ScenarioDisplay
 defaultDisplay = ScenarioDisplay
-  { sdEndScreen  = const []
-  , sdStatusLine = const Nothing
-  , sdLayout     = defaultLayout
+  { sdEndScreen       = const []
+  , sdStatusLine      = const Nothing
+  , sdLayout          = defaultLayout
+  , sdLocationSparkle = \_ _ _ -> 0
   }

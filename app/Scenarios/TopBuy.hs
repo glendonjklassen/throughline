@@ -27,9 +27,10 @@ topBuy seed you = Scenario
 
 topBuyDisplay :: ScenarioDisplay
 topBuyDisplay = ScenarioDisplay
-  { sdEndScreen  = endScreen
-  , sdStatusLine = const Nothing
-  , sdLayout     = defaultLayout
+  { sdEndScreen       = endScreen
+  , sdStatusLine      = const Nothing
+  , sdLayout          = defaultLayout
+  , sdLocationSparkle = \_ _ _ -> 0
   }
 
 endScreen :: GameWorld -> [String]

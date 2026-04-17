@@ -21,9 +21,10 @@ import           GameTypes
 
 -- | A single rendered cell in the spatial HUD.
 data HUDCell = HUDCell
-  { hudLabel  :: String        -- ^ e.g. "4) North Road Ditch"
-  , hudCol    :: Int           -- ^ column offset within the spatial box
-  , hudRow    :: Int           -- ^ row offset within the spatial box
+  { hudLabel  :: String          -- ^ e.g. "4) North Road Ditch"
+  , hudCol    :: Int             -- ^ column offset within the spatial box
+  , hudRow    :: Int             -- ^ row offset within the spatial box
+  , hudTarget :: Maybe Location  -- ^ target location for movement cells, Nothing for other actions
   } deriving (Show)
 
 -- | Full layout of the bottom HUD.
@@ -129,7 +130,8 @@ spatialLayout actions _playerLoc (px, py) lg totalCols =
 placeMovement :: Int -> Int -> Int -> Int -> Double
               -> (Int, AnyAction, Double, Double) -> HUDCell
 placeMovement boxW boxH centerCol centerRow maxDist (n, act, dx, dy) =
-  let label = show n <> ") " <> stripAnsi (anyActionLabel act)
+  let target = movementTarget act
+      label = show n <> ") " <> stripAnsi (anyActionLabel act)
       labelLen = length label
       -- Reserve space for the label itself
       maxColDisp = (boxW - labelLen) `div` 2 - 1
@@ -149,7 +151,7 @@ placeMovement boxW boxH centerCol centerRow maxDist (n, act, dx, dy) =
       -- Clamp to stay in bounds (account for label width)
       col = max 0 (min (boxW - labelLen) rawCol)
       row = max 0 (min (boxH - 1) rawRow)
-  in HUDCell { hudLabel = label, hudCol = col, hudRow = row }
+  in HUDCell { hudLabel = label, hudCol = col, hudRow = row, hudTarget = target }
 
 -- | Push cells apart when they'd overlap each other or the player marker.
 resolveOverlaps :: Int -> Int -> Int -> Int -> [HUDCell] -> [HUDCell]
