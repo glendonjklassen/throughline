@@ -1,6 +1,7 @@
 module Scenarios.DeerHunt.Constants where
 
-import           Data.Maybe          (fromMaybe)
+import           Data.List            (isPrefixOf, nub)
+import           Data.Maybe           (fromMaybe)
 import qualified Data.Map.Strict as Map
 import           Data.List.NonEmpty (NonEmpty(..))
 import           Engine.Author.DSL
@@ -110,6 +111,234 @@ foundSignRub = scenarioTag FoundSignRub
 
 foundSignScrape :: Tag
 foundSignScrape = scenarioTag FoundSignScrape
+
+-- ---------------------------------------------------------------------------
+-- Per-location sign tags (string-encoded)
+--
+-- The legacy signTracks/signScrape/etc. tags above are coarse: they
+-- indicate "there is some sign somewhere in the player's zone".  The
+-- shiny-sense UI needs to know *where*, so we encode per-location
+-- signs as opaque string tags of the form:
+--
+--   "sign|<type>|<LocationName>"
+--
+-- and the player's discovery (i.e. "I have looked here and noticed it")
+-- as:
+--
+--   "found|<type>|<LocationName>"
+--
+-- Multiple sign types can coexist at a location.  Tags decay via the
+-- timed-effect TTL mechanism.
+-- ---------------------------------------------------------------------------
+
+-- | All sign types the engine tracks per-location.  Each type has a
+-- different tell, decay profile, and narrative flavour.
+data SignType
+  = STracks      -- ^ recent passage, decays fastest
+  | SScrape      -- ^ ground torn up, medium decay
+  | SBed         -- ^ oval matted in the grass, persists
+  | SRub         -- ^ velvet shredded off saplings, persists longest
+  | SDroppings   -- ^ droppings, short decay
+  | SHair        -- ^ caught on barbed wire or a branch, long-lived
+  deriving (Eq, Ord, Show)
+
+-- | Short string id used in tag encoding.
+signTypeCode :: SignType -> String
+signTypeCode STracks    = "tracks"
+signTypeCode SScrape    = "scrape"
+signTypeCode SBed       = "bed"
+signTypeCode SRub       = "rub"
+signTypeCode SDroppings = "droppings"
+signTypeCode SHair      = "hair"
+
+-- | Every type in a stable order; useful for iteration.
+allSignTypes :: [SignType]
+allSignTypes = [STracks, SScrape, SBed, SRub, SDroppings, SHair]
+
+-- | Default decay in ticks for a sign type.  Tweaked at call-sites
+-- based on weather (snow accelerates the tracks/droppings fade).
+signDuration :: SignType -> Int
+signDuration STracks    = 24
+signDuration SScrape    = 18
+signDuration SBed       = 48
+signDuration SRub       = 72
+signDuration SDroppings = 12
+signDuration SHair      = 96
+
+-- | Encode a per-location sign tag.
+signAt :: SignType -> Location -> Tag
+signAt t (Location name) =
+  ScenarioTag (MkScenarioTag ("sign|" <> signTypeCode t <> "|" <> name))
+
+-- | Encode a player-discovered-sign tag.
+foundSignAt :: SignType -> Location -> Tag
+foundSignAt t (Location name) =
+  ScenarioTag (MkScenarioTag ("found|" <> signTypeCode t <> "|" <> name))
+
+-- | Parse a "sign|type|location" tag into (SignType, Location) if it matches.
+parseSignTag :: Tag -> Maybe (SignType, Location)
+parseSignTag (ScenarioTag (MkScenarioTag s))
+  | "sign|" `isPrefixOf` s = parseAfter (drop 5 s)
+  | otherwise              = Nothing
+  where
+    parseAfter rest = case break (== '|') rest of
+      (code, '|':name) -> (,) <$> codeToType code <*> Just (Location name)
+      _                -> Nothing
+parseSignTag _ = Nothing
+
+-- | Parse a "found|type|location" discovery tag.
+parseFoundTag :: Tag -> Maybe (SignType, Location)
+parseFoundTag (ScenarioTag (MkScenarioTag s))
+  | "found|" `isPrefixOf` s = parseAfter (drop 6 s)
+  | otherwise               = Nothing
+  where
+    parseAfter rest = case break (== '|') rest of
+      (code, '|':name) -> (,) <$> codeToType code <*> Just (Location name)
+      _                -> Nothing
+parseFoundTag _ = Nothing
+
+codeToType :: String -> Maybe SignType
+codeToType "tracks"    = Just STracks
+codeToType "scrape"    = Just SScrape
+codeToType "bed"       = Just SBed
+codeToType "rub"       = Just SRub
+codeToType "droppings" = Just SDroppings
+codeToType "hair"      = Just SHair
+codeToType _           = Nothing
+
+-- | All sign types present at a location in the world right now.
+signsAt :: GameWorld -> Location -> [SignType]
+signsAt world loc =
+  nub [ t | tag <- orToList (worldTags world)
+          , Just (t, l) <- [parseSignTag tag]
+          , l == loc ]
+
+-- | All sign types the player has *discovered* at a location.
+foundSignsAt :: GameWorld -> Location -> [SignType]
+foundSignsAt world loc =
+  nub [ t | tag <- orToList (worldTags world)
+          , Just (t, l) <- [parseFoundTag tag]
+          , l == loc ]
+
+-- | Has the player discovered any sign anywhere?
+hasDiscoveredAnySign :: GameWorld -> Bool
+hasDiscoveredAnySign world =
+  any (\tag -> case parseFoundTag tag of
+         Just _ -> True
+         Nothing -> False)
+      (orToList (worldTags world))
+
+-- | How strong is the evidence the player *has noticed* at a location?
+-- 0 = none; higher with more distinct sign types and rarer types.
+discoveredEvidence :: GameWorld -> Location -> Int
+discoveredEvidence world loc =
+  let found = foundSignsAt world loc
+      weight SRub       = 3
+      weight SBed       = 3
+      weight SHair      = 2
+      weight SScrape    = 2
+      weight STracks    = 1
+      weight SDroppings = 1
+  in sum (map weight found)
+
+-- ---------------------------------------------------------------------------
+-- Sign hotspots — the "treasure" placement
+--
+-- Signs are not sprayed wherever the deer walks.  Instead, the world
+-- has a small number of hotspot locations decided at scenario init
+-- from the session seed.  Each hotspot holds 1-3 sign types, biased
+-- by the location's character (the "Rub Line" location is very likely
+-- to carry SRub, a moss hollow is likely to carry SBed, etc.).
+--
+-- Hotspots are persistent for the whole run — they don't decay — and
+-- the player discovers them by searching.  This turns the map into a
+-- foraging puzzle layered on top of the direct deer-chasing loop.
+-- ---------------------------------------------------------------------------
+
+-- | How many hotspot locations to place per run.  With 57 locations,
+-- 9 hotspots means the player must search ~15% of the map to hit one.
+hotspotCount :: Int
+hotspotCount = 9
+
+-- | Locations eligible to carry signs.  Roads are excluded (nothing
+-- credible happens on a gravel road).  Trucks are excluded too.
+hotspotCandidates :: [Location]
+hotspotCandidates =
+  filter (not . isRoadZone . locationZone) allLocations
+
+-- | Bias: per location, which sign types are plausible and with what
+-- probability weight.  Higher weight = more likely to be chosen.
+-- Returns a non-empty list of (SignType, weight).  Defaults to a mix
+-- of tracks and droppings for unremarkable spots.
+locationSignBias :: Location -> [(SignType, Int)]
+locationSignBias loc
+  -- Named sign-specific locations heavily favour their namesake
+  | loc == scrapeLine =
+      [(SScrape, 5), (STracks, 2), (SDroppings, 1)]
+  | loc == rubLine =
+      [(SRub, 5), (STracks, 2), (SHair, 2)]
+  | loc == deerTrail || loc == gameTrailEntrance || loc == gameTrailFork =
+      [(STracks, 5), (SDroppings, 2), (SHair, 1)]
+  -- Bedding spots: sheltered, soft
+  | loc `elem` [mossyHollow, dryHummock, oakThicket, willowTangle, windbreak] =
+      [(SBed, 4), (STracks, 2), (SDroppings, 1)]
+  -- Water crossings and mud: tracks last
+  | loc `elem` [creekCrossing, mudFlat, drainageDitch, beaverDam] =
+      [(STracks, 5), (SDroppings, 2), (SHair, 1)]
+  -- Field feeding grounds
+  | loc `elem` [stubbleRows, stubbleFlat, hayBale, cornStubbleStrip, sunflowerStubble] =
+      [(SDroppings, 4), (STracks, 3), (SBed, 1)]
+  -- Old fences, brush: hair catches
+  | loc `elem` [oldFence, fenceLine, brushPile, deadfall, blowdown, fenceCorner] =
+      [(SHair, 4), (STracks, 2), (SDroppings, 1)]
+  -- Generic bush cover
+  | otherwise =
+      [(STracks, 2), (SDroppings, 1), (SBed, 1)]
+
+-- | Pick N hotspot locations from the candidates using the session seed.
+-- Deterministic: same seed -> same hotspots.  Uses a linear congruential
+-- shuffle via mkStdGen to keep the draw independent of any runtime state.
+hotspotLocations :: Int -> [Location]
+hotspotLocations seed =
+  let gen0 = mkStdGen (seed * 7919 + 113)
+      pool = hotspotCandidates
+      go 0 _ _    = []
+      go _ [] _   = []
+      go n xs gen =
+        let (idx, gen') = randomR (0, length xs - 1) gen
+        in case splitAt idx xs of
+             (pre, picked : post) -> picked : go (n - 1) (pre ++ post) gen'
+             _                    -> []   -- unreachable: idx is in-range
+  in go (min hotspotCount (length pool)) pool gen0
+
+-- | For one hotspot, pick 1-3 sign types using the location bias
+-- and a seed derived from the session seed + the location name.
+hotspotSigns :: Int -> Location -> [SignType]
+hotspotSigns seed loc =
+  let bias    = locationSignBias loc
+      salt    = foldl (\acc c -> acc * 33 + fromEnum c) 1 (locationName loc)
+      gen0    = mkStdGen (seed * 31 + salt)
+      (nSigns, gen1) = randomR (1, 3 :: Int) gen0
+      pick remaining g
+        | remaining <= 0 || null bias = []
+        | otherwise =
+            let totalW = sum (map snd bias)
+                (r, g') = randomR (0, totalW - 1) g
+                chosen  = choose r bias
+            in chosen : pick (remaining - 1) g'
+      choose _ []           = STracks   -- should not happen, bias is non-empty
+      choose r ((t, w):rest)
+        | r < w     = t
+        | otherwise = choose (r - w) rest
+  in nub (pick nSigns gen1)
+
+-- | All initial world tags for sign hotspots at the given seed.
+initialSignTags :: Int -> [Tag]
+initialSignTags seed =
+  [ signAt t loc
+  | loc <- hotspotLocations seed
+  , t   <- hotspotSigns seed loc
+  ]
 
 -- | Encode a wind angle (degrees) as a world tag. Stores hundredths.
 windAngleTag :: Double -> Tag
@@ -301,15 +530,18 @@ initialWorld seed you startTruck = GameWorld
   , worldActiveEffects = map staticLive [timeCycle, weatherCycle]
   , worldClock         = LamportClock 0 (PlayerId "init")
   , worldTags          = orFromList
-      [ weatherTag  (WeatherDesc "Clear and Cold")
-      , seasonTag   3
-      , dayOfWeekTag 5
-      , lunarPhaseTag 0
-      , dayNumberTag  0
-      , timeTag 7
-      , windAngleTag 270.0     -- initial wind from the west
-      , windStrengthTag 0.2    -- light morning breeze
-      ]
+      (
+        [ weatherTag  (WeatherDesc "Clear and Cold")
+        , seasonTag   3
+        , dayOfWeekTag 5
+        , lunarPhaseTag 0
+        , dayNumberTag  0
+        , timeTag 7
+        , windAngleTag 270.0     -- initial wind from the west
+        , windStrengthTag 0.2    -- light morning breeze
+        ]
+        ++ initialSignTags seed  -- seeded sign-hotspot "treasure"
+      )
   , worldLocationGraph = huntLocationGraph
   , worldSeed          = seed
   }

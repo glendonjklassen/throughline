@@ -26,9 +26,10 @@ diner seed _you = Scenario
 
 dinerDisplay :: ScenarioDisplay
 dinerDisplay = ScenarioDisplay
-  { sdEndScreen  = endScreen
-  , sdStatusLine = const Nothing
-  , sdLayout     = defaultLayout
+  { sdEndScreen       = endScreen
+  , sdStatusLine      = const Nothing
+  , sdLayout          = defaultLayout
+  , sdLocationSparkle = \_ _ _ -> 0
   }
 
 endScreen :: GameWorld -> [String]

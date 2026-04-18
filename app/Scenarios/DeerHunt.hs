@@ -8,7 +8,8 @@ import           Scenarios.DeerHunt.Actions   (allActions)
 import           Scenarios.DeerHunt.Axioms    (allAxioms, dawnRule,
                                                hunterArrivalMergeAxiom)
 import           Scenarios.DeerHunt.Constants
-import           Scenarios.DeerHunt.Locations  (truckNorth)
+import           Scenarios.DeerHunt.Locations  (adjacentTo, truckNorth)
+import           Scenarios.DeerHunt.Probability (experience)
 
 deerHunt :: Int -> CharId -> Scenario
 deerHunt seed you = Scenario
@@ -26,10 +27,69 @@ deerHunt seed you = Scenario
 
 deerHuntDisplay :: ScenarioDisplay
 deerHuntDisplay = ScenarioDisplay
-  { sdEndScreen  = endScreen
-  , sdStatusLine = const Nothing
-  , sdLayout     = defaultLayout
+  { sdEndScreen       = endScreen
+  , sdStatusLine      = const Nothing
+  , sdLayout          = defaultLayout
+  , sdLocationSparkle = locationSparkle
   }
+
+-- ---------------------------------------------------------------------------
+-- Shiny-sense sparkle
+--
+-- For each location the player could move to, produce a sparkle level
+-- 0-3 hinting at whether deer activity is likely there.  Signals used:
+--
+--   * Ground truth the player can *see*: if the deer is actually at
+--     that location and the player is co-located, the sparkle is
+--     capped — but in practice the action won't even appear as a
+--     move target.  So we leave this as a weak seasoning.
+--   * Player-discovered signs at that location — the main signal.
+--     More types and rarer types raise the level.
+--   * Adjacency echo: if a neighbour has discovered signs, bleed a
+--     small faint hint through.
+--   * Noise: low Understanding makes the sparkle unreliable — each
+--     tick introduces false positives on a handful of locations and
+--     may suppress a real one.  The noise is stable within a tick
+--     (seeded by the world clock + location) so it doesn't strobe.
+-- ---------------------------------------------------------------------------
+
+locationSparkle :: GameWorld -> CharId -> Location -> Int
+locationSparkle world you loc =
+  let exp'     = experience you world
+      directEv = discoveredEvidence world loc
+      adjEv    = maximum (0 : [ discoveredEvidence world n
+                              | n <- adjacentTo loc ])
+      expTier :: Int
+      expTier
+        | exp' <= 2 = 0
+        | exp' <= 5 = 1
+        | otherwise = 2
+      -- Direct discovered sign dominates; adjacent contributes at
+      -- most +1 and only for experienced readers.
+      base
+        | directEv >= 4 = 3
+        | directEv >= 2 = 2
+        | directEv >= 1 = 1
+        | adjEv    >= 3 && expTier >= 2 = 1
+        | otherwise     = 0
+      noise = locationNoise world loc expTier
+      signal
+        | base > 0 = base
+        | otherwise = noise
+  in max 0 (min 3 signal)
+  where
+    -- Deterministic per-tick noise for a location, keyed by name +
+    -- tick so it shifts every tick but never strobes within one.
+    locationNoise w (Location name) tier =
+      let tick = lcTick (worldClock w)
+          salt = foldl (\acc c -> acc * 131 + fromEnum c) 7 name
+          r    = (tick * 1103515245 + salt) `mod` 1000
+          -- Thresholds: tier 0 = 10%, tier 1 = 6%, tier 2 = 3%
+          thresh = case tier of
+            0 -> 100
+            1 -> 60
+            _ -> 30
+      in if r < thresh then 1 else 0
 
 endScreen :: GameWorld -> [String]
 endScreen w

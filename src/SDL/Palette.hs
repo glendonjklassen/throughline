@@ -10,6 +10,9 @@ module SDL.Palette
   , glitchColor
   , tensionColor
   , breathePulseColor
+  , sparkleColor
+  , sparkleGlyph
+  , ageFadeColor
   ) where
 
 import           Data.Word (Word8)
@@ -84,6 +87,42 @@ glitchColor :: Int -> Color
 glitchColor t
   | t < 7     = Color 196 122  58 255  -- rust
   | otherwise = Color 166  93  93 255  -- dried blood
+
+-- ---------------------------------------------------------------------------
+-- Shiny sense + history fade
+-- ---------------------------------------------------------------------------
+
+-- | Color for a sparkle glyph on the spatial HUD, keyed by intensity (0-3).
+-- Level 0 should not render; levels 1-3 pick pale-gold shades rising toward
+-- a near-white peak.  Use alongside 'sparkleGlyph' to pick the glyph itself.
+sparkleColor :: Int -> Color
+sparkleColor n
+  | n <= 0    = dimText
+  | n == 1    = Color 140 128  78 255   -- faint wheat
+  | n == 2    = Color 196 172  92 255   -- honey
+  | otherwise = Color 232 210 140 255   -- pale gold
+
+-- | Glyph to draw for a given sparkle intensity (0-3). Empty string for 0.
+sparkleGlyph :: Int -> String
+sparkleGlyph n
+  | n <= 0    = ""
+  | n == 1    = "."
+  | n == 2    = "*"
+  | otherwise = "\x2726"                  -- sparkle bullet
+
+-- | Fade a base color by a 0-1 factor toward the background.
+-- 1.0 keeps the color intact; 0.0 sinks it into the background.
+-- Used to age out older history lines so the most recent text pops.
+ageFadeColor :: Color -> Double -> Color
+ageFadeColor (Color r g b a) factor =
+  let f = max 0.0 (min 1.0 factor)
+      Color br bg bb _ = bgColor
+      blend :: Word8 -> Word8 -> Word8
+      blend base fg =
+        let bf = fromIntegral base :: Double
+            ff = fromIntegral fg   :: Double
+        in round (bf + (ff - bf) * f)
+  in Color (blend br r) (blend bg g) (blend bb b) a
 
 -- | Breathing pulse color: interpolate between dim and parchment.
 -- phase is 0.0 to 1.0 (sine wave position).

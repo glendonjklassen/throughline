@@ -34,25 +34,33 @@ spec = describe "Engine.Core.SystemAxioms" $ do
   -- =========================================================================
 
   describe "locationTransitionAxiom" $ do
-    it "narrates when a character moves" $
-      -- The diff says "player" moved from A to B. The system axiom should
-      -- produce a narration. Note: we pass [] for scenario axioms because
-      -- locationTransitionAxiom is a system axiom -- it runs automatically.
+    -- locationTransitionAxiom is defined/exported but no longer in the
+    -- default systemAxioms aggregate (scenarios author their own movement
+    -- prose via SceneEdges). Scenarios can still opt in by including it.
+    -- These tests run it explicitly as an opt-in scenario axiom.
+    let optIn = [locationTransitionAxiom]
+
+    it "narrates when a character moves (opt-in)" $
       let diff = emptyDiff { diffLocations = [LocationDelta player (Location "A") (Location "B")] }
-      in runAxioms [] emptyWorld [] diff
+      in runAxioms optIn emptyWorld [] diff
            `shouldBe` [immediate (Narrate "player \8594 B")]
 
     it "produces no narration when no location changes" $
-      -- Empty diff = nobody moved = no narration.
-      runAxioms [] emptyWorld [] emptyDiff `shouldBe` []
+      runAxioms optIn emptyWorld [] emptyDiff `shouldBe` []
 
-    it "narrates each moving character separately" $
-      -- Two characters moved in the same tick. Each gets their own
-      -- narration effect -- one per LocationDelta in the diff.
+    it "narrates each moving character separately (opt-in)" $
       let diff = emptyDiff { diffLocations = [ LocationDelta player (Location "A") (Location "B")
                                              , LocationDelta npc    (Location "X") (Location "Y") ] }
-          effects = runAxioms [] emptyWorld [] diff
+          effects = runAxioms optIn emptyWorld [] diff
       in length effects `shouldBe` 2
+
+    it "is not included in the default system axiom aggregate" $
+      -- The critical property: a scenario with no axioms and a move diff
+      -- should produce no narration by default. This prevents duplicate
+      -- "name -> place" lines from cluttering history alongside rich
+      -- scenario-authored movement prose.
+      let diff = emptyDiff { diffLocations = [LocationDelta player (Location "A") (Location "B")] }
+      in runAxioms [] emptyWorld [] diff `shouldBe` []
 
   -- =========================================================================
   -- dayAdvanceAxiom (system axiom)

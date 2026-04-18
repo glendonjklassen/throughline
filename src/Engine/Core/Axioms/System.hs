@@ -95,11 +95,16 @@ calendarEventText _ _ = "The seasons turn."
 -- ---------------------------------------------------------------------------
 -- Aggregate list -- the public API for all system axioms
 -- ---------------------------------------------------------------------------
+--
+-- Note: locationTransitionAxiom is defined/exported but NOT in the default
+-- aggregate. Scenarios author their own movement prose via SceneEdges, so
+-- the fallback "cid -> location" narration was duplicating work and
+-- cluttering history. Scenarios that want the debug-style narration can
+-- opt in by appending locationTransitionAxiom to their own axiom list.
 
 systemAxioms :: [Axiom]
 systemAxioms =
-  [ locationTransitionAxiom
-  , dayAdvanceAxiom
+  [ dayAdvanceAxiom
   , fatigueSystemAxiom
   , tirednessSystemAxiom
   , hungerSystemAxiom

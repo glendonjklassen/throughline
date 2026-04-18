@@ -25,9 +25,10 @@ dinerMaya seed _you = Scenario
 
 dinerMayaDisplay :: ScenarioDisplay
 dinerMayaDisplay = ScenarioDisplay
-  { sdEndScreen  = endScreen
-  , sdStatusLine = const Nothing
-  , sdLayout     = defaultLayout
+  { sdEndScreen       = endScreen
+  , sdStatusLine      = const Nothing
+  , sdLayout          = defaultLayout
+  , sdLocationSparkle = \_ _ _ -> 0
   }
 
 endScreen :: GameWorld -> [String]
