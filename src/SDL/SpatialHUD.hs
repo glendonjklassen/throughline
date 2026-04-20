@@ -252,19 +252,44 @@ resolveOverlaps cx cy bw bh cells = go [] cells
 
 -- | Return ASCII art sprites for the current terrain.  Positions are
 -- deterministically scattered using the location name as seed so each
--- spot looks different but is stable across frames.
+-- spot looks different but is stable across frames.  Density scales with
+-- how deep in its zone the player's location is: edge locations feel
+-- sparse, interior ones feel dense.
 terrainSprites :: CharId -> GameWorld -> Int -> Int -> [TerrainSprite]
 terrainSprites you world boxW boxH =
   case Map.lookup you (worldLocations world) of
     Nothing  -> []
     Just loc ->
-      let lg     = worldLocationGraph world
-          region = Map.lookup loc (lgRegions lg)
-          seed   = locHash loc
-          raw    = case region of
+      let lg         = worldLocationGraph world
+          region     = Map.lookup loc (lgRegions lg)
+          seed       = locHash loc
+          interior   = zoneInteriorness lg loc region
+          raw        = case region of
             Nothing -> []
-            Just r  -> scatter seed r boxW boxH
+            Just r  -> scatter seed r interior boxW boxH
       in map (uncolor separatorColor 1.0) raw
+
+-- | How deep inside its zone a location sits.  1.0 = at the zone
+-- centroid, 0.0 = at the far edge.  Returns 1.0 for zones with only a
+-- single location (nowhere else to be) and 0.5 when anything is
+-- undefined (fall back to "middle of the zone").
+zoneInteriorness :: LocationGraph -> Location -> Maybe Region -> Double
+zoneInteriorness _  _   Nothing   = 0.5
+zoneInteriorness lg loc (Just r)  =
+  let sameZone = [ (l, c) | (l, c) <- Map.toList (lgCoords lg)
+                          , Map.lookup l (lgRegions lg) == Just r ]
+  in case (Map.lookup loc (lgCoords lg), sameZone) of
+       (Just (px, py), _:_:_) ->
+         let coords      = map snd sameZone
+             n           = fromIntegral (length coords) :: Double
+             (cx, cy)    = ( sum (map fst coords) / n
+                           , sum (map snd coords) / n )
+             distFrom (qx, qy) = sqrt ((qx - cx) ** 2 + (qy - cy) ** 2)
+             myDist      = distFrom (px, py)
+             maxDist     = max 0.001 (maximum (map distFrom coords))
+             edgeness    = min 1.0 (myDist / maxDist)
+         in 1.0 - edgeness
+       _ -> 1.0   -- solitary zone or no coords — call it "interior"
 
 -- | Wrap a raw (col,row,glyph) triple into a 'TerrainSprite' with a
 -- uniform color and alpha.  The scatter helpers stay in their simple
@@ -323,26 +348,38 @@ trailGlyphFor world loc =
 
 -- | Scatter sprites across the box using the seed to pick positions.
 -- The region determines the sprite vocabulary; the seed makes each
--- location look different.
-scatter :: Int -> Region -> Int -> Int -> [(Int, Int, String)]
-scatter seed (Region name) bw bh
+-- location look different; @interior@ (0-1, 0 = edge of zone, 1 =
+-- deepest) scales density.
+scatter :: Int -> Region -> Double -> Int -> Int -> [(Int, Int, String)]
+scatter seed (Region name) interior bw bh
   | name `elem` ["NorthRoad", "SouthRoad", "WestRoad"] =
-      roadScatter seed bw bh
+      roadScatter seed interior bw bh
   | name `elem` ["NorthField", "SouthField"] =
-      fieldScatter seed bw bh
+      fieldScatter seed interior bw bh
   | name == "OakRidge" =
-      treeScatter seed [" _^_ ", " ||| ", "\\|/"] ["~:~", "o", ".:."] bw bh
+      treeScatter seed interior [" _^_ ", " ||| ", "\\|/"] ["~:~", "o", ".:."] bw bh
   | name == "WillowBottom" =
-      treeScatter seed [" )( ", " || ", "~~~"] ["!", "...", "~"] bw bh
+      treeScatter seed interior [" )( ", " || ", "~~~"] ["!", "...", "~"] bw bh
   | name == "PoplarStand" =
-      treeScatter seed ["/\\", "||", "||"] ["'", "_ _", "."] bw bh
+      treeScatter seed interior ["/\\", "||", "||"] ["'", "_ _", "."] bw bh
   | name == "BushEdge" =
-      treeScatter seed ["/\\", "||", "{::}"] [",,", ":.:", "o"] bw bh
+      treeScatter seed interior ["/\\", "||", "{::}"] [",,", ":.:", "o"] bw bh
   | otherwise = []
 
--- | Place road features using the seed for variation.
-roadScatter :: Int -> Int -> Int -> [(Int, Int, String)]
-roadScatter seed bw bh =
+-- | Scale an integer count by a density factor derived from zone
+-- interiorness.  Edge locations get ~50% of base; interior locations get
+-- ~120%.  Clamped at 1 so a very-edge location still has *something* on
+-- screen.
+scaleCount :: Double -> Int -> Int
+scaleCount interior base =
+  let factor = 0.5 + 0.7 * interior
+  in max 1 (round (fromIntegral base * factor :: Double))
+
+-- | Place road features using the seed for variation.  The road surface
+-- and ditches are structural and ignore the density factor; only the
+-- scattered gravel/grass shrinks at zone edges.
+roadScatter :: Int -> Double -> Int -> Int -> [(Int, Int, String)]
+roadScatter seed interior bw bh =
   let cx = bw `div` 2
       -- Road surface — always centered
       road = [ (cx - 3, r, "= = =") | r <- [0..bh-1], even r ]
@@ -354,7 +391,7 @@ roadScatter seed bw bh =
       -- Scattered gravel and grass using seed
       extras = seededSprites seed
                  [",", ".", ",,", ".", ","]
-                 bw bh 10
+                 bw bh (scaleCount interior 10)
       -- Fence posts at seed-dependent positions
       pCol1 = 2 + (seed `mod` 5)
       pCol2 = bw - 4 - (seed `mod` 6)
@@ -362,15 +399,17 @@ roadScatter seed bw bh =
               , (pCol1 + 8, bh-1, "|"), (pCol2 - 6, 0, "|") ]
   in bounds bw bh (road ++ ditchL ++ ditchR ++ extras ++ posts)
 
--- | Place field features using the seed for variation.
-fieldScatter :: Int -> Int -> Int -> [(Int, Int, String)]
-fieldScatter seed bw bh =
+-- | Place field features using the seed for variation.  Stubble density
+-- follows zone interiorness so standing at a field edge reads more open
+-- than standing in the middle of one.
+fieldScatter :: Int -> Double -> Int -> Int -> [(Int, Int, String)]
+fieldScatter seed interior bw bh =
   let -- Horizon
       horizon = [ (0, 0, replicate (min bw 50) '.') ]
       -- Stubble and grass scattered by seed
       stubble = seededSprites seed
                   [",", ",", ".", ",", ". ."]
-                  bw bh 16
+                  bw bh (scaleCount interior 16)
       -- Fence posts at seed-dependent positions
       pCol = 6 + (seed `mod` 10)
       pRow = 1 + (seed `mod` max 1 (bh - 3))
@@ -379,11 +418,13 @@ fieldScatter seed bw bh =
   in bounds bw bh (horizon ++ stubble ++ posts)
 
 -- | Place tree/forest features.  @treeGlyphs@ are 2-row tree sprites
--- (canopy + trunk + base), @floorGlyphs@ are ground scatter.
-treeScatter :: Int -> [String] -> [String] -> Int -> Int -> [(Int, Int, String)]
-treeScatter seed treeGlyphs floorGlyphs bw bh =
-  let -- Place 4-6 trees at seed-scattered positions, avoiding center
-      numTrees = 4 + (seed `mod` 3)
+-- (canopy + trunk + base), @floorGlyphs@ are ground scatter.  Both tree
+-- and ground density scale with zone interiorness so walking to the
+-- edge of the bush visibly thins the canopy.
+treeScatter :: Int -> Double -> [String] -> [String] -> Int -> Int -> [(Int, Int, String)]
+treeScatter seed interior treeGlyphs floorGlyphs bw bh =
+  let -- Place 4-6 trees at base density, scaled by interiorness.
+      numTrees = scaleCount interior (4 + (seed `mod` 3))
       treePlaces = take numTrees (seededPositions seed bw bh)
       trees = concatMap (\(i, (tc, tr)) ->
         let glyph r = treeGlyphs !! (r `mod` length treeGlyphs)
@@ -392,7 +433,8 @@ treeScatter seed treeGlyphs floorGlyphs bw bh =
         in [ (tc + (i `mod` 3), r, glyph (i + r)) | r <- rows ]
         ) (zip [0 :: Int ..] treePlaces)
       -- Ground scatter
-      ground = seededSprites (seed + 17) floorGlyphs bw bh 12
+      ground = seededSprites (seed + 17) floorGlyphs bw bh
+                 (scaleCount interior 12)
   in bounds bw bh (trees ++ ground)
 
 -- | Generate scattered sprite positions using a seed, avoiding the center.

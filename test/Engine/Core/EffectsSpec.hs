@@ -2,6 +2,7 @@
 module Engine.Core.EffectsSpec (spec) where
 
 import           Test.Hspec
+import           Control.Monad (foldM)
 import           Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.Map.Strict as Map
 
@@ -125,6 +126,36 @@ spec = describe "Engine.Core.Effects" $ do
     it "creates a location entry for an untracked character" $ do
       w <- runEffect (SetLocation player (Location "Somewhere")) emptyWorld
       Map.lookup player (worldLocations w) `shouldBe` Just (Location "Somewhere")
+    it "pushes the departing location onto the history deque" $ do
+      let w0 = emptyWorld { worldLocations = Map.fromList [(player, Location "A")] }
+      w1 <- runEffect (SetLocation player (Location "B")) w0
+      w2 <- runEffect (SetLocation player (Location "C")) w1
+      Map.lookup player (worldLocationHistory w2)
+        `shouldBe` Just [Location "B", Location "A"]
+    it "does not push history when arriving for the first time" $ do
+      w <- runEffect (SetLocation player (Location "Somewhere")) emptyWorld
+      Map.lookup player (worldLocationHistory w) `shouldBe` Nothing
+    it "increments the visit count on each arrival" $ do
+      w1 <- runEffect (SetLocation player (Location "A")) emptyWorld
+      w2 <- runEffect (SetLocation player (Location "B")) w1
+      w3 <- runEffect (SetLocation player (Location "A")) w2
+      (Map.lookup (Location "A") =<< Map.lookup player (worldLocationVisits w3))
+        `shouldBe` Just 2
+      (Map.lookup (Location "B") =<< Map.lookup player (worldLocationVisits w3))
+        `shouldBe` Just 1
+    it "is a no-op when setting to the current location" $ do
+      let w0 = emptyWorld { worldLocations = Map.fromList [(player, Location "A")] }
+      w1 <- runEffect (SetLocation player (Location "A")) w0
+      w2 <- runEffect (SetLocation player (Location "A")) w1
+      Map.lookup player (worldLocationHistory w2) `shouldBe` Nothing
+      (Map.lookup (Location "A") =<< Map.lookup player (worldLocationVisits w2))
+        `shouldBe` Nothing
+    it "caps the history at 8 entries" $ do
+      let steps = [ Location ("L" <> show n) | n <- [1 .. 12 :: Int] ]
+      let go w loc = runEffect (SetLocation player loc) w
+      wFinal <- foldM go emptyWorld steps
+      let hist = Map.findWithDefault [] player (worldLocationHistory wFinal)
+      length hist `shouldBe` 8
 
   describe "ModifyRelation (truth stats)" $ do
     it "increases Intelligence by n" $ do
