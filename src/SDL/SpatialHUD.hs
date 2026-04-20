@@ -6,13 +6,19 @@
 module SDL.SpatialHUD
   ( HUDCell(..)
   , SpatialHUD(..)
+  , TerrainSprite(..)
+  , TrailMark(..)
   , layoutHUD
   , terrainSprites
+  , trailMarks
   ) where
 
+import           Data.List       (find)
 import qualified Data.Map.Strict as Map
+import           Data.Maybe      (catMaybes)
 
-import           SDL.Text (stripAnsi)
+import           SDL.Palette (Color, separatorColor)
+import           SDL.Text    (stripAnsi)
 import           GameTypes
 
 -- ---------------------------------------------------------------------------
@@ -20,11 +26,39 @@ import           GameTypes
 -- ---------------------------------------------------------------------------
 
 -- | A single rendered cell in the spatial HUD.
+--
+-- 'hudTint' overrides the default foreground color (used for familiarity
+-- shading); 'hudHalo' requests a soft filled background behind the label
+-- (used for per-zone biome cues).  Both are optional — 'Nothing' preserves
+-- today's look.
 data HUDCell = HUDCell
   { hudLabel  :: String          -- ^ e.g. "4) North Road Ditch"
   , hudCol    :: Int             -- ^ column offset within the spatial box
   , hudRow    :: Int             -- ^ row offset within the spatial box
   , hudTarget :: Maybe Location  -- ^ target location for movement cells, Nothing for other actions
+  , hudTint   :: Maybe Color     -- ^ optional foreground color override
+  , hudHalo   :: Maybe Color     -- ^ optional background tint (alpha-respected)
+  } deriving (Show)
+
+-- | A breadcrumb dropped at a neighbor HUD cell, marking a location the
+-- player recently departed.  Alpha decays with age so the trail fades
+-- behind the player.
+data TrailMark = TrailMark
+  { tmCol   :: Int
+  , tmRow   :: Int
+  , tmGlyph :: String
+  , tmAge   :: Int      -- ^ 0 = most recent (just left), larger = older
+  } deriving (Show)
+
+-- | A single terrain glyph on the spatial HUD, with its own color and
+-- alpha so scatter density, trail fades, and other ambient cues can
+-- modulate without touching the layout pipeline.
+data TerrainSprite = TerrainSprite
+  { tsCol   :: Int
+  , tsRow   :: Int
+  , tsGlyph :: String
+  , tsColor :: Color
+  , tsAlpha :: Double   -- ^ 0-1
   } deriving (Show)
 
 -- | Full layout of the bottom HUD.
@@ -151,7 +185,14 @@ placeMovement boxW boxH centerCol centerRow maxDist (n, act, dx, dy) =
       -- Clamp to stay in bounds (account for label width)
       col = max 0 (min (boxW - labelLen) rawCol)
       row = max 0 (min (boxH - 1) rawRow)
-  in HUDCell { hudLabel = label, hudCol = col, hudRow = row, hudTarget = target }
+  in HUDCell
+       { hudLabel  = label
+       , hudCol    = col
+       , hudRow    = row
+       , hudTarget = target
+       , hudTint   = Nothing
+       , hudHalo   = Nothing
+       }
 
 -- | Push cells apart when they'd overlap each other or the player marker.
 resolveOverlaps :: Int -> Int -> Int -> Int -> [HUDCell] -> [HUDCell]
@@ -212,7 +253,7 @@ resolveOverlaps cx cy bw bh cells = go [] cells
 -- | Return ASCII art sprites for the current terrain.  Positions are
 -- deterministically scattered using the location name as seed so each
 -- spot looks different but is stable across frames.
-terrainSprites :: CharId -> GameWorld -> Int -> Int -> [(Int, Int, String)]
+terrainSprites :: CharId -> GameWorld -> Int -> Int -> [TerrainSprite]
 terrainSprites you world boxW boxH =
   case Map.lookup you (worldLocations world) of
     Nothing  -> []
@@ -220,13 +261,65 @@ terrainSprites you world boxW boxH =
       let lg     = worldLocationGraph world
           region = Map.lookup loc (lgRegions lg)
           seed   = locHash loc
-      in case region of
-           Nothing -> []
-           Just r  -> scatter seed r boxW boxH
+          raw    = case region of
+            Nothing -> []
+            Just r  -> scatter seed r boxW boxH
+      in map (uncolor separatorColor 1.0) raw
+
+-- | Wrap a raw (col,row,glyph) triple into a 'TerrainSprite' with a
+-- uniform color and alpha.  The scatter helpers stay in their simple
+-- triple form; color modulation lives at this boundary.
+uncolor :: Color -> Double -> (Int, Int, String) -> TerrainSprite
+uncolor color alpha (c, r, g) = TerrainSprite
+  { tsCol = c, tsRow = r, tsGlyph = g, tsColor = color, tsAlpha = alpha }
 
 -- | Simple hash of a location name for deterministic placement.
 locHash :: Location -> Int
 locHash (Location name) = foldl (\acc c -> acc * 37 + fromEnum c) 7 name
+
+-- ---------------------------------------------------------------------------
+-- Trail marks — breadcrumbs on recently departed locations
+-- ---------------------------------------------------------------------------
+
+-- | For each entry in the player's location history that happens to be a
+-- neighbor of the current position (i.e. shown as a movement cell in the
+-- HUD), emit a 'TrailMark' co-located with that cell.  Entries that don't
+-- land on a visible neighbor are silently dropped — they still live in
+-- the history deque, just off-screen from this viewpoint.
+trailMarks :: CharId -> GameWorld -> SpatialHUD -> [TrailMark]
+trailMarks cid world hud =
+  let history = Map.findWithDefault [] cid (worldLocationHistory world)
+      cells   = shSpatialCells hud
+      lookupCell loc = find (\c -> hudTarget c == Just loc) cells
+      mk age loc = do
+        cell <- lookupCell loc
+        let glyph = trailGlyphFor world loc
+            -- Place the glyph just past the end of the label so it sits
+            -- between the neighbor name and the board edge without
+            -- overlapping either the label or the sparkle (which is on
+            -- the player-side of the label).
+            colEnd = hudCol cell + length (hudLabel cell) + 1
+        pure TrailMark
+          { tmCol   = colEnd
+          , tmRow   = hudRow cell
+          , tmGlyph = glyph
+          , tmAge   = age
+          }
+  in catMaybes (zipWith mk [0 ..] history)
+
+-- | Pick a glyph for a trail mark based on the location's region.  Field
+-- locations leave boot-in-stubble dots; bush and ridge locations leave
+-- broken-twig marks; water-adjacent locations leave wet prints.  Falls
+-- back to a neutral breadcrumb if region info is missing.
+trailGlyphFor :: GameWorld -> Location -> String
+trailGlyphFor world loc =
+  case Map.lookup loc (lgRegions (worldLocationGraph world)) of
+    Just (Region r)
+      | r `elem` ["NorthField", "SouthField", "FieldBreak"] -> "\x2024"  -- one-dot leader
+      | r `elem` ["NorthRoad", "SouthRoad", "WestRoad"]     -> "\x00b7"  -- middle dot
+      | r == "WillowBottom" || r == "CreekBed"              -> "\x2234"  -- therefore (wet prints)
+      | otherwise                                           -> ","
+    Nothing                                                 -> ","
 
 -- | Scatter sprites across the box using the seed to pick positions.
 -- The region determines the sprite vocabulary; the seed makes each

@@ -52,14 +52,16 @@ npc = Named "npc"
 
 emptyWorld :: GameWorld
 emptyWorld = GameWorld
-  { worldCharacters    = Map.empty
-  , worldGraph         = Map.empty
-  , worldLocations     = Map.empty
-  , worldActiveEffects = []
-  , worldTags          = orEmpty
-  , worldClock         = LamportClock 0 (PlayerId "init")
-  , worldLocationGraph = emptyLocationGraph
-  , worldSeed          = 0
+  { worldCharacters      = Map.empty
+  , worldGraph           = Map.empty
+  , worldLocations       = Map.empty
+  , worldActiveEffects   = []
+  , worldTags            = orEmpty
+  , worldClock           = LamportClock 0 (PlayerId "init")
+  , worldLocationGraph   = emptyLocationGraph
+  , worldSeed            = 0
+  , worldLocationHistory = Map.empty
+  , worldLocationVisits  = Map.empty
   }
 
 -- | Two characters with trust 5 in each direction and all ground-truth stats at 5.

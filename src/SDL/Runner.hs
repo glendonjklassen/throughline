@@ -104,11 +104,12 @@ sdlActionSource ctx display countRef actionsRef actions = do
   let layout     = sdLayout display
       statusLine = sdStatusLine display
       sparkleFn  = sdLocationSparkle display world you
+      zoneTintFn = sdZoneTintFor display world
   -- Stash current actions for the step hook
   liftIO $ writeIORef actionsRef actions
   -- Render the world with actions (twice to populate both back buffers)
-  liftIO $ renderWorldSDL ctx layout statusLine sparkleFn you world actions logRef debugRef traceRef
-  liftIO $ renderWorldSDL ctx layout statusLine sparkleFn you world actions logRef debugRef traceRef
+  liftIO $ renderWorldSDL ctx layout statusLine sparkleFn zoneTintFn you world actions logRef debugRef traceRef
+  liftIO $ renderWorldSDL ctx layout statusLine sparkleFn zoneTintFn you world actions logRef debugRef traceRef
   -- Update message count
   msgs <- liftIO $ readIORef logRef
   liftIO $ writeIORef countRef (length msgs)
@@ -180,8 +181,9 @@ sdlStepHook ctx display countRef actionsRef _before after _diff = do
           layout     = sdLayout display
           statusLine = sdStatusLine display
           sparkleFn  = sdLocationSparkle display after you
+          zoneTintFn = sdZoneTintFor display after
       oldLogRef <- newIORef oldMsgs
-      typewriteFullFrame ctx layout statusLine sparkleFn you after lastActions
+      typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn you after lastActions
                          oldLogRef debugRef traceRef
                          fc labelW newEntryLines
       -- Drain lingering key events, brief pause, then done
@@ -200,13 +202,14 @@ sdlStepHook ctx display countRef actionsRef _before after _diff = do
 typewriteFullFrame
   :: SDLContext -> LayoutConfig -> (GameWorld -> Maybe String)
   -> (Location -> Int)
+  -> (Location -> Maybe Color)
   -> CharId -> GameWorld -> [AnyAction]
   -> IORef [NarrativeEntry] -> IORef DebugMode -> IORef [AxiomTrace]
   -> FontContext -> Int
   -> [(Color, Int, String)]   -- ^ (color, delayMs, plainLine) for each new line
   -> IO ()
-typewriteFullFrame _   _      _          _         _   _     _           _      _        _        _  _      []    = pure ()
-typewriteFullFrame ctx layout statusLine sparkleFn you world actions logRef debugRef traceRef fc labelW newLines = do
+typewriteFullFrame _   _      _          _         _          _   _     _           _      _        _        _  _      []    = pure ()
+typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn you world actions logRef debugRef traceRef fc labelW newLines = do
   let cols     = gridCols ctx
       -- Compute where the history area starts (mirrors renderWorldFrame)
       rows     = gridRows ctx

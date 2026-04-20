@@ -182,14 +182,20 @@ data Character = Character
 -- ---------------------------------------------------------------------------
 
 data GameWorld = GameWorld
-  { worldCharacters    :: Map.Map CharId Character
-  , worldGraph         :: RelationshipGraph
-  , worldLocations     :: Map.Map CharId Location
-  , worldActiveEffects :: [LiveEffect]
-  , worldTags          :: ORSet Tag
-  , worldClock         :: LamportClock
-  , worldLocationGraph :: LocationGraph
-  , worldSeed          :: Int
+  { worldCharacters       :: Map.Map CharId Character
+  , worldGraph            :: RelationshipGraph
+  , worldLocations        :: Map.Map CharId Location
+  , worldActiveEffects    :: [LiveEffect]
+  , worldTags             :: ORSet Tag
+  , worldClock            :: LamportClock
+  , worldLocationGraph    :: LocationGraph
+  , worldSeed             :: Int
+  , worldLocationHistory  :: Map.Map CharId [Location]
+    -- ^ Most recently departed location first, newest at head.  Bounded
+    -- to a small window so downstream renderers can draw a fading trail.
+  , worldLocationVisits   :: Map.Map CharId (Map.Map Location Int)
+    -- ^ Per-character visit count for each location, incremented on
+    -- arrival.  Powers familiarity cues in the spatial HUD.
   } deriving (Generic)
 
 -- ---------------------------------------------------------------------------

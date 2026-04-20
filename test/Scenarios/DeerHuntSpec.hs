@@ -49,6 +49,8 @@ mkShootableWorld you loc tick = GameWorld
       ]
   , worldLocationGraph = emptyLocationGraph
   , worldSeed          = 0
+  , worldLocationHistory = Map.empty
+  , worldLocationVisits  = Map.empty
   }
 
 -- | Same as mkShootableWorld but with another hunter co-located.
@@ -320,7 +322,9 @@ spec = do
               , worldClock = LamportClock tk (PlayerId "test")
               , worldTags = orEmpty
               , worldLocationGraph = emptyLocationGraph
-              , worldSeed = 0 }
+              , worldSeed = 0
+              , worldLocationHistory = Map.empty
+              , worldLocationVisits  = Map.empty }
             -- rollCheck world salt prob = rollD world salt < prob
             -- We need: 0.15 <= rollD < 0.30
             inRange t = let r = rollD (mkW t) saltDeerMove

@@ -20,13 +20,17 @@ module SDL.Renderer
 import           Control.Monad (when)
 import           Data.IORef
 import           Data.List (intercalate)
+import qualified Data.Map.Strict as Map
 import           Data.Maybe (fromMaybe)
 import           Foreign.C.Types (CInt)
 import qualified SDL
 import           SDL.FontContext
 import           SDL.Palette
 import           SDL.Text (stripAnsi, wrapWords)
-import           SDL.SpatialHUD (SpatialHUD(..), HUDCell(..), layoutHUD, terrainSprites)
+import           SDL.Primitives (fillCellsAlpha)
+import           SDL.SpatialHUD (SpatialHUD(..), HUDCell(..), TerrainSprite(..),
+                                 TrailMark(..), layoutHUD, terrainSprites,
+                                 trailMarks)
 import           Engine.Core.World (playerLocationName, engineTimeStatus, exitBearings)
 import           Engine.Core.NarrativeMessage
 import           SDL.Layout (LayoutConfig(..))
@@ -120,6 +124,7 @@ renderWorldSDL
   -> LayoutConfig
   -> (GameWorld -> Maybe String)
   -> (Location -> Int)
+  -> (Location -> Maybe Color)
   -> CharId
   -> GameWorld
   -> [AnyAction]
@@ -127,7 +132,7 @@ renderWorldSDL
   -> IORef DebugMode
   -> IORef [AxiomTrace]
   -> IO ()
-renderWorldSDL ctx _layout statusLine sparkleFn you world actions logRef debugRef traceRef = do
+renderWorldSDL ctx _layout statusLine sparkleFn zoneTintFn you world actions logRef debugRef traceRef = do
   clearSDL ctx
   allMsgs   <- readIORef logRef
   debugMode <- readIORef debugRef
@@ -198,35 +203,9 @@ renderWorldSDL ctx _layout statusLine sparkleFn you world actions logRef debugRe
   -- Spatial area (movement actions positioned by direction, centered on screen)
   let spatialTopRow = hudStartRow + 2 + fromIntegral genRowCount
                         + (if hasSpatial then 1 else 0)
-      -- Center the spatial box horizontally
-      spatialLeft = fromIntegral ((cols - shBoxWidth hud) `div` 2)
-  when hasSpatial $ do
-    -- Terrain art sprites (background, rendered first)
-    let sprites = terrainSprites you world (shBoxWidth hud) (shBoxHeight hud)
-    mapM_ (\(sc, sr, sText) ->
-      renderText fc sText separatorColor
-        (spatialLeft + fromIntegral sc, spatialTopRow + fromIntegral sr)
-      ) sprites
-    -- Player marker (centered on the marker position)
-    let (pcol, prow) = shPlayerMarker hud
-        markerText = "@ You"
-        markerCol  = max 0 (pcol - length markerText `div` 2)
-    renderText fc markerText dimText
-      (spatialLeft + fromIntegral markerCol, spatialTopRow + fromIntegral prow)
-    -- Movement action labels, with optional sparkle glyph in front when
-    -- the scenario's sparkle function reports a non-zero level for the
-    -- target location.
-    mapM_ (\cell -> do
-      let row = spatialTopRow + fromIntegral (hudRow cell)
-          col = spatialLeft + fromIntegral (hudCol cell)
-      renderText fc (hudLabel cell) greyText (col, row)
-      ) (shSpatialCells hud)
-    mapM_ (\(cell, level, glyph) -> do
-      let row = spatialTopRow + fromIntegral (hudRow cell)
-          col = spatialLeft + fromIntegral (hudCol cell)
-          gCol = max 0 (col - fromIntegral (length glyph) - 1)
-      renderText fc glyph (sparkleColor level) (gCol, row)
-      ) (cellSparkles sparkleFn (shSpatialCells hud))
+      spatialLeft   = fromIntegral ((cols - shBoxWidth hud) `div` 2)
+  when hasSpatial $
+    drawSpatialHUD fc sparkleFn zoneTintFn you world hud spatialLeft spatialTopRow
 
   -- -----------------------------------------------------------------------
   -- Learning mode (optional, between top bar and history)
@@ -270,6 +249,7 @@ renderWorldFrame
   -> LayoutConfig
   -> (GameWorld -> Maybe String)
   -> (Location -> Int)
+  -> (Location -> Maybe Color)
   -> CharId
   -> GameWorld
   -> [AnyAction]
@@ -277,7 +257,7 @@ renderWorldFrame
   -> IORef DebugMode
   -> IORef [AxiomTrace]
   -> IO ()
-renderWorldFrame ctx _layout statusLine sparkleFn you world actions logRef debugRef traceRef = do
+renderWorldFrame ctx _layout statusLine sparkleFn zoneTintFn you world actions logRef debugRef traceRef = do
   clearSDL ctx
   allMsgs   <- readIORef logRef
   debugMode <- readIORef debugRef
@@ -333,29 +313,9 @@ renderWorldFrame ctx _layout statusLine sparkleFn you world actions logRef debug
 
   let spatialTopRow = hudStartRow + 2 + fromIntegral genRowCount
                         + (if hasSpatial then 1 else 0)
-      spatialLeft = fromIntegral ((cols - shBoxWidth hud) `div` 2)
-  when hasSpatial $ do
-    let sprites = terrainSprites you world (shBoxWidth hud) (shBoxHeight hud)
-    mapM_ (\(sc, sr, sText) ->
-      renderText fc sText separatorColor
-        (spatialLeft + fromIntegral sc, spatialTopRow + fromIntegral sr)
-      ) sprites
-    let (pcol, prow) = shPlayerMarker hud
-        markerText = "@ You"
-        markerCol  = max 0 (pcol - length markerText `div` 2)
-    renderText fc markerText dimText
-      (spatialLeft + fromIntegral markerCol, spatialTopRow + fromIntegral prow)
-    mapM_ (\cell -> do
-      let row = spatialTopRow + fromIntegral (hudRow cell)
-          col = spatialLeft + fromIntegral (hudCol cell)
-      renderText fc (hudLabel cell) greyText (col, row)
-      ) (shSpatialCells hud)
-    mapM_ (\(cell, level, glyph) -> do
-      let row = spatialTopRow + fromIntegral (hudRow cell)
-          col = spatialLeft + fromIntegral (hudCol cell)
-          gCol = max 0 (col - fromIntegral (length glyph) - 1)
-      renderText fc glyph (sparkleColor level) (gCol, row)
-      ) (cellSparkles sparkleFn (shSpatialCells hud))
+      spatialLeft   = fromIntegral ((cols - shBoxWidth hud) `div` 2)
+  when hasSpatial $
+    drawSpatialHUD fc sparkleFn zoneTintFn you world hud spatialLeft spatialTopRow
 
   -- Learning mode
   let learnLines = if debugMode == Learning
@@ -407,6 +367,85 @@ ageFadeVisible xs =
 -- ---------------------------------------------------------------------------
 -- Sparkle overlay
 -- ---------------------------------------------------------------------------
+
+-- | Draw the spatial HUD box: terrain scatter, player marker, neighbor
+-- labels (with optional halo + tint), sparkle hints, and trail marks.
+-- Shared by the main and typewriter render paths.
+drawSpatialHUD
+  :: FontContext
+  -> (Location -> Int)
+  -> (Location -> Maybe Color)
+  -> CharId
+  -> GameWorld
+  -> SpatialHUD
+  -> CInt        -- ^ spatialLeft (col)
+  -> CInt        -- ^ spatialTopRow (row)
+  -> IO ()
+drawSpatialHUD fc sparkleFn zoneTintFn you world hud spatialLeft spatialTopRow = do
+  let sprites = terrainSprites you world (shBoxWidth hud) (shBoxHeight hud)
+  mapM_ (\ts -> do
+    let Color r g b a = tsColor ts
+        -- Fold alpha into the color so renderText picks it up uniformly.
+        effA = min a (round (fromIntegral a * tsAlpha ts :: Double))
+    renderText fc (tsGlyph ts) (Color r g b effA)
+      ( spatialLeft   + fromIntegral (tsCol ts)
+      , spatialTopRow + fromIntegral (tsRow ts)
+      )
+    ) sprites
+  -- Player marker.
+  let (pcol, prow) = shPlayerMarker hud
+      markerText = "@ You"
+      markerCol  = max 0 (pcol - length markerText `div` 2)
+  renderText fc markerText dimText
+    (spatialLeft + fromIntegral markerCol, spatialTopRow + fromIntegral prow)
+  -- Neighbor labels with familiarity tint + zone halo.  Cells come in
+  -- from the layout with Nothing for both; we derive them here so the
+  -- layout stays a pure positional computation.
+  let enrich cell =
+        let visits = case hudTarget cell of
+              Just loc -> lookupVisits you loc world
+              Nothing  -> 0
+            tint   = Just (familiarityColor visits)
+            halo   = hudTarget cell >>= zoneTintFn
+        in cell { hudTint = tint, hudHalo = halo }
+  mapM_ (\cell0 -> do
+    let cell = enrich cell0
+        row = spatialTopRow + fromIntegral (hudRow cell)
+        col = spatialLeft   + fromIntegral (hudCol cell)
+        fg  = fromMaybe greyText (hudTint cell)
+    case hudHalo cell of
+      Just halo -> fillCellsAlpha fc halo 1.0 (length (hudLabel cell)) 1
+                     (fromIntegral col, fromIntegral row)
+      Nothing   -> pure ()
+    renderText fc (hudLabel cell) fg (col, row)
+    ) (shSpatialCells hud)
+  -- Sparkles.
+  mapM_ (\(cell, level, glyph) -> do
+    let row = spatialTopRow + fromIntegral (hudRow cell)
+        col = spatialLeft   + fromIntegral (hudCol cell)
+        gCol = max 0 (col - fromIntegral (length glyph) - 1)
+    renderText fc glyph (sparkleColor level) (gCol, row)
+    ) (cellSparkles sparkleFn (shSpatialCells hud))
+  -- Trail marks: breadcrumbs at neighbor cells the player recently
+  -- departed.  Age fades the alpha so the freshest step reads strongest
+  -- and anything more than a few moves old dissolves into the scatter.
+  mapM_ (\tm -> do
+    let alpha = max 0.12 (1.0 - fromIntegral (tmAge tm) * 0.18 :: Double)
+        Color r g b a = dimText
+        effA = round (fromIntegral a * alpha :: Double)
+    renderText fc (tmGlyph tm) (Color r g b effA)
+      ( spatialLeft   + fromIntegral (tmCol tm)
+      , spatialTopRow + fromIntegral (tmRow tm)
+      )
+    ) (trailMarks you world hud)
+
+-- | Look up how many times a character has arrived at a given location.
+-- Zero for never-visited (or for characters absent from the visits map).
+lookupVisits :: CharId -> Location -> GameWorld -> Int
+lookupVisits cid loc world =
+  case Map.lookup cid (worldLocationVisits world) of
+    Nothing -> 0
+    Just m  -> Map.findWithDefault 0 loc m
 
 -- | Compute sparkle glyphs for movement cells that have a target location
 -- and a non-zero sparkle level. Returns each cell paired with its level

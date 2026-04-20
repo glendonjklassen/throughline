@@ -13,6 +13,8 @@ module SDL.Palette
   , sparkleColor
   , sparkleGlyph
   , ageFadeColor
+  , familiarityColor
+  , zoneTintDefault
   ) where
 
 import           Data.Word (Word8)
@@ -123,6 +125,43 @@ ageFadeColor (Color r g b a) factor =
             ff = fromIntegral fg   :: Double
         in round (bf + (ff - bf) * f)
   in Color (blend br r) (blend bg g) (blend bb b) a
+
+-- ---------------------------------------------------------------------------
+-- Familiarity + zone tints (spatial HUD)
+-- ---------------------------------------------------------------------------
+
+-- | Color for a neighbor label, keyed by how many times the player has
+-- been to that destination.  Unvisited neighbors render in the brightest
+-- grey so they stand out against the familiar ones, which warm and dim
+-- as they become retreads.  The curve tops out around 4 visits; past
+-- that, extra visits don't further darken.
+familiarityColor :: Int -> Color
+familiarityColor n
+  | n <= 0    = Color 176 168 152 255   -- crisp, unfamiliar
+  | n == 1    = Color 158 148 128 255   -- been there, recent
+  | n == 2    = Color 138 128 108 255   -- known ground
+  | n == 3    = Color 120 110  92 255   -- retread
+  | otherwise = Color 100  92  76 255   -- worn path
+
+-- | Default halo color for a zone — a soft blend of the zone's character
+-- in the late-autumn palette.  Scenarios can override via
+-- 'sdZoneTintFor'; this table provides sensible defaults keyed by
+-- 'Region' name so something renders even without explicit wiring.  The
+-- alpha is kept low (~35) so the halo reads as a tint, not a box.
+zoneTintDefault :: String -> Maybe Color
+zoneTintDefault name = case name of
+  "NorthField"   -> Just (Color 181 164  78  38)   -- dry grass
+  "SouthField"   -> Just (Color 196 148  58  38)   -- amber
+  "FieldBreak"   -> Just (Color 154 154  90  36)   -- yellow-green
+  "BushEdge"     -> Just (Color 107 120  88  40)   -- sage-green
+  "OakRidge"     -> Just (Color 196 122  58  40)   -- rust
+  "WillowBottom" -> Just (Color 107 130 140  40)   -- blue-grey water
+  "PoplarStand"  -> Just (Color 143 135 108  36)   -- poplar
+  "CreekBed"     -> Just (Color  92 120 128  40)   -- damp shadow
+  "NorthRoad"    -> Just (Color 120 112  98  32)   -- bone / gravel
+  "SouthRoad"    -> Just (Color 120 112  98  32)
+  "WestRoad"     -> Just (Color 120 112  98  32)
+  _              -> Nothing
 
 -- | Breathing pulse color: interpolate between dim and parchment.
 -- phase is 0.0 to 1.0 (sine wave position).

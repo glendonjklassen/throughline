@@ -544,5 +544,7 @@ initialWorld seed you startTruck = GameWorld
       )
   , worldLocationGraph = huntLocationGraph
   , worldSeed          = seed
+  , worldLocationHistory = Map.empty
+  , worldLocationVisits  = Map.empty
   }
 

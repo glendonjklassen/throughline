@@ -7,6 +7,7 @@ module SDL.Layout
   ) where
 
 import GameTypes.Types (CharId, GameWorld, Location)
+import qualified SDL.Palette
 
 data LayoutConfig = LayoutConfig
   { layoutLeftMaxWidth  :: Int  -- ^ hard cap on left panel width (columns)
@@ -33,14 +34,18 @@ data ScenarioDisplay = ScenarioDisplay
     -- 0 = no sparkle, 1 = faint hint, 2 = clear sign, 3 = strong pull.
     -- Scenarios use this to hint at deer presence or other points of
     -- interest based on world state, player experience, and noise.
+  , sdZoneTintFor     :: GameWorld -> Location -> Maybe SDL.Palette.Color
+    -- ^ Optional halo color for a neighbor label — e.g. the biome it
+    -- leads into.  Returning 'Nothing' leaves the label untinted.
   }
 
 -- | Sensible defaults: no end screen, no status line, default layout,
--- no sparkle hints.
+-- no sparkle hints, no zone tinting.
 defaultDisplay :: ScenarioDisplay
 defaultDisplay = ScenarioDisplay
   { sdEndScreen       = const []
   , sdStatusLine      = const Nothing
   , sdLayout          = defaultLayout
   , sdLocationSparkle = \_ _ _ -> 0
+  , sdZoneTintFor     = \_ _   -> Nothing
   }

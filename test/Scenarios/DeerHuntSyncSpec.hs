@@ -164,6 +164,8 @@ findHitTick you offset =
                          ]
                      , worldLocationGraph = emptyLocationGraph
                      , worldSeed = 0
+                     , worldLocationHistory = Map.empty
+                     , worldLocationVisits  = Map.empty
                      }
            , doesShotHit w you
            ] of

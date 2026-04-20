@@ -31,13 +31,16 @@ npc2 = Named "npc2"
 -- Useful for benchmarking diffWorlds, checkCondition, etc. at varying scale.
 scaledWorld :: Int -> GameWorld
 scaledWorld n = GameWorld
-  { worldCharacters    = Map.fromList chars
-  , worldGraph         = graph
-  , worldLocations     = Map.fromList locs
-  , worldActiveEffects = []
-  , worldTags          = orFromList (map (ScenarioTag . MkScenarioTag . ("tag-" ++) . show) [1 .. min n 20])
-  , worldClock         = LamportClock 0 (PlayerId "bench")
-  , worldLocationGraph = emptyLocationGraph
+  { worldCharacters      = Map.fromList chars
+  , worldGraph           = graph
+  , worldLocations       = Map.fromList locs
+  , worldActiveEffects   = []
+  , worldTags            = orFromList (map (ScenarioTag . MkScenarioTag . ("tag-" ++) . show) [1 .. min n 20])
+  , worldClock           = LamportClock 0 (PlayerId "bench")
+  , worldLocationGraph   = emptyLocationGraph
+  , worldSeed            = 0
+  , worldLocationHistory = Map.empty
+  , worldLocationVisits  = Map.empty
   }
   where
     charIds = [ Named ("char-" ++ show i) | i <- [1..n] ]

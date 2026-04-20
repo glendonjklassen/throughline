@@ -108,6 +108,8 @@ findHitTick you offset =
                        ]
                    , worldLocationGraph = huntLocationGraph
                    , worldSeed = 0
+                   , worldLocationHistory = Map.empty
+                   , worldLocationVisits  = Map.empty
                    }
            , doesShotHit w you
            , not (isFriendlyFire w)
