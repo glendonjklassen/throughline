@@ -29,6 +29,7 @@ dinerMayaDisplay = ScenarioDisplay
   , sdStatusLine      = const Nothing
   , sdLayout          = defaultLayout
   , sdLocationSparkle = \_ _ _ -> 0
+  , sdZoneTintFor     = \_ _   -> Nothing
   }
 
 endScreen :: GameWorld -> [String]

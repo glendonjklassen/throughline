@@ -1,7 +1,10 @@
 module Scenarios.DeerHunt (deerHunt, deerHuntDisplay) where
 
+import qualified Data.Map.Strict as Map
+
 import           Engine.Core.Conditions (checkCondition)
 import           SDL.Layout
+import           SDL.Palette  (Color, zoneTintDefault)
 import           SDL.Text
 import           GameTypes
 import           Scenarios.DeerHunt.Actions   (allActions)
@@ -31,7 +34,18 @@ deerHuntDisplay = ScenarioDisplay
   , sdStatusLine      = const Nothing
   , sdLayout          = defaultLayout
   , sdLocationSparkle = locationSparkle
+  , sdZoneTintFor     = deerHuntZoneTint
   }
+
+-- | Tint a neighbor label by the biome it leads into.  Looks up the
+-- destination's region and hands off to the palette's zone-tint table.
+-- Falls back to no tint if the location is absent from the graph or the
+-- region has no default color.
+deerHuntZoneTint :: GameWorld -> Location -> Maybe Color
+deerHuntZoneTint world loc =
+  case Map.lookup loc (lgRegions (worldLocationGraph world)) of
+    Just (Region name) -> zoneTintDefault name
+    Nothing            -> Nothing
 
 -- ---------------------------------------------------------------------------
 -- Shiny-sense sparkle

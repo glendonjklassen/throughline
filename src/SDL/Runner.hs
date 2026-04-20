@@ -248,7 +248,7 @@ typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn you world actions 
     -- Render one frame: full world + all revealed characters so far
     renderTick :: [(Color, String, CInt)] -> IO ()
     renderTick revealed = do
-      renderWorldFrame ctx layout statusLine sparkleFn you world actions logRef debugRef traceRef
+      renderWorldFrame ctx layout statusLine sparkleFn zoneTintFn you world actions logRef debugRef traceRef
       mapM_ (\(clr, txt, row) ->
         renderText fc txt clr (marginLeft, row)
         ) revealed
