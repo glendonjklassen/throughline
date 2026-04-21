@@ -18,6 +18,7 @@ module SDL.Renderer
   , RevealFrame(..)
   , finalReveal
   , hiddenReveal
+  , sweepFeatherCh
   ) where
 
 import           Control.Monad (when)
@@ -379,16 +380,18 @@ ageFadeVisible xs =
 
 -- | A rendering-time snapshot of the spatial HUD reveal animation.
 -- Each neighbor cell has a 0-1 alpha; zero or more cells have an
--- active sensory fragment.  Each sensory is a substring window
--- @(startChar, endChar)@ into the original fragment — the wipe-in
--- grows @endChar@ while @startChar@ stays at 0, and the wipe-out
--- advances @startChar@ while @endChar@ stays at the fragment length.
--- Multiple cells animate on their own independent timelines, so one
--- cell's wipe-out never cuts off another's wipe-in.
+-- active sensory fragment.  Each sensory is rendered character by
+-- character at its own alpha, driven by a light-sweep across the
+-- fragment: during fade-in a beam enters from the left and
+-- illuminates rightward; during fade-out a shadow enters from the
+-- left and darkens rightward.  Multiple cells animate on their own
+-- independent timelines.
 data RevealFrame = RevealFrame
   { rfCellAlpha   :: HUDCell -> Double
-  , rfActiveSenses :: [(HUDCell, Int, Int, String)]
-    -- ^ (cell, startChar, endChar, fullFragment), one per active cell
+  , rfActiveSenses :: [(HUDCell, Double, Bool, String)]
+    -- ^ (cell, sweepPos, darkening, fragment) — sweepPos is in
+    -- character units along the fragment; @darkening@ flips the
+    -- sweep from "lighting up behind it" to "going dark behind it".
   }
 
 -- | The 'RevealFrame' representing a completed reveal: every cell at
@@ -498,25 +501,24 @@ drawSpatialHUD fc sparkleFn zoneTintFn frame you world hud spatialLeft spatialTo
       Nothing   -> pure ()
     ) visibleCells
   -- Active sensory line (if any) one row under its parent cell.
-  -- The substring @fragment[startChar .. endChar)@ is what's currently
-  -- visible; the wipe animation advances those indices frame-to-frame.
-  -- Rendered in thoughtColor so the line reads as a transient inner
-  -- impression rather than a static label.
-  -- Active sensory lines: each cell has its own independent timeline,
-  -- so multiple can animate simultaneously without interfering.
-  mapM_ (\(cell, startChar, endChar, fragment) ->
-    when (not (null fragment) && endChar > startChar) $ do
-      let row      = spatialTopRow + fromIntegral (hudRow cell) + 1
-          col      = spatialLeft   + fromIntegral (hudCol cell)
-          clampedS = max 0 (min (length fragment) startChar)
-          clampedE = max clampedS (min (length fragment) endChar)
-          visible  = drop clampedS (take clampedE fragment)
-      -- Wipe-in keeps startChar=0 and grows endChar → text extends
-      -- rightward from @col@.  Wipe-out advances startChar → the
-      -- render column shifts with it so the remaining tail slides
-      -- off toward the right (same direction the wipe-in went).
-      renderText fc visible thoughtColor
-        (col + fromIntegral clampedS, row)
+  -- Each character's alpha is determined by its position relative to
+  -- the sweep: during fade-in, chars the beam has already passed read
+  -- bright, chars still ahead of it stay dark; during fade-out, the
+  -- relationship inverts.  The soft feather around the sweep gives
+  -- the effect of a light glow rather than a hard edge.
+  mapM_ (\(cell, sweep, darkening, fragment) ->
+    when (not (null fragment)) $ do
+      let baseRow = spatialTopRow + fromIntegral (hudRow cell) + 1
+          baseCol = spatialLeft   + fromIntegral (hudCol cell)
+          py      = baseRow * cellHeight fc
+          baseX   = baseCol * cellWidth  fc
+          cw      = cellWidth fc
+      mapM_ (\(i, ch) -> do
+        let a = charSweepAlpha i sweep darkening
+        when (a > 0.01) $
+          renderTextAtPixel fc [ch] (applyAlpha a thoughtColor)
+            (baseX + fromIntegral i * cw, py)
+        ) (zip [0 :: Int ..] fragment)
     ) (rfActiveSenses frame)
   -- Sparkles.  Only rendered for cells that have been revealed.
   mapM_ (\(cell, level, glyph) -> do
@@ -545,6 +547,22 @@ applyAlpha factor (Color r g b a) =
   let f = max 0.0 (min 1.0 factor)
       a' = round (fromIntegral a * f :: Double)
   in Color r g b a'
+
+-- | Alpha contribution of a single character under a sweep at position
+-- @sweep@ (in character units along the fragment).  The sweep moves
+-- left-to-right; chars the sweep has already crossed (i < sweep) read
+-- bright during fade-in and dark during fade-out.  The
+-- @sweepFeatherCh@ window gives a soft, glow-like edge.
+charSweepAlpha :: Int -> Double -> Bool -> Double
+charSweepAlpha i sweep darkening =
+  let lit = clamp01 ((sweep - fromIntegral i) / sweepFeatherCh + 0.5)
+  in if darkening then 1.0 - lit else lit
+  where
+    clamp01 x = max 0.0 (min 1.0 x)
+
+-- | Soft edge of the sweep, in character units.  Wider = gentler glow.
+sweepFeatherCh :: Double
+sweepFeatherCh = 4.0
 
 -- | Deterministic pixel offset for a label — hashed from the label
 -- string so the same neighbour always sits in the same place across

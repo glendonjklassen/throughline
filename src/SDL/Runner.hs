@@ -188,18 +188,16 @@ hashLoc (Just (Location s)) = foldl (\acc c -> acc * 131 + fromEnum c) 7 s
 -- | Fade-in duration for each label (ms).  The label crosses from alpha
 -- 0 to 1 over this window, starting when the cell's slot opens.
 labelFadeInMs :: Double
-labelFadeInMs = 450
+labelFadeInMs = 700
 
--- | The sensory fragment's timeline within a single cell's slot.
--- Both the wipe-in and wipe-out advance @startChar@ in the same
--- direction (left→right), so the text never reverses — it grows
--- rightward, holds, then the leading edge sweeps off to the right.
--- Durations are in ms per phase; they scale down together when a
--- cell's slot is short.
-sensoryWipeInMs, sensoryHoldMs, sensoryWipeOutMs :: Double
-sensoryWipeInMs  = 450
-sensoryHoldMs    = 900
-sensoryWipeOutMs = 450
+-- | The sensory fragment's timeline within a single cell's slot.  A
+-- beam of light sweeps left-to-right across the fragment, lighting it
+-- as it passes; the fragment holds fully lit; then a shadow sweeps
+-- left-to-right, darkening as it passes.  Durations in ms per phase.
+sensorySweepInMs, sensoryHoldMs, sensorySweepOutMs :: Double
+sensorySweepInMs  = 900
+sensoryHoldMs     = 1600
+sensorySweepOutMs = 900
 
 -- | Animate the spatial-HUD reveal continuously at ~30fps, composing a
 -- 'RevealFrame' per frame from elapsed time.  Each cell gets a per-slot
@@ -228,10 +226,10 @@ animateReveal render cellsWithSense = do
         , rfActiveSenses = activeSensesAt elapsed cellMeta slotMs
         }
       -- Last cell's sensory starts at (n-1)*slotMs + labelFadeIn and
-      -- runs its own wipeIn + hold + wipeOut.  Hold the animation
+      -- runs its own sweep-in + hold + sweep-out.  Hold the animation
       -- open at least that long so the final fragment completes.
       totalMs = fromIntegral (n - 1) * slotMs + labelFadeInMs
-              + sensoryWipeInMs + sensoryHoldMs + sensoryWipeOutMs
+              + sensorySweepInMs + sensoryHoldMs + sensorySweepOutMs
   startTick <- SDL.ticks
   loop startTick frameAt totalMs
   where
@@ -260,47 +258,61 @@ labelAlphaAt elapsed slotStart
       let t = (elapsed - slotStart) / labelFadeInMs
       in max 0.0 (min 1.0 t)
 
--- | Compute the currently active sensory substrings.  Each cell's
+-- | Compute the currently active sensory fragments.  Each cell's
 -- fragment has its own independent timeline anchored to that cell's
--- slot start: wipe-in, hold, wipe-out.  No cell truncates another —
--- late starters run past the overall reveal window if they need to.
--- Cells with an empty fragment contribute nothing.
+-- slot start: sweep-in (light enters from left), hold (fully lit),
+-- sweep-out (shadow enters from left).  Late starters run past the
+-- overall reveal window if they need to.  Empty fragments contribute
+-- nothing.
 activeSensesAt
   :: Double                          -- ^ elapsed ms
   -> [(Int, (HUDCell, String))]      -- ^ (slot index, (cell, fragment))
   -> Double                          -- ^ slot length ms (unused; kept for signature symmetry)
-  -> [(HUDCell, Int, Int, String)]
+  -> [(HUDCell, Double, Bool, String)]
 activeSensesAt elapsed cellMeta _slotMs =
   [ r
   | (i, (cell, frag)) <- cellMeta
   , not (null frag)
   , let sStart   = fromIntegral i * perCellOffsetMs + labelFadeInMs
-        wipeEnd  = sStart + sensoryWipeInMs
-        holdEnd  = wipeEnd + sensoryHoldMs
-        totalEnd = holdEnd + sensoryWipeOutMs
-        n        = length frag
+        sweepEnd = sStart + sensorySweepInMs
+        holdEnd  = sweepEnd + sensoryHoldMs
+        totalEnd = holdEnd + sensorySweepOutMs
+        n        = fromIntegral (length frag)
+        -- Sweep travels left-to-right: starts just past the left edge
+        -- (-feather/2) and ends just past the right edge (n +
+        -- feather/2), so the leading and trailing chars get a full
+        -- transit through the feather.
+        startPos = negate (sweepFeatherCh / 2)
+        endPos   = n + sweepFeatherCh / 2
+        travel t = startPos + (endPos - startPos) * smooth t
   , elapsed >= sStart
   , elapsed <  totalEnd
-  , let r | elapsed < wipeEnd =
-            -- Wipe in: endChar grows from 0 to n.
-            let t = (elapsed - sStart) / sensoryWipeInMs
-                e = round (fromIntegral n * t :: Double)
-            in (cell, 0, e, frag)
+  , let r | elapsed < sweepEnd =
+            -- Light sweeping in from the left; leftmost chars light first.
+            let t = (elapsed - sStart) / sensorySweepInMs
+            in (cell, travel t, False, frag)
           | elapsed < holdEnd =
-            -- Hold at full.
-            (cell, 0, n, frag)
+            -- Fully lit: sweep held past the right edge, no darkening.
+            (cell, endPos, False, frag)
           | otherwise =
-            -- Wipe out: startChar advances, endChar stays at full.
-            let t = (elapsed - holdEnd) / sensoryWipeOutMs
-                s = round (fromIntegral n * t :: Double)
-            in (cell, min n s, n, frag)
+            -- Shadow sweeping in from the left; leftmost chars dim first.
+            let t = (elapsed - holdEnd) / sensorySweepOutMs
+            in (cell, travel t, True, frag)
   ]
 
--- | Stagger between adjacent cells' sensory starts.  Short enough that
--- the reveal feels snappy; long enough that two adjacent fragments
--- don't start their wipe-in on the exact same frame.
+-- | Smoothstep easing, 0-1 in → 0-1 out with zero slope at both ends.
+-- Rounds the sweep so it eases in and out rather than moving at a
+-- constant rate — reads more like a drifting beam than a slide.
+smooth :: Double -> Double
+smooth x =
+  let c = max 0 (min 1 x)
+  in c * c * (3 - 2 * c)
+
+-- | Stagger between adjacent cells' sensory starts.  Keeps adjacent
+-- fragments from all lighting on the same frame while still feeling
+-- like one continuous sweep across the neighbours.
 perCellOffsetMs :: Double
-perCellOffsetMs = 250
+perCellOffsetMs = 400
 
 -- ---------------------------------------------------------------------------
 -- Step hook: typewriter new messages onto the existing frame
