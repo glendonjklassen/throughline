@@ -3,6 +3,7 @@ module Scenarios.DeerHunt.Constants where
 import           Data.List            (isPrefixOf, nub)
 import           Data.Maybe           (fromMaybe)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set        as Set
 import           Data.List.NonEmpty (NonEmpty(..))
 import           Engine.Author.DSL
 import           Engine.Author.Random   (rollChoice)
@@ -10,7 +11,8 @@ import           System.Random          (mkStdGen, randomR)
 import           Engine.CRDT.ORSet
 import           Engine.Core.World      (setCharacterStat)
 import           GameTypes
-import           Scenarios.DeerHunt.Locations
+import           Scenarios.DeerHunt.Generation (GeneratedMap(..), TerrainClass(..))
+import           Scenarios.DeerHunt.World      (HuntWorld(..), hwClass, hwLocsOfClass, hwStart, hwDeerStart)
 
 -- ---------------------------------------------------------------------------
 -- Characters
@@ -260,48 +262,37 @@ discoveredEvidence world loc =
 hotspotCount :: Int
 hotspotCount = 9
 
--- | Locations eligible to carry signs.  Roads are excluded (nothing
--- credible happens on a gravel road).  Trucks are excluded too.
-hotspotCandidates :: [Location]
-hotspotCandidates =
-  filter (not . isRoadZone . locationZone) allLocations
+-- | Locations eligible to carry signs.  Roads and empty cells are
+-- excluded (nothing credible happens on a gravel road).  Everything
+-- in a cover class or a field is fair game.
+hotspotCandidates :: HuntWorld -> [Location]
+hotspotCandidates hw =
+  [ loc | loc <- gmLocations (hwMap hw)
+        , let cls = hwClass hw loc
+        , cls /= CRoad && cls /= CEmpty ]
 
--- | Bias: per location, which sign types are plausible and with what
--- probability weight.  Higher weight = more likely to be chosen.
--- Returns a non-empty list of (SignType, weight).  Defaults to a mix
--- of tracks and droppings for unremarkable spots.
-locationSignBias :: Location -> [(SignType, Int)]
-locationSignBias loc
-  -- Named sign-specific locations heavily favour their namesake
-  | loc == scrapeLine =
-      [(SScrape, 5), (STracks, 2), (SDroppings, 1)]
-  | loc == rubLine =
-      [(SRub, 5), (STracks, 2), (SHair, 2)]
-  | loc == deerTrail || loc == gameTrailEntrance || loc == gameTrailFork =
-      [(STracks, 5), (SDroppings, 2), (SHair, 1)]
-  -- Bedding spots: sheltered, soft
-  | loc `elem` [mossyHollow, dryHummock, oakThicket, willowTangle, windbreak] =
-      [(SBed, 4), (STracks, 2), (SDroppings, 1)]
-  -- Water crossings and mud: tracks last
-  | loc `elem` [creekCrossing, mudFlat, drainageDitch, beaverDam] =
-      [(STracks, 5), (SDroppings, 2), (SHair, 1)]
-  -- Field feeding grounds
-  | loc `elem` [stubbleRows, stubbleFlat, hayBale, cornStubbleStrip, sunflowerStubble] =
-      [(SDroppings, 4), (STracks, 3), (SBed, 1)]
-  -- Old fences, brush: hair catches
-  | loc `elem` [oldFence, fenceLine, brushPile, deadfall, blowdown, fenceCorner] =
-      [(SHair, 4), (STracks, 2), (SDroppings, 1)]
-  -- Generic bush cover
-  | otherwise =
-      [(STracks, 2), (SDroppings, 1), (SBed, 1)]
+-- | Bias: per terrain class, which sign types are plausible and with
+-- what probability weight.  Higher weight = more likely to be chosen.
+-- Ridge and bush are prime bedding/rubbing ground; fields are feeding
+-- ground (droppings, tracks); creeks are tracks-heavy (mud holds them).
+-- Returns a non-empty list of (SignType, weight).
+locationSignBias :: HuntWorld -> Location -> [(SignType, Int)]
+locationSignBias hw loc = case hwClass hw loc of
+  CRidge -> [(SRub, 4), (SScrape, 3), (SBed, 2), (STracks, 2)]
+  CBush  -> [(SBed, 4), (SHair, 3), (STracks, 2), (SDroppings, 1)]
+  CCreek -> [(STracks, 5), (SDroppings, 2), (SHair, 1)]
+  CField -> [(SDroppings, 4), (STracks, 3), (SBed, 1)]
+  _      -> [(STracks, 2), (SDroppings, 1)]
 
 -- | Pick N hotspot locations from the candidates using the session seed.
--- Deterministic: same seed -> same hotspots.  Uses a linear congruential
--- shuffle via mkStdGen to keep the draw independent of any runtime state.
-hotspotLocations :: Int -> [Location]
-hotspotLocations seed =
-  let gen0 = mkStdGen (seed * 7919 + 113)
-      pool = hotspotCandidates
+-- Deterministic: same HuntWorld + same seed -> same hotspots.  Uses a
+-- linear congruential shuffle to keep the draw independent of any
+-- runtime state.
+hotspotLocations :: HuntWorld -> [Location]
+hotspotLocations hw =
+  let seed = hwSeed hw
+      gen0 = mkStdGen (seed * 7919 + 113)
+      pool = hotspotCandidates hw
       go 0 _ _    = []
       go _ [] _   = []
       go n xs gen =
@@ -311,11 +302,12 @@ hotspotLocations seed =
              _                    -> []   -- unreachable: idx is in-range
   in go (min hotspotCount (length pool)) pool gen0
 
--- | For one hotspot, pick 1-3 sign types using the location bias
+-- | For one hotspot, pick 1-3 sign types using the class-keyed bias
 -- and a seed derived from the session seed + the location name.
-hotspotSigns :: Int -> Location -> [SignType]
-hotspotSigns seed loc =
-  let bias    = locationSignBias loc
+hotspotSigns :: HuntWorld -> Location -> [SignType]
+hotspotSigns hw loc =
+  let seed    = hwSeed hw
+      bias    = locationSignBias hw loc
       salt    = foldl (\acc c -> acc * 33 + fromEnum c) 1 (locationName loc)
       gen0    = mkStdGen (seed * 31 + salt)
       (nSigns, gen1) = randomR (1, 3 :: Int) gen0
@@ -332,12 +324,12 @@ hotspotSigns seed loc =
         | otherwise = choose (r - w) rest
   in nub (pick nSigns gen1)
 
--- | All initial world tags for sign hotspots at the given seed.
-initialSignTags :: Int -> [Tag]
-initialSignTags seed =
+-- | All initial world tags for sign hotspots for the given HuntWorld.
+initialSignTags :: HuntWorld -> [Tag]
+initialSignTags hw =
   [ signAt t loc
-  | loc <- hotspotLocations seed
-  , t   <- hotspotSigns seed loc
+  | loc <- hotspotLocations hw
+  , t   <- hotspotSigns hw loc
   ]
 
 -- | Encode a wind angle (degrees) as a world tag. Stores hundredths.
@@ -467,31 +459,44 @@ currentHour world =
        (h:_) -> Just h
        []    -> Nothing
 
--- | Preferred zone for the deer based on time of day.
-deerPreferredZone :: GameWorld -> Zone
-deerPreferredZone world = case currentHour world of
+-- | Preferred terrain class for the deer based on time of day.  The
+-- generator no longer gives us a pinned Zone ADT, so we work in
+-- 'TerrainClass' instead.  Behaviour is the same: feed in fields
+-- morning and evening, retreat to bush/ridge during the day.
+deerPreferredClass :: GameWorld -> TerrainClass
+deerPreferredClass world = case currentHour world of
   Just h
-    | h >= 7  && h < 9  -> NorthField     -- early morning: feeding
-    | h >= 9  && h < 11 -> BushEdge       -- mid-morning: heading for cover
-    | h >= 11 && h < 14 -> OakRidge       -- midday: bedded down
-    | h >= 14 && h < 17 -> PoplarStand    -- afternoon: moving again
-    | h >= 17 && h < 19 -> SouthField     -- evening: feeding
-    | otherwise          -> OakRidge       -- night: bedded
-  Nothing -> NorthField
+    | h >= 7  && h < 9  -> CField      -- early morning: feeding
+    | h >= 9  && h < 11 -> CBush       -- mid-morning: heading for cover
+    | h >= 11 && h < 14 -> CRidge      -- midday: bedded down
+    | h >= 14 && h < 17 -> CBush       -- afternoon: moving again
+    | h >= 17 && h < 19 -> CField      -- evening: feeding
+    | otherwise         -> CRidge      -- night: bedded
+  Nothing -> CField
 
--- | Pick a destination node for the deer's next move.
-deerNextLocation :: GameWorld -> Location
-deerNextLocation world =
-  let current   = fromMaybe stubbleRows (charLocation deer world)
-      preferred = deerPreferredZone world
-      prefLocs  = zoneLocations preferred
-      neighbors = adjacentTo current
-      -- Bias toward preferred zone: if any neighbor is in preferred zone, pick from those
-      prefNeighbors = filter (\l -> locationZone l == preferred) neighbors
+-- | Pick a destination node for the deer's next move.  Biased toward
+-- the preferred terrain class: if any neighbor sits in that class the
+-- deer picks from those, otherwise from all neighbors, otherwise from
+-- the class itself (a teleport fallback when the deer is stuck).
+deerNextLocation :: HuntWorld -> GameWorld -> Location
+deerNextLocation hw world =
+  let current   = fromMaybe (hwDeerStart hw) (charLocation deer world)
+      preferred = deerPreferredClass world
+      neighbors = neighborsOf (worldLocationGraph world) current
+      prefNeighbors = filter (\l -> hwClass hw l == preferred) neighbors
+      prefLocs      = hwLocsOfClass hw preferred
       candidates | not (null prefNeighbors) = prefNeighbors
                  | not (null neighbors)     = neighbors
-                 | otherwise                = prefLocs  -- shouldn't happen
+                 | otherwise                = prefLocs
   in rollChoice world saltDeerMove candidates
+
+-- | All locations adjacent to the given one in the scenario's
+-- 'LocationGraph'.  Edges are undirected; we walk both directions.
+neighborsOf :: LocationGraph -> Location -> [Location]
+neighborsOf lg loc =
+  let pairs = Set.toList (lgEdges lg)
+  in nub $  [ b | (a, b) <- pairs, a == loc ]
+         ++ [ a | (a, b) <- pairs, b == loc ]
 
 -- ---------------------------------------------------------------------------
 -- Initial world
@@ -508,24 +513,20 @@ initialGraph you
   . setCharacterStat deer (Capacity Strength)      6
   $ Map.empty
 
--- | Pick the deer's starting location from the session seed.
--- Deep bush only — oak ridge, willow bottom, poplar stand.
-deerStartFromSeed :: Int -> Location
-deerStartFromSeed seed =
-  let candidates = zoneLocations OakRidge ++ zoneLocations WillowBottom ++ zoneLocations PoplarStand
-      (idx, _) = randomR (0, length candidates - 1) (mkStdGen seed)
-  in candidates !! idx
-
-initialWorld :: Int -> CharId -> Location -> GameWorld
-initialWorld seed you startTruck = GameWorld
+-- | Build the initial world from a pre-constructed 'HuntWorld'.  The
+-- map, start, and deer-start are all already baked into the
+-- 'HuntWorld'; this function composes them with characters, tags, and
+-- engine-level effects.
+initialWorld :: HuntWorld -> CharId -> GameWorld
+initialWorld hw you = GameWorld
   { worldCharacters = Map.fromList
       [ (you,  Character you  "You"      [] orEmpty)
       , (deer, Character deer "The Deer" [] orEmpty)
       ]
   , worldGraph         = initialGraph you
   , worldLocations     = Map.fromList
-      [ (you,  startTruck)
-      , (deer, deerStartFromSeed seed)
+      [ (you,  hwStart hw)
+      , (deer, hwDeerStart hw)
       ]
   , worldActiveEffects = map staticLive [timeCycle, weatherCycle]
   , worldClock         = LamportClock 0 (PlayerId "init")
@@ -540,9 +541,11 @@ initialWorld seed you startTruck = GameWorld
         , windAngleTag 270.0     -- initial wind from the west
         , windStrengthTag 0.2    -- light morning breeze
         ]
-        ++ initialSignTags seed  -- seeded sign-hotspot "treasure"
+        ++ initialSignTags hw  -- seeded sign-hotspot "treasure"
       )
-  , worldLocationGraph = huntLocationGraph
-  , worldSeed          = seed
+  , worldLocationGraph = gmGraph (hwMap hw)
+  , worldSeed          = hwSeed hw
+  , worldLocationHistory = Map.empty
+  , worldLocationVisits  = Map.empty
   }
 

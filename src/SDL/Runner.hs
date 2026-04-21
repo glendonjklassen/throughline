@@ -7,6 +7,10 @@ import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Reader   (asks)
 import           Control.Monad.State    (get)
 import           Data.IORef
+import           Data.List       (find, sortOn)
+import qualified Data.Map.Strict as Map
+import           Data.Maybe      (fromMaybe)
+import           Data.Word       (Word32)
 import           Foreign.C.Types (CInt)
 import qualified SDL
 
@@ -23,7 +27,7 @@ import           SDL.FontContext
 import           SDL.InputHandler
 import           SDL.Palette
 import           SDL.Renderer
-import           SDL.SpatialHUD        (SpatialHUD(..), layoutHUD)
+import           SDL.SpatialHUD        (SpatialHUD(..), HUDCell(..), layoutHUD)
 import           SDL.Text              (stripAnsi, wrapWords)
 import           SDL.Debug             (cycleDebug, learningModeLines)
 import           SDL.Layout            (ScenarioDisplay(..), LayoutConfig(..))
@@ -89,13 +93,22 @@ sdlGameLoop ctx display = do
   msgCountRef <- liftIO $ newIORef (0 :: Int)
   -- Stash last-rendered actions so the step hook can keep the HUD stable
   actionsRef  <- liftIO $ newIORef ([] :: [AnyAction])
+  -- Remember the player's last-rendered location so the HUD reveal
+  -- animation only fires when movement actually happened.  Non-moving
+  -- actions (sit, look, wave) leave this unchanged and skip the
+  -- animation — the HUD stays fully revealed.
+  lastLocRef  <- liftIO $ newIORef (Nothing :: Maybe Location)
   coreLoop (sdlStepHook ctx display msgCountRef actionsRef)
-           (sdlActionSource ctx display msgCountRef actionsRef)
+           (sdlActionSource ctx display msgCountRef actionsRef lastLocRef)
 
--- | Action source: render the world, await a keypress, map to an action.
+-- | Action source: render the world, animate the spatial-HUD reveal,
+-- then await a keypress and map it to an action.  If the player hits
+-- a key during the reveal, we skip to the fully-revealed HUD and
+-- process that key as the selection input.
 sdlActionSource :: SDLContext -> ScenarioDisplay
-                -> IORef Int -> IORef [AnyAction] -> ActionSource
-sdlActionSource ctx display countRef actionsRef actions = do
+                -> IORef Int -> IORef [AnyAction] -> IORef (Maybe Location)
+                -> ActionSource
+sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
   world    <- get
   you      <- asks envPlayerCharId
   logRef   <- asks envMessageLog
@@ -104,33 +117,202 @@ sdlActionSource ctx display countRef actionsRef actions = do
   let layout     = sdLayout display
       statusLine = sdStatusLine display
       sparkleFn  = sdLocationSparkle display world you
-  -- Stash current actions for the step hook
+      zoneTintFn = sdZoneTintFor display world
+      sensoryFn  = sdSensoryFor display world
+      render frame = renderWorldSDL ctx layout statusLine sparkleFn zoneTintFn frame
+                                    you world actions logRef debugRef traceRef
+      currentLoc = Map.lookup you (worldLocations world)
   liftIO $ writeIORef actionsRef actions
-  -- Render the world with actions (twice to populate both back buffers)
-  liftIO $ renderWorldSDL ctx layout statusLine sparkleFn you world actions logRef debugRef traceRef
-  liftIO $ renderWorldSDL ctx layout statusLine sparkleFn you world actions logRef debugRef traceRef
-  -- Update message count
-  msgs <- liftIO $ readIORef logRef
-  liftIO $ writeIORef countRef (length msgs)
-  -- Drain stale events (e.g. from typewriter skip) before awaiting fresh input
+  -- Only animate the reveal when the player has moved since the last
+  -- turn.  Non-moving actions (sit, look, wave) keep the HUD static.
+  prevLoc <- liftIO $ readIORef lastLocRef
+  -- First-ever render or a location change → animate.
+  -- Same location → static HUD (non-movement action like sit / look).
+  let playerMoved = case prevLoc of
+        Nothing       -> True                  -- first render of the game
+        Just prev     -> Just prev /= currentLoc
+  -- Precompute the sorted cell list and per-cell sensory fragments so the
+  -- animation loop doesn't re-derive them every frame.
+  let totalCols = gridCols ctx
+      hud       = layoutHUD you world actions totalCols
+      sortedCells = sortOn hudDist (shSpatialCells hud)
+      tick        = lcTick (worldClock world)
+      salt0       = tick + hashLoc currentLoc
+      cellSensory i cell =
+        case hudTarget cell of
+          Just loc -> fromMaybe "" (sensoryFn loc (salt0 + i * 131))
+          Nothing  -> ""
+      withSensory = zipWith (\i c -> (c, cellSensory i c)) [0 :: Int ..] sortedCells
+  liftIO $ writeIORef countRef . length =<< readIORef logRef
   liftIO drainSDLEvents
-  -- Await input
-  liftIO (awaitKeyLoop actions debugRef)
+  skipChar <- liftIO $ if playerMoved
+    then animateReveal render withSensory
+    else do
+      -- No animation: just draw the full-reveal frame and await input.
+      render finalReveal
+      pure Nothing
+  -- Final render at full reveal to guarantee both back buffers are clean.
+  liftIO $ render finalReveal
+  liftIO $ render finalReveal
+  liftIO $ writeIORef lastLocRef currentLoc
+  liftIO (awaitKeyLoop actions debugRef skipChar)
   where
-    awaitKeyLoop :: [AnyAction] -> IORef DebugMode -> IO (Maybe AnyAction)
-    awaitKeyLoop acts debugRef' = do
-      mc <- awaitKeySDL
+    awaitKeyLoop :: [AnyAction] -> IORef DebugMode -> Maybe Char -> IO (Maybe AnyAction)
+    awaitKeyLoop acts debugRef' pending = do
+      mc <- case pending of
+        Just c  -> pure (Just c)
+        Nothing -> awaitKeySDL
       case mc of
         Nothing   -> pure Nothing
         Just 'q'  -> pure Nothing
         Just 'd'  -> do
           modifyIORef' debugRef' cycleDebug
-          awaitKeyLoop acts debugRef'
+          awaitKeyLoop acts debugRef' Nothing
         Just 'm'  ->
-          awaitKeyLoop acts debugRef'
+          awaitKeyLoop acts debugRef' Nothing
         Just c    -> case safeIndex c acts of
           Just a  -> pure (Just a)
-          Nothing -> awaitKeyLoop acts debugRef'
+          Nothing -> awaitKeyLoop acts debugRef' Nothing
+
+-- | Hash a location (or its absence) into an Int for seeded sensory
+-- selection.  Co-arrivals at the same tick and location pick the same
+-- fragment; different ticks or locations shift the pool.
+hashLoc :: Maybe Location -> Int
+hashLoc Nothing             = 0
+hashLoc (Just (Location s)) = foldl (\acc c -> acc * 131 + fromEnum c) 7 s
+
+-- ---------------------------------------------------------------------------
+-- Reveal animation — time-based, continuous fades
+-- ---------------------------------------------------------------------------
+
+-- | Fade-in duration for each label (ms).  The label crosses from alpha
+-- 0 to 1 over this window, starting when the cell's slot opens.
+labelFadeInMs :: Double
+labelFadeInMs = 700
+
+-- | The sensory fragment's timeline within a single cell's slot.  A
+-- beam of light sweeps left-to-right across the fragment, lighting it
+-- as it passes; the fragment holds fully lit; then a shadow sweeps
+-- left-to-right, darkening as it passes.  Durations in ms per phase.
+sensorySweepInMs, sensoryHoldMs, sensorySweepOutMs :: Double
+sensorySweepInMs  = 900
+sensoryHoldMs     = 1600
+sensorySweepOutMs = 900
+
+-- | Animate the spatial-HUD reveal continuously at ~30fps, composing a
+-- 'RevealFrame' per frame from elapsed time.  Each cell gets a per-slot
+-- window of length @revealTotalMs / cellCount@ during which its label
+-- fades in and its sensory fragment rises, holds, and fades back out.
+-- Returns the char of any keypress that interrupted the animation;
+-- 'Nothing' means the reveal completed naturally.
+animateReveal
+  :: (RevealFrame -> IO ())
+  -> [(HUDCell, String)]        -- ^ nearest-first cells paired with sensory fragments
+  -> IO (Maybe Char)
+animateReveal render [] = do
+  render finalReveal
+  pure Nothing
+animateReveal render cellsWithSense = do
+  let n        = length cellsWithSense
+      -- Labels and sensories share the same cell-to-cell cadence.
+      slotMs   = perCellOffsetMs
+      cellMeta = zip [0 :: Int ..] cellsWithSense
+      frameAt  :: Double -> RevealFrame
+      frameAt elapsed = RevealFrame
+        { rfCellAlpha = \cell ->
+            case find (\(_, (c, _)) -> hudLabel c == hudLabel cell) cellMeta of
+              Nothing     -> 0.0
+              Just (i, _) -> labelAlphaAt elapsed (fromIntegral i * slotMs)
+        , rfActiveSenses = activeSensesAt elapsed cellMeta slotMs
+        }
+      -- Last cell's sensory starts at (n-1)*slotMs + labelFadeIn and
+      -- runs its own sweep-in + hold + sweep-out.  Hold the animation
+      -- open at least that long so the final fragment completes.
+      totalMs = fromIntegral (n - 1) * slotMs + labelFadeInMs
+              + sensorySweepInMs + sensoryHoldMs + sensorySweepOutMs
+  startTick <- SDL.ticks
+  loop startTick frameAt totalMs
+  where
+    loop :: Word32 -> (Double -> RevealFrame) -> Double -> IO (Maybe Char)
+    loop start frameAt total = do
+      now <- SDL.ticks
+      let elapsed = fromIntegral (now - start) :: Double
+      if elapsed >= total
+        then do
+          render finalReveal
+          pure Nothing
+        else do
+          render (frameAt elapsed)
+          mc <- waitOrKeyChar 33
+          case mc of
+            Just c  -> pure (Just c)
+            Nothing -> loop start frameAt total
+
+-- | Alpha for a label given elapsed ms and the label's slot start ms.
+-- Before its slot opens: 0.  During fade-in window: ramps 0→1.  After
+-- that: stays at 1 until the animation ends.
+labelAlphaAt :: Double -> Double -> Double
+labelAlphaAt elapsed slotStart
+  | elapsed < slotStart = 0.0
+  | otherwise =
+      let t = (elapsed - slotStart) / labelFadeInMs
+      in max 0.0 (min 1.0 t)
+
+-- | Compute the currently active sensory fragments.  Each cell's
+-- fragment has its own independent timeline anchored to that cell's
+-- slot start: sweep-in (light enters from left), hold (fully lit),
+-- sweep-out (shadow enters from left).  Late starters run past the
+-- overall reveal window if they need to.  Empty fragments contribute
+-- nothing.
+activeSensesAt
+  :: Double                          -- ^ elapsed ms
+  -> [(Int, (HUDCell, String))]      -- ^ (slot index, (cell, fragment))
+  -> Double                          -- ^ slot length ms (unused; kept for signature symmetry)
+  -> [(HUDCell, Double, Bool, String)]
+activeSensesAt elapsed cellMeta _slotMs =
+  [ r
+  | (i, (cell, frag)) <- cellMeta
+  , not (null frag)
+  , let sStart   = fromIntegral i * perCellOffsetMs + labelFadeInMs
+        sweepEnd = sStart + sensorySweepInMs
+        holdEnd  = sweepEnd + sensoryHoldMs
+        totalEnd = holdEnd + sensorySweepOutMs
+        n        = fromIntegral (length frag)
+        -- Sweep travels left-to-right: starts just past the left edge
+        -- (-feather/2) and ends just past the right edge (n +
+        -- feather/2), so the leading and trailing chars get a full
+        -- transit through the feather.
+        startPos = negate (sweepFeatherCh / 2)
+        endPos   = n + sweepFeatherCh / 2
+        travel t = startPos + (endPos - startPos) * smooth t
+  , elapsed >= sStart
+  , elapsed <  totalEnd
+  , let r | elapsed < sweepEnd =
+            -- Light sweeping in from the left; leftmost chars light first.
+            let t = (elapsed - sStart) / sensorySweepInMs
+            in (cell, travel t, False, frag)
+          | elapsed < holdEnd =
+            -- Fully lit: sweep held past the right edge, no darkening.
+            (cell, endPos, False, frag)
+          | otherwise =
+            -- Shadow sweeping in from the left; leftmost chars dim first.
+            let t = (elapsed - holdEnd) / sensorySweepOutMs
+            in (cell, travel t, True, frag)
+  ]
+
+-- | Smoothstep easing, 0-1 in → 0-1 out with zero slope at both ends.
+-- Rounds the sweep so it eases in and out rather than moving at a
+-- constant rate — reads more like a drifting beam than a slide.
+smooth :: Double -> Double
+smooth x =
+  let c = max 0 (min 1 x)
+  in c * c * (3 - 2 * c)
+
+-- | Stagger between adjacent cells' sensory starts.  Keeps adjacent
+-- fragments from all lighting on the same frame while still feeling
+-- like one continuous sweep across the neighbours.
+perCellOffsetMs :: Double
+perCellOffsetMs = 400
 
 -- ---------------------------------------------------------------------------
 -- Step hook: typewriter new messages onto the existing frame
@@ -138,7 +320,7 @@ sdlActionSource ctx display countRef actionsRef actions = do
 
 sdlStepHook :: SDLContext -> ScenarioDisplay
             -> IORef Int -> IORef [AnyAction] -> StepHook
-sdlStepHook ctx display countRef actionsRef _before after _diff = do
+sdlStepHook ctx display countRef actionsRef before after _diff = do
   you      <- asks envPlayerCharId
   logRef   <- asks envMessageLog
   debugRef <- asks envDebug
@@ -180,8 +362,17 @@ sdlStepHook ctx display countRef actionsRef _before after _diff = do
           layout     = sdLayout display
           statusLine = sdStatusLine display
           sparkleFn  = sdLocationSparkle display after you
+          zoneTintFn = sdZoneTintFor display after
       oldLogRef <- newIORef oldMsgs
-      typewriteFullFrame ctx layout statusLine sparkleFn you after lastActions
+      -- On a movement action the HUD is hidden during typewriter
+      -- ('hiddenReveal') so the reveal animation can take over
+      -- cleanly afterwards.  On non-movement actions the choices
+      -- should stay exactly where they were — hiding them would
+      -- flicker them away and back for no reason.
+      let movedHere = Map.lookup you (worldLocations before)
+                   /= Map.lookup you (worldLocations after)
+          hudFrame  = if movedHere then hiddenReveal else finalReveal
+      typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn hudFrame you after lastActions
                          oldLogRef debugRef traceRef
                          fc labelW newEntryLines
       -- Drain lingering key events, brief pause, then done
@@ -200,13 +391,15 @@ sdlStepHook ctx display countRef actionsRef _before after _diff = do
 typewriteFullFrame
   :: SDLContext -> LayoutConfig -> (GameWorld -> Maybe String)
   -> (Location -> Int)
+  -> (Location -> Maybe Color)
+  -> RevealFrame           -- ^ HUD frame to render under the typewriter
   -> CharId -> GameWorld -> [AnyAction]
   -> IORef [NarrativeEntry] -> IORef DebugMode -> IORef [AxiomTrace]
   -> FontContext -> Int
   -> [(Color, Int, String)]   -- ^ (color, delayMs, plainLine) for each new line
   -> IO ()
-typewriteFullFrame _   _      _          _         _   _     _           _      _        _        _  _      []    = pure ()
-typewriteFullFrame ctx layout statusLine sparkleFn you world actions logRef debugRef traceRef fc labelW newLines = do
+typewriteFullFrame _   _      _          _         _          _     _   _     _           _      _        _        _  _      []    = pure ()
+typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn frame you world actions logRef debugRef traceRef fc labelW newLines = do
   let cols     = gridCols ctx
       -- Compute where the history area starts (mirrors renderWorldFrame)
       rows     = gridRows ctx
@@ -245,7 +438,7 @@ typewriteFullFrame ctx layout statusLine sparkleFn you world actions logRef debu
     -- Render one frame: full world + all revealed characters so far
     renderTick :: [(Color, String, CInt)] -> IO ()
     renderTick revealed = do
-      renderWorldFrame ctx layout statusLine sparkleFn you world actions logRef debugRef traceRef
+      renderWorldFrame ctx layout statusLine sparkleFn zoneTintFn frame you world actions logRef debugRef traceRef
       mapM_ (\(clr, txt, row) ->
         renderText fc txt clr (marginLeft, row)
         ) revealed

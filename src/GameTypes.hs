@@ -1,5 +1,10 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
--- | Re-exports all game types, smart constructors, and JSON instances as a single import surface.
+-- | Public type surface for the engine.  Re-exports every type,
+-- smart constructor, and JSON instance that scenario authors, the
+-- runtime, and the renderer all need, so downstream modules can
+-- @import GameTypes@ once instead of chasing half a dozen internal
+-- sub-modules.  Definitions live in "GameTypes.Types" and the
+-- "Engine.CRDT.*" modules; this one only re-exports.
 module GameTypes
   ( -- * Event log
     PlayerId(..)

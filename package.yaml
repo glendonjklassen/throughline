@@ -1,5 +1,5 @@
 name:                throughline
-version:             0.10.0
+version:             0.11.0
 homepage:            "https://github.com/glendonjklassen/throughline"
 license:             MIT
 author:              "Glendon Klassen"
@@ -100,11 +100,17 @@ tests:
     - Scenarios.DeerHunt.Actions
     - Scenarios.DeerHunt.Axioms
     - Scenarios.DeerHunt.Constants
-    - Scenarios.DeerHunt.Locations
+    - Scenarios.DeerHunt.Generation
+    - Scenarios.DeerHunt.Narration
     - Scenarios.DeerHunt.Probability
+    - Scenarios.DeerHunt.Section
+    - Scenarios.DeerHunt.Terrain
+    - Scenarios.DeerHunt.World
     - Scenarios.DeerHuntSpec
     - Scenarios.DeerHuntPlaythrough
     - Scenarios.DeerHuntSyncSpec
+    - Scenarios.DeerHuntGenerationSpec
+    - Scenarios.DeerHuntTestFixtures
     - Scenarios.DinerSpec
     - Scenarios.DinerSyncSpec
     - Scenarios.DinerInterleaveSpec
@@ -173,5 +179,9 @@ benchmarks:
     - Scenarios.DeerHunt.Actions
     - Scenarios.DeerHunt.Axioms
     - Scenarios.DeerHunt.Constants
-    - Scenarios.DeerHunt.Locations
+    - Scenarios.DeerHunt.Generation
+    - Scenarios.DeerHunt.Narration
     - Scenarios.DeerHunt.Probability
+    - Scenarios.DeerHunt.Section
+    - Scenarios.DeerHunt.Terrain
+    - Scenarios.DeerHunt.World

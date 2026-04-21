@@ -1,5 +1,21 @@
 {
   "attribution": {
     "commit": ""
+  },
+  "permissions": {
+    "allow": [
+      "Bash(stack test *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git add *)",
+      "Bash(git push *)",
+      "Bash(git stash *)",
+      "Bash(git commit *)",
+      "Bash(git -C /mnt/c/Users/GlendonKlassen/code/throughline-engine log --oneline -15)",
+      "Bash(stack exec *)",
+      "Bash(hlint src/ app/ test/)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
+    ]
   }
 }

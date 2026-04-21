@@ -30,6 +30,8 @@ dinerDisplay = ScenarioDisplay
   , sdStatusLine      = const Nothing
   , sdLayout          = defaultLayout
   , sdLocationSparkle = \_ _ _ -> 0
+  , sdZoneTintFor     = \_ _   -> Nothing
+  , sdSensoryFor      = \_ _ _ -> Nothing
   }
 
 endScreen :: GameWorld -> [String]

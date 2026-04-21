@@ -196,4 +196,6 @@ initialWorld seed you = GameWorld
       ]
   , worldLocationGraph = emptyLocationGraph
   , worldSeed          = seed
+  , worldLocationHistory = Map.empty
+  , worldLocationVisits  = Map.empty
   }

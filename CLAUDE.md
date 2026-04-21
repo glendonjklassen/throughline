@@ -120,7 +120,9 @@ SDL2 system libraries are required before `stack build`:
 
 Run tests with `stack test`.
 
-### Protocol: never mix source and test changes in one commit
+### Protocol: write the test before the implementation
+
+When a change is complex enough that assertions could be tainted by your implementation — i.e. a change where it'd be tempting to nudge the test to match whatever you just coded — write the test first, watch it fail, *then* implement. Committing source and test together in one commit is fine; the rule is about write-order, not commit granularity.
 
 ### When logic gets complex, test first
 

@@ -103,7 +103,7 @@ executeBody (RemoveWorldTag t) =
 executeBody (ModifyRelation from to stat delta) = do
   pid <- asks envPlayerId
   modify (\w -> w { worldGraph = modifyRelStat pid from to stat delta (worldGraph w) })
-executeBody (SetLocation cid loc)       = modify (\w -> w { worldLocations = Map.insert cid loc (worldLocations w) })
+executeBody (SetLocation cid loc)       = modify (moveCharacter cid loc)
 executeBody (Dialogue dls) = do
   w <- get
   let resolve (cid, listeners, b) =
@@ -117,7 +117,7 @@ executeBody (SetLocationRandom cid salt locs) = do
     [] -> pure ()
     _  -> do
       let idx = scenarioSeed (lcTick (worldClock w)) salt `mod` length locs
-      modify (\w' -> w' { worldLocations = Map.insert cid (locs !! idx) (worldLocations w') })
+      modify (moveCharacter cid (locs !! idx))
 executeBody (SetLocationAdjacent cid salt) = do
   w <- get
   case Map.lookup cid (worldLocations w) of
@@ -128,7 +128,7 @@ executeBody (SetLocationAdjacent cid salt) = do
         [] -> pure ()
         _  -> do
           let idx = scenarioSeed (lcTick (worldClock w)) salt `mod` length neighbors
-          modify (\w' -> w' { worldLocations = Map.insert cid (neighbors !! idx) (worldLocations w') })
+          modify (moveCharacter cid (neighbors !! idx))
 executeBody (SetLocationAdjacentPrefer cid salt region) = do
   w <- get
   case Map.lookup cid (worldLocations w) of
@@ -141,11 +141,38 @@ executeBody (SetLocationAdjacentPrefer cid salt region) = do
         [] -> pure ()
         _  -> do
           let idx = scenarioSeed (lcTick (worldClock w)) salt `mod` length candidates
-          modify (\w' -> w' { worldLocations = Map.insert cid (candidates !! idx) (worldLocations w') })
+          modify (moveCharacter cid (candidates !! idx))
 executeBody DoNothing                   = pure ()
 executeBody (OnExpire _ _)              = error "executeBody: compound body reached; currentBody must be called first"
 executeBody (CycleMany _ _)             = error "executeBody: compound body reached; currentBody must be called first"
 executeBody (Cycle {})                  = error "executeBody: compound body reached; currentBody must be called first"
+
+-- | Move a character to a new location, pushing the departing location
+-- onto the bounded per-character history and incrementing the visit
+-- count for the destination.  No-op moves (already at 'loc') leave
+-- everything untouched so axioms that redundantly re-assert a location
+-- don't pollute the trail or inflate visit counts.
+moveCharacter :: CharId -> Location -> GameWorld -> GameWorld
+moveCharacter cid loc w =
+  let prev        = Map.lookup cid (worldLocations w)
+      sameSpot    = prev == Just loc
+      newLocs     = Map.insert cid loc (worldLocations w)
+      newHistory  = case (prev, sameSpot) of
+        (Just old, False) ->
+          Map.insertWith pushBounded cid [old] (worldLocationHistory w)
+        _                  -> worldLocationHistory w
+      newVisits   = if sameSpot
+        then worldLocationVisits w
+        else Map.insertWith (Map.unionWith (+)) cid
+               (Map.singleton loc 1) (worldLocationVisits w)
+  in w { worldLocations       = newLocs
+       , worldLocationHistory = newHistory
+       , worldLocationVisits  = newVisits
+       }
+  where
+    -- Cap the trail at 8 entries.  'insertWith' passes (new, old), so the
+    -- single-element new list prepends onto whatever was there.
+    pushBounded new old = take 8 (new ++ old)
 
 -- | Return the deduplication predicate for singleton EngineTag families,
 -- or Nothing for tags that allow multiple concurrent values.
@@ -234,14 +261,21 @@ mergeActiveEffects as bs = nubBy (\x y -> liveId x == liveId y) (as ++ bs)
 -- are indistinguishable).
 mergeWorlds :: GameWorld -> GameWorld -> GameWorld
 mergeWorlds a b = GameWorld
-  { worldCharacters    = Map.unionWith mergeChar (worldCharacters a) (worldCharacters b)
-  , worldGraph         = Map.unionWith (Map.unionWith mergeRel) (worldGraph a) (worldGraph b)
-  , worldLocations     = Map.union (worldLocations a) (worldLocations b)
-  , worldActiveEffects = mergeActiveEffects (worldActiveEffects a) (worldActiveEffects b)
-  , worldTags          = orMerge (worldTags a) (worldTags b)
-  , worldClock         = max (worldClock a) (worldClock b)
-  , worldLocationGraph = mergeLocationGraphs (worldLocationGraph a) (worldLocationGraph b)
-  , worldSeed          = worldSeed a
+  { worldCharacters      = Map.unionWith mergeChar (worldCharacters a) (worldCharacters b)
+  , worldGraph           = Map.unionWith (Map.unionWith mergeRel) (worldGraph a) (worldGraph b)
+  , worldLocations       = Map.union (worldLocations a) (worldLocations b)
+  , worldActiveEffects   = mergeActiveEffects (worldActiveEffects a) (worldActiveEffects b)
+  , worldTags            = orMerge (worldTags a) (worldTags b)
+  , worldClock           = max (worldClock a) (worldClock b)
+  , worldLocationGraph   = mergeLocationGraphs (worldLocationGraph a) (worldLocationGraph b)
+  , worldSeed            = worldSeed a
+  , worldLocationHistory = Map.union (worldLocationHistory a) (worldLocationHistory b)
+    -- Left-biased: local history wins, foreign history fills gaps.  Ordering
+    -- between logs is not meaningful here; downstream UI only reads prefixes.
+  , worldLocationVisits  = Map.unionWith (Map.unionWith (+)) (worldLocationVisits a) (worldLocationVisits b)
+    -- Visit counts sum; merges double-count if both sides saw the same arrival,
+    -- but that's a known consequence of snapshot merges (see the function's
+    -- haddock).  The log-replay path is authoritative for contested state.
   }
   where
     mergeChar ca cb      = ca { charTags = orMerge (charTags ca) (charTags cb) }

@@ -218,8 +218,9 @@ bearing (x1, y1) (x2, y2) =
 snapToCardinal :: Double -> String
 snapToCardinal deg =
   let labels = ["N","NE","E","SE","S","SW","W","NW"]
+      idx :: Int
       idx = round (deg / 45) `mod` 8
-  in labels !! idx
+  in fromMaybe "N" (lookup idx (zip [0..] labels))
 
 -- | Given the player's location, return adjacent locations with their cardinal
 -- label and bearing in degrees. Returns [] if coordinates are not populated.

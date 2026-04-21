@@ -6,6 +6,7 @@ module SDL.InputHandler
   , pollQuit
   , pollAnyKey
   , waitOrKey
+  , waitOrKeyChar
   , safeIndex
   ) where
 
@@ -87,6 +88,21 @@ waitOrKey ms = do
       SDL.KeyboardEvent kd
         | SDL.keyboardEventKeyMotion kd == SDL.Pressed -> pure True
       _ -> pure False  -- non-key event, leave the rest in the queue
+
+-- | Wait up to @ms@ milliseconds for a mapped keypress.  Returns
+-- @Just c@ if a character we care about was pressed, @Nothing@ on
+-- timeout or a non-key / unmapped event.  Used by the HUD reveal
+-- animation to accept an early input as a "skip + select" gesture.
+waitOrKeyChar :: Int -> IO (Maybe Char)
+waitOrKeyChar ms = do
+  mEvent <- SDL.waitEventTimeout (fromIntegral ms)
+  case mEvent of
+    Nothing    -> pure Nothing
+    Just event -> case SDL.eventPayload event of
+      SDL.KeyboardEvent kd
+        | SDL.keyboardEventKeyMotion kd == SDL.Pressed ->
+            pure (keycodeToChar (SDL.keysymKeycode (SDL.keyboardEventKeysym kd)))
+      _ -> pure Nothing
 
 -- | Map a single character to a 1-based index into the list.
 -- Returns Nothing for non-digit input, '0', or indices beyond the list length.

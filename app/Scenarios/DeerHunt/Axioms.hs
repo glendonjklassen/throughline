@@ -8,8 +8,9 @@ import           Engine.Author.Random        (rollCheck, rollChoice, rollD)
 import           Engine.CRDT.ORSet           (orToList)
 import           GameTypes
 import           Scenarios.DeerHunt.Constants
-import           Scenarios.DeerHunt.Locations
+import           Scenarios.DeerHunt.Generation (TerrainClass(..))
 import           Scenarios.DeerHunt.Probability
+import           Scenarios.DeerHunt.World      (HuntWorld(..), hwClass, hwLocsOfClass, hwNearestTruck)
 
 -- ---------------------------------------------------------------------------
 -- Shared predicate
@@ -25,17 +26,21 @@ huntOver world = hasTag world deerKilled
 -- Axiom list
 -- ---------------------------------------------------------------------------
 
-allAxioms :: CharId -> [Axiom]
-allAxioms you =
+-- | The full axiom set for a given hunt.  Each axiom closes over the
+-- 'HuntWorld' so it can consult the generated map's class lookups,
+-- truck locations, and region groupings without having to thread the
+-- world through as an argument on every call.
+allAxioms :: HuntWorld -> CharId -> [Axiom]
+allAxioms hw you =
   [ windAxiom
-  , deerMovementAxiom
-  , spookAxiom you
+  , deerMovementAxiom hw
+  , spookAxiom hw you
   , signPlacementAxiom you
   , signDiscoveryAxiom you
-  , deerPresenceAxiom you
+  , deerPresenceAxiom hw you
   , stillnessAxiom you
   , experienceAxiom you
-  , nightfallAxiom you
+  , nightfallAxiom hw you
   , tensionAxiom you
   , weatherNarrationAxiom weatherDesc
   ]
@@ -104,21 +109,21 @@ weatherStrengthBias world =
 -- Deer movement
 -- ---------------------------------------------------------------------------
 
--- | Each tick, the deer may move to an adjacent node.
--- Biased toward its time-of-day preferred zone.
--- Frozen once the hunt is over (killed, gone, or shot a hunter).
-deerMovementAxiom :: Axiom
-deerMovementAxiom = Axiom
+-- | Each tick, the deer may move to an adjacent node.  Biased toward
+-- its time-of-day preferred terrain class.  Frozen once the hunt is
+-- over (killed, gone, or shot a hunter).
+deerMovementAxiom :: HuntWorld -> Axiom
+deerMovementAxiom hw = Axiom
   { axiomId       = ScenarioAxiom "deerMovement"
   , axiomPriority = 1
   , axiomEvaluate = \world _actions _diff ->
       let frozen = huntOver world || hasTag world deerSpooked
       in if frozen then [] else
-           let current   = fromMaybe stubbleRows (charLocation deer world)
-               preferred = deerPreferredZone world
-               prefLocs  = zoneLocations preferred
-               neighbors = adjacentTo current
-               prefNeighbors = filter (\l -> locationZone l == preferred) neighbors
+           let current   = fromMaybe (hwDeerStartLoc hw) (charLocation deer world)
+               preferred = deerPreferredClass world
+               prefLocs  = hwLocsOfClass hw preferred
+               neighbors = neighborsOf (worldLocationGraph world) current
+               prefNeighbors = filter (\l -> hwClass hw l == preferred) neighbors
                -- Moving fast = closing the gap, deer less likely to drift.
                -- Careful approach = quiet, but gives the deer time to wander.
                moveChance | hasTag world movingFast = 0.15
@@ -135,12 +140,12 @@ deerMovementAxiom = Axiom
 -- Spook check
 -- ---------------------------------------------------------------------------
 
--- | When the player enters the deer's node (or vice versa), check for spook.
--- If spooked, the deer bolts to a different zone.
--- Terrain noise at the player's location and visibility at the deer's location
--- modify the base spook chance.
-spookAxiom :: CharId -> Axiom
-spookAxiom you = Axiom
+-- | When the player enters the deer's node (or vice versa), check for
+-- spook.  If spooked, the deer bolts to a different cover region.
+-- Terrain noise at the player's location and visibility at the deer's
+-- location modify the base spook chance.
+spookAxiom :: HuntWorld -> CharId -> Axiom
+spookAxiom hw you = Axiom
   { axiomId       = ScenarioAxiom "spook"
   , axiomPriority = 2
   , axiomEvaluate = \world _actions diff ->
@@ -158,7 +163,7 @@ spookAxiom you = Axiom
           baseChance  | sitting   = spookChanceSitting world you
                       | otherwise = spookChance world you
           terrainMod  = case (playerLoc, deerLoc) of
-            (Just pl, Just dl) -> terrainSpookModifier pl dl (not sitting) world
+            (Just pl, Just dl) -> terrainSpookModifier hw pl dl (not sitting) world
             _                  -> 0.0
           -- Wind modifier: scent-based detection
           windAngle'  = getWindAngle world
@@ -172,11 +177,14 @@ spookAxiom you = Axiom
           stillnessMod = stillnessSpookModifier (getStillness you world)
           finalChance = max 0.02 (baseChance * windMult + terrainMod + stillnessMod)
           spooked     = rollCheck world saltSpook finalChance
-          -- Where does the deer bolt to?
-          currentZone = maybe BushEdge locationZone deerLoc
-          otherZones  = filter (\z -> z /= currentZone && not (isRoadZone z)) allZones
-          boltZone    = rollChoice world (saltSpook + 20) otherZones
-          boltDest    = rollChoice world (saltSpook + 30) (zoneLocations boltZone)
+          -- Where does the deer bolt to?  Pick a different cover class
+          -- from the current one.  Falls back to any cover location if
+          -- the preferred class is empty.
+          currentCls = maybe CBush (hwClass hw) deerLoc
+          coverClasses = filter (/= currentCls) [CBush, CRidge, CCreek]
+          boltPool = concatMap (hwLocsOfClass hw) coverClasses
+          boltDest | not (null boltPool) = rollChoice world (saltSpook + 30) boltPool
+                   | otherwise = fromMaybe (hwDeerStartLoc hw) deerLoc
       in if not (huntOver world || hasTag world deerSpooked) && sameNode && moved
          then if spooked
               then [ immediate (Narrate "A crash of brush. White flag up. The buck bolts through the trees and is gone.")
@@ -195,10 +203,13 @@ spookAxiom you = Axiom
 -- Deer presence tracking
 -- ---------------------------------------------------------------------------
 
--- | Maintains DeerSpotted and FreshSign tags based on player/deer proximity.
--- Clears DeerSpooked after one tick so the deer can be found again.
-deerPresenceAxiom :: CharId -> Axiom
-deerPresenceAxiom you = Axiom
+-- | Maintains DeerSpotted and FreshSign tags based on player/deer
+-- proximity.  "Same region" check now keys off 'hwClass' rather than
+-- specific zone identity — deer and player are "nearby" when they're
+-- in the same terrain class of the section.  Clears DeerSpooked after
+-- one tick so the deer can be found again.
+deerPresenceAxiom :: HuntWorld -> CharId -> Axiom
+deerPresenceAxiom hw you = Axiom
   { axiomId       = ScenarioAxiom "deerPresence"
   , axiomPriority = 3
   , axiomEvaluate = \world _actions _diff ->
@@ -208,13 +219,13 @@ deerPresenceAxiom you = Axiom
           sameNode  = case (playerLoc, deerLoc) of
             (Just pl, Just dl) -> pl == dl
             _                  -> False
-          sameZone  = case (playerLoc, deerLoc) of
-            (Just pl, Just dl) -> locationZone pl == locationZone dl
+          sameClass = case (playerLoc, deerLoc) of
+            (Just pl, Just dl) -> hwClass hw pl == hwClass hw dl
             _                  -> False
           clearSpotted = [immediate (RemoveWorldTag deerSpotted) | hasTag world deerSpotted && not sameNode && not over]
-          clearSign    = [immediate (RemoveWorldTag freshSign) | hasTag world freshSign && not sameZone && not over]
+          clearSign    = [immediate (RemoveWorldTag freshSign) | hasTag world freshSign && not sameClass && not over]
           clearSpooked = [immediate (RemoveWorldTag deerSpooked) | hasTag world deerSpooked]
-          addSign      = [immediate (AddWorldTag freshSign) | sameZone && not (hasTag world freshSign) && not over]
+          addSign      = [immediate (AddWorldTag freshSign) | sameClass && not (hasTag world freshSign) && not over]
       in if over then clearSpotted ++ clearSign
          else clearSpotted ++ clearSign ++ clearSpooked ++ addSign
   }
@@ -380,15 +391,16 @@ experienceAxiom you = Axiom
 -- Day/night cycle
 -- ---------------------------------------------------------------------------
 
--- | At 7 PM, force the player back to their truck.
-nightfallAxiom :: CharId -> Axiom
-nightfallAxiom you = Axiom
+-- | At 7 PM, force the player back to their truck.  Picks the nearest
+-- truck by Euclidean distance in the generated map's coord space.
+nightfallAxiom :: HuntWorld -> CharId -> Axiom
+nightfallAxiom hw you = Axiom
   { axiomId       = ScenarioAxiom "nightfall"
   , axiomPriority = 2
   , axiomEvaluate = \world _actions diff ->
       let evening  = timeTag 19 `elem` diffWorldTagsAdded diff
-          startLoc = fromMaybe truckNorth (charLocation you world)
-          truck    = nearestTruck startLoc
+          startLoc = fromMaybe (hwStartLoc hw) (charLocation you world)
+          truck    = hwNearestTruck hw startLoc
       in if evening && not (huntOver world)
          then [ immediate (Narrate "The light is going. Legal shooting is over. You mark your spot mentally and head back to the road.")
               , immediate (SetLocation you truck)
@@ -421,21 +433,6 @@ dawnRule you = AxiomRule
                    , immediate (RemoveTag you sleepingTag)
                    ]
   }
-
--- | Nearest truck based on current zone.
-nearestTruck :: Location -> Location
-nearestTruck loc = case locationZone loc of
-  NorthRoad    -> truckNorth
-  NorthField   -> truckNorth
-  BushEdge     -> truckNorth    -- came in from north
-  OakRidge     -> truckNorth
-  WestRoad     -> truckWest
-  SouthField   -> truckWest     -- closest to west
-  PoplarStand  -> truckWest
-  WillowBottom -> truckSouth
-  SouthRoad    -> truckSouth
-  FieldBreak   -> truckNorth    -- belt between the fields, closest to north road
-  CreekBed     -> truckSouth    -- drains down toward south
 
 -- ---------------------------------------------------------------------------
 -- Tension
