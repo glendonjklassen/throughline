@@ -143,7 +143,7 @@ instance Arbitrary LogEntry where
 -- Use `sized` to bound depth; at size 0 only the leaf constructors fire.
 
 instance Arbitrary Region where
-  arbitrary = Region <$> elements ["NorthField", "SouthField", "BushEdge", "OakRidge"]
+  arbitrary = Region <$> elements ["North Field", "South Field", "East Bush", "West Ridge"]
 
 instance Arbitrary LocationGraph where
   arbitrary = pure emptyLocationGraph
