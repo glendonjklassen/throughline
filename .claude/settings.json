@@ -1,5 +1,13 @@
 {
   "attribution": {
     "commit": ""
+  },
+  "permissions": {
+    "allow": [
+      "Bash(stack test *)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
+    ]
   }
 }

@@ -37,6 +37,11 @@ data ScenarioDisplay = ScenarioDisplay
   , sdZoneTintFor     :: GameWorld -> Location -> Maybe SDL.Palette.Color
     -- ^ Optional halo color for a neighbor label — e.g. the biome it
     -- leads into.  Returning 'Nothing' leaves the label untinted.
+  , sdSensoryFor      :: GameWorld -> Location -> Int -> Maybe String
+    -- ^ Optional fleeting one-liner rendered under a neighbor label
+    -- during the incremental reveal animation.  The 'Int' is a
+    -- per-arrival salt so repeated arrivals read differently.
+    -- Returning 'Nothing' suppresses the sensory line.
   }
 
 -- | Sensible defaults: no end screen, no status line, default layout,
@@ -48,4 +53,5 @@ defaultDisplay = ScenarioDisplay
   , sdLayout          = defaultLayout
   , sdLocationSparkle = \_ _ _ -> 0
   , sdZoneTintFor     = \_ _   -> Nothing
+  , sdSensoryFor      = \_ _ _ -> Nothing
   }

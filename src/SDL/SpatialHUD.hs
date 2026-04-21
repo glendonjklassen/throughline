@@ -10,10 +10,12 @@ module SDL.SpatialHUD
   , TrailMark(..)
   , layoutHUD
   , terrainSprites
+  , terrainSpriteScatter
+  , SpritePlacement(..)
   , trailMarks
   ) where
 
-import           Data.List       (find)
+import           Data.List       (find, sortOn)
 import qualified Data.Map.Strict as Map
 import           Data.Maybe      (catMaybes)
 
@@ -38,6 +40,7 @@ data HUDCell = HUDCell
   , hudTarget :: Maybe Location  -- ^ target location for movement cells, Nothing for other actions
   , hudTint   :: Maybe Color     -- ^ optional foreground color override
   , hudHalo   :: Maybe Color     -- ^ optional background tint (alpha-respected)
+  , hudDist   :: Double          -- ^ graph distance from player (for reveal order)
   } deriving (Show)
 
 -- | A breadcrumb dropped at a neighbor HUD cell, marking a location the
@@ -134,7 +137,7 @@ spatialLayout actions _playerLoc (px, py) lg totalCols =
 
       -- Spatial box dimensions — use most of the screen width
       boxW = totalCols - 8
-      boxH = 9                        -- enough vertical spread
+      boxH = 11                       -- enough vertical spread
 
       -- Center of the box (player position)
       centerCol = boxW `div` 2
@@ -144,8 +147,16 @@ spatialLayout actions _playerLoc (px, py) lg totalCols =
       dists = [ sqrt (dx * dx + dy * dy) | (_, _, dx, dy) <- movements ]
       maxDist = if null dists then 1.0 else max 0.01 (maximum dists)
 
+      -- If the generator dropped several neighbours in roughly the
+      -- same compass direction they'd pile on top of each other.
+      -- Redistribute angles so every cell sits at least
+      -- @minAngularGap@ radians from its neighbour on the angle
+      -- circle — preserves rough direction while guaranteeing
+      -- readable spread.
+      spreadMovements = angularSpread movements
+
       -- Map each movement action to a grid cell, scaled relative to max distance
-      cells = map (placeMovement boxW boxH centerCol centerRow maxDist) movements
+      cells = map (placeMovement boxW boxH centerCol centerRow maxDist) spreadMovements
 
       -- Resolve overlaps: nudge cells that collide with each other or the center
       resolved = resolveOverlaps centerCol centerRow boxW boxH cells
@@ -157,6 +168,46 @@ spatialLayout actions _playerLoc (px, py) lg totalCols =
     , shBoxWidth      = boxW
     , shBoxHeight     = boxH
     }
+
+-- | Redistribute movement angles so no two cells land in the same
+-- compass wedge.  The generator can easily drop several neighbours
+-- roughly north of the player, which would pile their labels on top
+-- of each other if we used the graph angle unmodified.
+--
+-- Strategy: sort cells by current angle, walk them once, and if any
+-- pair is closer than @minAngularGap@ radians, rotate the later one
+-- forward by the remaining gap.  We preserve ordering (so "roughly
+-- north" neighbours still cluster northward) while guaranteeing
+-- visual separation.  The radius (distance) is left intact so near/
+-- far still reads correctly after the fan-out.
+angularSpread :: [(Int, AnyAction, Double, Double)]
+              -> [(Int, AnyAction, Double, Double)]
+angularSpread [] = []
+angularSpread movements =
+  let -- We need at least 8 distinct angular buckets for up to 8
+      -- cells.  Anything tighter than this pushes labels into
+      -- re-collision under the ~9-row grid.
+      minGap = 2 * pi / 8    -- 45°
+      -- Tag each movement with (angle, dist) for convenience
+      tagged = [ (atan2 dx dy, sqrt (dx*dx + dy*dy), n, act)
+               | (n, act, dx, dy) <- movements ]
+      -- Sort by angle so we can walk it and enforce the gap
+      sorted = sortOn (\(a, _, _, _) -> a) tagged
+      spread []     = []
+      spread (x:xs) = x : go x xs
+      go _prev [] = []
+      go (pa, _, _, _) ((a, d, n, act) : rest) =
+        let diff = a - pa
+            adjusted
+              | diff < minGap = pa + minGap
+              | otherwise     = a
+            entry = (adjusted, d, n, act)
+        in entry : go entry rest
+      spread'  = spread sorted
+      -- Rebuild into (n, act, dx, dy) using the adjusted angles but
+      -- the original distances.  dx = d*sin(a), dy = d*cos(a) so
+      -- atan2(dx, dy) = a — matches placeMovement's angle convention.
+  in [ (n, act, d * sin a, d * cos a) | (a, d, n, act) <- spread' ]
 
 -- | Place a movement action in the spatial grid based on its relative direction.
 -- Distance is scaled relative to the farthest neighbor so closer spots are
@@ -172,10 +223,13 @@ placeMovement boxW boxH centerCol centerRow maxDist (n, act, dx, dy) =
       maxRowDisp = centerRow - 1
       -- Proportional distance: 0.0 (here) to 1.0 (farthest neighbor)
       dist = sqrt (dx * dx + dy * dy)
-      -- Scale with a minimum of 35% so nothing sits right on center,
-      -- but close vs far is clearly different
+      -- Scale so even the nearest neighbour sits well clear of the
+      -- player marker: 0.55 floor pushes every cell out at least a
+      -- little over half the available displacement from center.
+      -- The 1.0 ceiling (0.55 + 0.45) means the farthest still
+      -- reaches the edge.
       proportion = if dist < 0.001 then 0 else dist / maxDist
-      scale = 0.35 + 0.65 * proportion
+      scale = 0.55 + 0.45 * proportion
       angle = atan2 dx dy  -- angle from north, clockwise
       -- Convert to grid displacement
       colDisp = round (scale * fromIntegral maxColDisp * sin angle)
@@ -192,6 +246,7 @@ placeMovement boxW boxH centerCol centerRow maxDist (n, act, dx, dy) =
        , hudTarget = target
        , hudTint   = Nothing
        , hudHalo   = Nothing
+       , hudDist   = dist
        }
 
 -- | Push cells apart when they'd overlap each other or the player marker.
@@ -204,23 +259,36 @@ resolveOverlaps cx cy bw bh cells = go [] cells
       let cell' = nudge placed cell
       in go (placed ++ [cell']) rest
 
-    -- Check if two cells overlap (their labels would collide on the same row)
+    -- Check if two cells overlap.  Labels on the same row obviously
+    -- collide if their column ranges overlap; labels on adjacent rows
+    -- can also visually collide once the pixel nudge ±cellHeight/4 is
+    -- applied (the text from row N leaks into row N+1's upper
+    -- descenders space).  Treating adjacent rows as collisions keeps
+    -- cells at least two rows apart when their columns would overlap.
     overlaps :: HUDCell -> HUDCell -> Bool
     overlaps a b =
-      hudRow a == hudRow b &&
-      let aEnd = hudCol a + length (hudLabel a) + 1
-          bEnd = hudCol b + length (hudLabel b) + 1
-      in not (aEnd <= hudCol b || bEnd <= hudCol a)
+      let rowsClose = abs (hudRow a - hudRow b) <= 1
+          pad      = 2   -- extra columns of breathing room
+          aEnd = hudCol a + length (hudLabel a) + pad
+          bEnd = hudCol b + length (hudLabel b) + pad
+          colsOverlap = not (aEnd <= hudCol b || bEnd <= hudCol a)
+      in rowsClose && colsOverlap
 
-    -- Check if a cell overlaps the player marker "@ You" at center
+    -- Check if a cell overlaps the player marker "You" at center,
+    -- with extra padding on either side so pixel nudges can't push a
+    -- label into the marker cell either.  Also clears the rows just
+    -- above and below so labels on the center row's neighbours don't
+    -- graze the marker either.
     overlapsCenter :: HUDCell -> Bool
     overlapsCenter cell =
-      hudRow cell == cy &&
-      let cEnd = hudCol cell + length (hudLabel cell) + 1
-          markerLen = 5  -- "@ You"
-          markerStart = cx - markerLen `div` 2 - 1
-          markerEnd   = cx + markerLen `div` 2 + 2
-      in not (cEnd <= markerStart || hudCol cell >= markerEnd)
+      let cEnd        = hudCol cell + length (hudLabel cell) + 1
+          markerLen   = 3  -- "You"
+          markerPad   = 3  -- breathing room on each side (in cells)
+          markerStart = cx - markerLen `div` 2 - markerPad
+          markerEnd   = cx + markerLen `div` 2 + markerPad
+          horizontalHit = not (cEnd <= markerStart || hudCol cell >= markerEnd)
+          rowHit       = abs (hudRow cell - cy) <= 0
+      in rowHit && horizontalHit
 
     -- Try to nudge a cell to avoid overlapping placed cells and center
     nudge :: [HUDCell] -> HUDCell -> HUDCell
@@ -268,6 +336,108 @@ terrainSprites you world boxW boxH =
             Nothing -> []
             Just r  -> scatter seed r interior boxW boxH
       in map (uncolor separatorColor 1.0) raw
+
+-- | A sprite placement in absolute pixel coordinates.  The sprite's
+-- identity is kept as a @String@ (its class name) so the renderer can
+-- look up the actual pixel layout — keeping this module free of
+-- 'SDL.Sprites' and the SDL import chain.
+data SpritePlacement = SpritePlacement
+  { spX      :: !Int      -- ^ pixel x (top-left)
+  , spY      :: !Int      -- ^ pixel y (top-left)
+  , spClass  :: !String   -- ^ sprite-class key (@"Field"@, @"Bush"@, …)
+  , spIndex  :: !Int      -- ^ index into the class's sprite vocab
+  } deriving (Show)
+
+-- | Seeded pixel-coord scatter for the player's current location.
+-- Returns sprite placements at absolute pixel positions within the
+-- spatial panel.  @exclusions@ is a list of pixel rects (x, y, w, h)
+-- to avoid — used to keep scatter from overlapping labels.
+--
+-- The sprite pool is keyed on the last word of the region's name
+-- ("Field", "Road", etc.) — same convention the narration pool uses.
+terrainSpriteScatter
+  :: CharId
+  -> GameWorld
+  -> (Int, Int)            -- ^ panel pixel origin (left, top)
+  -> (Int, Int)            -- ^ panel pixel size (w, h)
+  -> [(Int, Int, Int, Int)] -- ^ exclusion rects in pixel space (x, y, w, h)
+  -> [SpritePlacement]
+terrainSpriteScatter you world (panelX, panelY) (panelW, panelH) exclusions =
+  case Map.lookup you (worldLocations world) of
+    Nothing  -> []
+    Just loc ->
+      let lg       = worldLocationGraph world
+          region   = Map.lookup loc (lgRegions lg)
+          seed     = locHash loc
+          interior = zoneInteriorness lg loc region
+          cls      = case region of
+            Just (Region n) -> lastWord n
+            Nothing         -> ""
+          -- Density: sparse by default — roughly one sprite per 80×80
+          -- pixel area.  Interiorness modulates so a deep-field
+          -- location still feels more populated than a field edge,
+          -- but nothing gets crowded.
+          baseCount = (panelW * panelH) `div` 6400
+          target    = max 4 (scaleCount interior baseCount)
+          -- Sprites are ~12-18 px at scale=3.  Keep ~40 px of
+          -- minimum spacing between them so the background reads as
+          -- texture, not noise.
+          minGap    = 40
+          positions = spaced minGap (4 * target) seed panelW panelH
+          keep (x, y) = not (inAnyRect (x + panelX, y + panelY) exclusions)
+          picks = zipWith
+                    (\(x, y) k -> SpritePlacement
+                       { spX     = x + panelX
+                       , spY     = y + panelY
+                       , spClass = cls
+                       , spIndex = k
+                       })
+                    (filter keep positions)
+                    (map (\i -> (i + seed) `mod` 32) [0 :: Int ..])
+      in take target picks
+
+-- | Extract the last whitespace-separated word of a region name.  Used
+-- to key the sprite pool — @"North Field"@ → @"Field"@.
+lastWord :: String -> String
+lastWord s = case reverse (words s) of
+  (w:_) -> w
+  []    -> ""
+
+-- | Is a point inside any of the given rects?
+inAnyRect :: (Int, Int) -> [(Int, Int, Int, Int)] -> Bool
+inAnyRect (px, py) = any (\(x, y, w, h) ->
+  px >= x && px < x + w && py >= y && py < y + h)
+
+-- | Deterministic pseudo-random pixel positions within a panel.  Same
+-- LCG scheme as the old grid-coord scatter, just producing pixel
+-- coords directly.
+pixelPositions :: Int -> Int -> Int -> [(Int, Int)]
+pixelPositions s panelW panelH = go s
+  where
+    go k =
+      let k1 = k * 1103515245 + 12345
+          k2 = k1 * 1103515245 + 12345
+          px = abs (k1 `div` 65536) `mod` max 1 panelW
+          py = abs (k2 `div` 65536) `mod` max 1 panelH
+      in (px, py) : go k2
+
+-- | Take up to @n@ positions from the seeded stream, rejecting any
+-- candidate that's within @gap@ Chebyshev distance of an already-kept
+-- position.  Gives a crude Poisson-disk feel for free — sprites won't
+-- clump into a busy blob the way a pure random scatter can.  We pull
+-- from the stream generously (~4× target) so rejections don't starve
+-- the final list.
+spaced :: Int -> Int -> Int -> Int -> Int -> [(Int, Int)]
+spaced gap n seed panelW panelH =
+  go n (take (max 1 (4 * n)) (pixelPositions (abs seed + 1) panelW panelH)) []
+  where
+    go 0 _      acc = reverse acc
+    go _ []     acc = reverse acc
+    go k (p:ps) acc
+      | any (tooClose p) acc = go k ps acc
+      | otherwise            = go (k - 1) ps (p : acc)
+    tooClose (x1, y1) (x2, y2) =
+      abs (x1 - x2) < gap && abs (y1 - y2) < gap
 
 -- | How deep inside its zone a location sits.  1.0 = at the zone
 -- centroid, 0.0 = at the far edge.  Returns 1.0 for zones with only a

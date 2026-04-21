@@ -101,13 +101,16 @@ tests:
     - Scenarios.DeerHunt.Axioms
     - Scenarios.DeerHunt.Constants
     - Scenarios.DeerHunt.Generation
-    - Scenarios.DeerHunt.Locations
+    - Scenarios.DeerHunt.Narration
     - Scenarios.DeerHunt.Probability
     - Scenarios.DeerHunt.Section
+    - Scenarios.DeerHunt.Terrain
+    - Scenarios.DeerHunt.World
     - Scenarios.DeerHuntSpec
     - Scenarios.DeerHuntPlaythrough
     - Scenarios.DeerHuntSyncSpec
     - Scenarios.DeerHuntGenerationSpec
+    - Scenarios.DeerHuntTestFixtures
     - Scenarios.DinerSpec
     - Scenarios.DinerSyncSpec
     - Scenarios.DinerInterleaveSpec
@@ -177,6 +180,8 @@ benchmarks:
     - Scenarios.DeerHunt.Axioms
     - Scenarios.DeerHunt.Constants
     - Scenarios.DeerHunt.Generation
-    - Scenarios.DeerHunt.Locations
+    - Scenarios.DeerHunt.Narration
     - Scenarios.DeerHunt.Probability
     - Scenarios.DeerHunt.Section
+    - Scenarios.DeerHunt.Terrain
+    - Scenarios.DeerHunt.World

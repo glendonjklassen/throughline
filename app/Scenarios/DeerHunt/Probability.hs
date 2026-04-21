@@ -25,8 +25,9 @@ import           Engine.Core.Conditions    (getCharStat)
 import           Engine.Core.World         (getWeather)
 import           GameTypes
 import           Scenarios.DeerHunt.Constants (movingFast, saltSpook, saltShot, saltFriendlyFire)
-import           Scenarios.DeerHunt.Locations (TerrainNoise(..), TerrainVisibility(..),
-                                               terrainNoise, terrainVisibility)
+import           Scenarios.DeerHunt.Terrain    (TerrainNoise(..), TerrainVisibility(..),
+                                                 classNoise, classVisibility)
+import           Scenarios.DeerHunt.World      (HuntWorld, hwClass)
 
 -- ---------------------------------------------------------------------------
 -- Experience & probability helpers
@@ -85,9 +86,9 @@ isFriendlyFire world = rollCheck world saltFriendlyFire friendlyFireChance
 
 -- | Weather-adjusted noise level. Snow and wind muffle sound (one step quieter).
 -- Frozen ground in clear cold makes dense bush slightly louder.
-effectiveNoise :: Location -> GameWorld -> TerrainNoise
-effectiveNoise loc world =
-  let base = terrainNoise loc
+effectiveNoise :: HuntWorld -> Location -> GameWorld -> TerrainNoise
+effectiveNoise hw loc world =
+  let base = classNoise (hwClass hw loc)
       weather = getWeather world
   in case weather of
        Just (WeatherDesc "Light Snow") -> quieter base
@@ -102,14 +103,14 @@ effectiveNoise loc world =
 -- Noise at the player's location (positive = louder = easier to detect).
 -- Visibility at the deer's location (open = deer sees you coming).
 -- Only applies noise when the player is moving (not sitting).
-terrainSpookModifier :: Location -> Location -> Bool -> GameWorld -> Double
-terrainSpookModifier playerLoc deerLoc isMoving world =
+terrainSpookModifier :: HuntWorld -> Location -> Location -> Bool -> GameWorld -> Double
+terrainSpookModifier hw playerLoc deerLoc isMoving world =
   let noiseAdd | not isMoving = 0.0
-               | otherwise = case effectiveNoise playerLoc world of
+               | otherwise = case effectiveNoise hw playerLoc world of
                    Loud     ->  0.15
                    Moderate ->  0.0
                    Quiet    -> -0.05
-      visAdd = case terrainVisibility deerLoc of
+      visAdd = case classVisibility (hwClass hw deerLoc) of
                  Open    ->  0.10
                  Partial ->  0.0
                  Dense   -> -0.10

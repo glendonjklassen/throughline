@@ -1,33 +1,46 @@
 module Scenarios.DeerHunt (deerHunt, deerHuntDisplay) where
 
 import qualified Data.Map.Strict as Map
+import qualified Data.Set        as Set
 
 import           Engine.Core.Conditions (checkCondition)
 import           SDL.Layout
 import           SDL.Palette  (Color, zoneTintDefault)
 import           SDL.Text
 import           GameTypes
-import           Scenarios.DeerHunt.Actions   (allActions)
-import           Scenarios.DeerHunt.Axioms    (allAxioms, dawnRule,
-                                               hunterArrivalMergeAxiom)
+import           Scenarios.DeerHunt.Actions     (allActions)
+import           Scenarios.DeerHunt.Axioms      (allAxioms, dawnRule,
+                                                 hunterArrivalMergeAxiom)
 import           Scenarios.DeerHunt.Constants
-import           Scenarios.DeerHunt.Locations  (adjacentTo, truckNorth)
+import           Scenarios.DeerHunt.Generation  (TerrainClass(..))
+import           Scenarios.DeerHunt.Narration   (sensoryFragment)
 import           Scenarios.DeerHunt.Probability (experience)
+import           Scenarios.DeerHunt.World       (PositionHint(..), huntWorld)
 
+-- | Build a full DeerHunt scenario from a seed.  The 'HuntWorld' is
+-- constructed once here and captured by every axiom, action, and
+-- display hook that needs to consult the generated map.
 deerHunt :: Int -> CharId -> Scenario
-deerHunt seed you = Scenario
-  { scenarioName         = "Deer Hunt"
-  , scenarioInitial      = initialWorld seed you truckNorth
-  , scenarioActions      = allActions you
-  , scenarioAxioms       = allAxioms you
-  , scenarioMergeAxioms  = [hunterArrivalMergeAxiom you]
-  , scenarioRules        = [dawnRule you]
-  , scenarioMergeRules   = []
-  , scenarioTerminal     = Any [HasWorldTag deerKilled, HasWorldTag hunterShot, HasWorldTag deerGone]
-  , scenarioDebugDefault = Off
-  , scenarioPlayerCharId = you
-  }
+deerHunt seed you =
+  let hw = huntWorld seed
+  in Scenario
+       { scenarioName         = "Deer Hunt"
+       , scenarioInitial      = initialWorld hw you
+       , scenarioActions      = allActions hw you
+       , scenarioAxioms       = allAxioms hw you
+       , scenarioMergeAxioms  = [hunterArrivalMergeAxiom you]
+       , scenarioRules        = [dawnRule you]
+       , scenarioMergeRules   = []
+       , scenarioTerminal     = Any [HasWorldTag deerKilled, HasWorldTag hunterShot, HasWorldTag deerGone]
+       , scenarioDebugDefault = Off
+       , scenarioPlayerCharId = you
+       }
 
+-- | The scenario's display hooks.  Unlike 'deerHunt' these can't close
+-- over a 'HuntWorld' built from a seed because the SDL runtime doesn't
+-- pass a seed in — the 'GameWorld' carries what we need instead.  The
+-- display hooks consult 'worldLocationGraph' directly for region
+-- lookups and 'worldSeed' plus adjacency math for sparkle propagation.
 deerHuntDisplay :: ScenarioDisplay
 deerHuntDisplay = ScenarioDisplay
   { sdEndScreen       = endScreen
@@ -35,7 +48,59 @@ deerHuntDisplay = ScenarioDisplay
   , sdLayout          = defaultLayout
   , sdLocationSparkle = locationSparkle
   , sdZoneTintFor     = deerHuntZoneTint
+  , sdSensoryFor      = deerHuntSensory
   }
+
+-- | Pick a fleeting sensory fragment for a neighbor label during the
+-- incremental reveal.  Uses the location's terrain class plus an
+-- Interior/Edge/Bridge approximation derived from whether any of its
+-- graph neighbours cross a class boundary.
+deerHuntSensory :: GameWorld -> Location -> Int -> Maybe String
+deerHuntSensory world loc salt =
+  case Map.lookup loc (lgRegions (worldLocationGraph world)) of
+    Just (Region name) ->
+      let cls  = regionClassHint name
+          hint = positionHintFor world loc
+      in Just (sensoryFragment cls hint salt)
+    Nothing -> Nothing
+
+-- | Approximate 'TerrainClass' from a generated region name's last
+-- word.  The generator always tags regions with their class in the
+-- name (e.g. @"North Field"@, @"East Bush"@).
+regionClassHint :: String -> TerrainClass
+regionClassHint name = case lastWord name of
+  "Field" -> CField
+  "Bush"  -> CBush
+  "Ridge" -> CRidge
+  "Creek" -> CCreek
+  "Road"  -> CRoad
+  _       -> CEmpty
+  where
+    lastWord s = case reverse (words s) of
+      (w:_) -> w
+      []    -> ""
+
+-- | Approximate 'PositionHint' from the world's 'LocationGraph'
+-- without pulling in a 'HuntWorld'.  A location is 'Bridge' if any
+-- neighbour crosses a class boundary, 'Edge' if any 2-hop neighbour
+-- does, otherwise 'Interior'.  Mirrors the logic in
+-- 'Scenarios.DeerHunt.World.computePositionHints' but scoped to one
+-- location at a time for use from the display hook.
+positionHintFor :: GameWorld -> Location -> PositionHint
+positionHintFor world loc =
+  let lg     = worldLocationGraph world
+      regs   = lgRegions lg
+      myReg  = Map.lookup loc regs
+      pairs  = Set.toList (lgEdges lg)
+      ns l   = [ b | (a, b) <- pairs, a == l ]
+            ++ [ a | (a, b) <- pairs, b == l ]
+      cross l = any (\n -> Map.lookup n regs /= Map.lookup l regs) (ns l)
+      isBridge = cross loc
+      isEdge   = any cross (ns loc)
+  in case (myReg, isBridge, isEdge) of
+       (_, True, _) -> Bridge
+       (_, _, True) -> Edge
+       _            -> Interior
 
 -- | Tint a neighbor label by the biome it leads into.  Looks up the
 -- destination's region and hands off to the palette's zone-tint table.
@@ -49,22 +114,6 @@ deerHuntZoneTint world loc =
 
 -- ---------------------------------------------------------------------------
 -- Shiny-sense sparkle
---
--- For each location the player could move to, produce a sparkle level
--- 0-3 hinting at whether deer activity is likely there.  Signals used:
---
---   * Ground truth the player can *see*: if the deer is actually at
---     that location and the player is co-located, the sparkle is
---     capped — but in practice the action won't even appear as a
---     move target.  So we leave this as a weak seasoning.
---   * Player-discovered signs at that location — the main signal.
---     More types and rarer types raise the level.
---   * Adjacency echo: if a neighbour has discovered signs, bleed a
---     small faint hint through.
---   * Noise: low Understanding makes the sparkle unreliable — each
---     tick introduces false positives on a handful of locations and
---     may suppress a real one.  The noise is stable within a tick
---     (seeded by the world clock + location) so it doesn't strobe.
 -- ---------------------------------------------------------------------------
 
 locationSparkle :: GameWorld -> CharId -> Location -> Int
@@ -72,7 +121,7 @@ locationSparkle world you loc =
   let exp'     = experience you world
       directEv = discoveredEvidence world loc
       adjEv    = maximum (0 : [ discoveredEvidence world n
-                              | n <- adjacentTo loc ])
+                              | n <- neighborsFromGraph world loc ])
       expTier :: Int
       expTier
         | exp' <= 2 = 0
@@ -92,18 +141,23 @@ locationSparkle world you loc =
         | otherwise = noise
   in max 0 (min 3 signal)
   where
-    -- Deterministic per-tick noise for a location, keyed by name +
-    -- tick so it shifts every tick but never strobes within one.
     locationNoise w (Location name) tier =
       let tick = lcTick (worldClock w)
           salt = foldl (\acc c -> acc * 131 + fromEnum c) 7 name
           r    = (tick * 1103515245 + salt) `mod` 1000
-          -- Thresholds: tier 0 = 10%, tier 1 = 6%, tier 2 = 3%
           thresh = case tier of
             0 -> 100
             1 -> 60
             _ -> 30
       in if r < thresh then 1 else 0
+
+-- | Neighbor locations as stored in the world's 'LocationGraph'.  Used
+-- by the sparkle's adjacency-bleed heuristic.
+neighborsFromGraph :: GameWorld -> Location -> [Location]
+neighborsFromGraph world loc =
+  let pairs = Set.toList (lgEdges (worldLocationGraph world))
+  in [ b | (a, b) <- pairs, a == loc ]
+     ++ [ a | (a, b) <- pairs, b == loc ]
 
 endScreen :: GameWorld -> [String]
 endScreen w

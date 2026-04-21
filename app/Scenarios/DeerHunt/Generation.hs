@@ -380,7 +380,12 @@ placeInZone seed density classMap zid cells =
       cls     = Map.findWithDefault CField zid classMap
       chosen  = pickSpaced minSpacing n seeds cells []
       vocab   = locationVocab cls
-      named   = zipWith (\i c -> (c, vocab !! (i `mod` length vocab)))
+      -- Offset the vocab starting point per (seed, zone) so two zones
+      -- of the same class don't both open with the same word.  With
+      -- 20+-deep vocabs and zones of ~5-8 locations, this keeps the
+      -- generated names unique across the map without any suffixing.
+      vocabOffset = (seed * 17 + zid * 31) `mod` length vocab
+      named   = zipWith (\i c -> (c, vocab !! ((i + vocabOffset) `mod` length vocab)))
                         [0..] chosen
   in named
   where
@@ -413,39 +418,55 @@ zoneSeedStream :: Int -> [Int]
 zoneSeedStream s0 = iterate step (abs s0 + 1)
   where step s = (s * 1103515245 + 12345) `mod` 2147483647
 
--- | Per-class vocabulary for naming locations.  Picked round-robin per
--- zone; with minSpacing keeping placements from clumping, collisions
--- between names inside a single zone are rare.  We append a numeric
--- suffix when we'd otherwise emit a duplicate.
+-- | Per-class vocabulary for naming locations.  Each list is deep
+-- enough that a full hunt (~50 locations across 6-10 zones) never
+-- exhausts any single class — ensuring every location ends up with a
+-- clean unadorned name, no numeric suffixes.  Names are picked
+-- deterministically from a seeded permutation per generation run; see
+-- 'pickVocabNames'.
 locationVocab :: TerrainClass -> [String]
 locationVocab cls = case cls of
   CField ->
     [ "Stubble Rows", "Hay Bale", "Drainage Ditch", "Corn Strip"
-    , "Fence Line", "Slough Edge", "Sunflower Stubble", "Field Edge" ]
+    , "Fence Line", "Slough Edge", "Sunflower Stubble", "Field Edge"
+    , "Stubble Flat", "Broken Rows", "Wheat Husks", "Canola Scatter"
+    , "Flax Stubble", "Oat Patch", "Wire Corner", "Low Spot"
+    , "Combine Tracks", "Windrow", "Stone Pile", "Bale Line"
+    , "Swale", "Burnt Patch", "Fallow Strip", "Seed Drill Line"
+    , "Shelterbelt Edge", "Culvert Mouth", "Reedy Dip", "Cut Stalks"
+    ]
   CBush ->
     [ "Thin Poplars", "Brush Pile", "Game Trail", "Old Fence"
-    , "Clearing", "Deadfall", "Stump Field", "Hazel Clump" ]
+    , "Clearing", "Deadfall", "Stump Field", "Hazel Clump"
+    , "Birch Stand", "Willow Tangle", "Dogwood", "Ash Grove"
+    , "Hawthorn Thicket", "Windfall", "Dense Understory", "Buckbrush"
+    , "Chokecherry", "Saskatoon Patch", "Pin Cherry", "Cat Briar"
+    , "Thimbleberry", "Spruce Pocket", "Elder Stand", "Sedge Fringe"
+    , "Fern Gully", "Moss Floor"
+    ]
   CRidge ->
     [ "Ridge Top", "Oak Thicket", "Scrape Line", "Mossy Hollow"
-    , "Blowdown", "Deer Trail", "Acorn Ground", "Rock Outcrop" ]
+    , "Blowdown", "Deer Trail", "Acorn Ground", "Rock Outcrop"
+    , "Bur Oak Stand", "Limestone Shelf", "Wind Gap", "Crown Rock"
+    , "Bone Meadow", "Sun Slope", "North Slope", "South Slope"
+    , "Cedar Bench", "Broken Crown", "Lichen Rocks", "Upland Pine"
+    , "Shale Cut", "Goat Track", "Flint Ledge", "Saddle"
+    ]
   CCreek ->
     [ "Creek Mouth", "Gravel Bar", "Alder Thicket", "Creek Bend"
-    , "Driftwood Pile", "Cattail Marsh", "Mud Flat" ]
+    , "Driftwood Pile", "Cattail Marsh", "Mud Flat"
+    , "Reed Bed", "Sedge Meadow", "Beaver Dam", "Willow Bottom"
+    , "Otter Slide", "Still Pool", "Riffle", "Cut Bank"
+    , "Gravel Ford", "Willow Run", "Wet Meadow", "Silt Bank"
+    , "Shallow Crossing", "Elder Mat"
+    ]
   CRoad ->
-    [ "Truck", "Ditch", "Culvert", "Fence Post" ]
+    [ "Truck", "Ditch", "Culvert", "Fence Post"
+    , "Pull-Off", "Gate", "Cattle Guard", "Road Cut"
+    , "Graded Shoulder", "Gravel Wash", "Approach", "Mile Marker"
+    , "Grid Crossing", "Dirt Track", "Access Road"
+    ]
   CEmpty -> ["Somewhere"]
-
--- | De-duplicate location names within a zone by appending numeric
--- suffixes to repeated names.  Preserves first occurrences unsuffixed.
-uniquifyNames :: [(Coord, String)] -> [(Coord, String)]
-uniquifyNames = go (Map.empty :: Map String Int)
-  where
-    go _ [] = []
-    go seen ((c, n) : rest) =
-      let k = Map.findWithDefault 0 n seen
-          name = if k == 0 then n else n ++ " " ++ show (k + 1)
-          seen' = Map.insertWith (+) n 1 seen
-      in (c, name) : go seen' rest
 
 -- ---------------------------------------------------------------------------
 -- Step 6 — Edges
@@ -502,6 +523,10 @@ data GeneratedMap = GeneratedMap
   { gmGraph     :: !LocationGraph
   , gmZoneNames :: !(Map Location String)
   , gmLocations :: ![Location]
+  , gmClassOf   :: !(Map Location TerrainClass)
+    -- ^ Terrain class per location.  Downstream scenarios key narration,
+    -- axiom behavior, and sign placement off this rather than zone-name
+    -- string parsing.
   } deriving (Show)
 
 -- | Compile a descriptor into a full generated map.
@@ -511,17 +536,23 @@ buildFromDescriptor sd =
       (zmap, clsMap)   = floodFillZones grid
       zoneNames        = computeZoneNames zmap clsMap
       scattered        = scatterLocations (sdSeed sd) (sdLocationDensity sd) zmap clsMap
-      -- Flatten to (Location, ZoneId, normalised (x,y))
+      -- Flatten to (Location, ZoneId, normalised (x,y)).  The
+      -- per-zone scatter already picks from a deep enough vocabulary
+      -- and uses a seeded offset so two zones of the same class never
+      -- collide on a name.  No suffixing needed.
       named =
         concatMap (\(zid, placements) ->
           [ (Location name, zid, normCoord coord)
-          | (coord, name) <- uniquifyNames placements ])
+          | (coord, name) <- placements ])
         (Map.toList scattered)
       locs             = [ loc | (loc, _, _) <- named ]
       coordsMap        = Map.fromList
                             [ (loc, p) | (loc, _, p) <- named ]
       regionMap        = Map.fromList
                             [ (loc, Region (Map.findWithDefault "Unknown" zid zoneNames))
+                            | (loc, zid, _) <- named ]
+      classMap         = Map.fromList
+                            [ (loc, Map.findWithDefault CEmpty zid clsMap)
                             | (loc, zid, _) <- named ]
       edges            = buildEdges named
   in GeneratedMap
@@ -534,6 +565,7 @@ buildFromDescriptor sd =
            [ (loc, Map.findWithDefault "Unknown" zid zoneNames)
            | (loc, zid, _) <- named ]
        , gmLocations = locs
+       , gmClassOf   = classMap
        }
   where
     normCoord (c, r) =
