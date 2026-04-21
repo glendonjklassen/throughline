@@ -143,7 +143,7 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
           Just loc -> fromMaybe "" (sensoryFn loc (salt0 + i * 131))
           Nothing  -> ""
       withSensory = zipWith (\i c -> (c, cellSensory i c)) [0 :: Int ..] sortedCells
-  liftIO $ writeIORef countRef =<< fmap length (readIORef logRef)
+  liftIO $ writeIORef countRef . length =<< readIORef logRef
   liftIO drainSDLEvents
   skipChar <- liftIO $ if playerMoved
     then animateReveal render withSensory
@@ -320,7 +320,7 @@ perCellOffsetMs = 400
 
 sdlStepHook :: SDLContext -> ScenarioDisplay
             -> IORef Int -> IORef [AnyAction] -> StepHook
-sdlStepHook ctx display countRef actionsRef _before after _diff = do
+sdlStepHook ctx display countRef actionsRef before after _diff = do
   you      <- asks envPlayerCharId
   logRef   <- asks envMessageLog
   debugRef <- asks envDebug
@@ -364,11 +364,15 @@ sdlStepHook ctx display countRef actionsRef _before after _diff = do
           sparkleFn  = sdLocationSparkle display after you
           zoneTintFn = sdZoneTintFor display after
       oldLogRef <- newIORef oldMsgs
-      -- During the typewriter the HUD is rendered with 'hiddenReveal'
-      -- — terrain and player marker only, no labels.  The reveal
-      -- animation plays out afterwards when the action source takes
-      -- over, so the choices don't flash in and out as prose arrives.
-      typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn you after lastActions
+      -- On a movement action the HUD is hidden during typewriter
+      -- ('hiddenReveal') so the reveal animation can take over
+      -- cleanly afterwards.  On non-movement actions the choices
+      -- should stay exactly where they were — hiding them would
+      -- flicker them away and back for no reason.
+      let movedHere = Map.lookup you (worldLocations before)
+                   /= Map.lookup you (worldLocations after)
+          hudFrame  = if movedHere then hiddenReveal else finalReveal
+      typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn hudFrame you after lastActions
                          oldLogRef debugRef traceRef
                          fc labelW newEntryLines
       -- Drain lingering key events, brief pause, then done
@@ -388,13 +392,14 @@ typewriteFullFrame
   :: SDLContext -> LayoutConfig -> (GameWorld -> Maybe String)
   -> (Location -> Int)
   -> (Location -> Maybe Color)
+  -> RevealFrame           -- ^ HUD frame to render under the typewriter
   -> CharId -> GameWorld -> [AnyAction]
   -> IORef [NarrativeEntry] -> IORef DebugMode -> IORef [AxiomTrace]
   -> FontContext -> Int
   -> [(Color, Int, String)]   -- ^ (color, delayMs, plainLine) for each new line
   -> IO ()
-typewriteFullFrame _   _      _          _         _          _   _     _           _      _        _        _  _      []    = pure ()
-typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn you world actions logRef debugRef traceRef fc labelW newLines = do
+typewriteFullFrame _   _      _          _         _          _     _   _     _           _      _        _        _  _      []    = pure ()
+typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn frame you world actions logRef debugRef traceRef fc labelW newLines = do
   let cols     = gridCols ctx
       -- Compute where the history area starts (mirrors renderWorldFrame)
       rows     = gridRows ctx
@@ -433,7 +438,7 @@ typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn you world actions 
     -- Render one frame: full world + all revealed characters so far
     renderTick :: [(Color, String, CInt)] -> IO ()
     renderTick revealed = do
-      renderWorldFrame ctx layout statusLine sparkleFn zoneTintFn hiddenReveal you world actions logRef debugRef traceRef
+      renderWorldFrame ctx layout statusLine sparkleFn zoneTintFn frame you world actions logRef debugRef traceRef
       mapM_ (\(clr, txt, row) ->
         renderText fc txt clr (marginLeft, row)
         ) revealed

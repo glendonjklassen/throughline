@@ -87,6 +87,7 @@ See [docs/multiplayer.md](./docs/multiplayer.md) and [proposals/shared-universe.
 
 ## More
 
+- Architecture and layer model: [ARCHITECTURE.md](./ARCHITECTURE.md)
 - Design notes and authoring philosophy: [CLAUDE.md](./CLAUDE.md)
 - Sync internals: [docs/multiplayer.md](./docs/multiplayer.md)
 - Forward-looking design: [proposals/](./proposals/)

@@ -107,7 +107,7 @@ spec = describe "DeerHunt procedural generation" $ do
       -- so we check that every generated region contains one of the
       -- known biome words.
       let matches name = any (`isInfix` name) (Set.toList expected)
-      mapM_ (\name -> name `shouldSatisfy` matches) (Set.toList regions)
+      mapM_ (`shouldSatisfy` matches) (Set.toList regions)
       where
         isInfix needle hay = needle `Set.member` Set.fromList (words hay)
 

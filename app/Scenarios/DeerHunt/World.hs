@@ -177,7 +177,7 @@ computePositionHints gm =
       clsOf   = gmClassOf gm
       adj     = adjacencyMap edges
       classOf l = Map.findWithDefault CEmpty l clsOf
-      myClass l = classOf l
+      myClass = classOf
       neighborsOf l = Set.toList (Map.findWithDefault Set.empty l adj)
       isBridge l = any (\n -> classOf n /= myClass l) (neighborsOf l)
       isEdge   l = any isBridge (neighborsOf l)

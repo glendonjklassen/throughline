@@ -92,7 +92,7 @@ walkPath start targetClass k =
             let expansions = [ (n, (cur, n) : path)
                              | n <- neighbors cur
                              , not (Set.member n seen) ]
-                seen'      = foldr Set.insert seen (map fst expansions)
+                seen'      = foldr (Set.insert . fst) seen expansions
             in bfs (rest ++ expansions) seen'
   in fromMaybe (error $ "walkPath: no path from " <> show start
                       <> " to a " <> show targetClass

@@ -159,7 +159,7 @@ paintRidge axis (Position pos) g =
   in foldl' (\acc c -> Map.insert c CRidge acc) g cells
   where
     clampIdx n = max 0 (min (gridSize - 1) n)
-    intersectIdx xs = filter (\n -> n >= 0 && n < gridSize) xs
+    intersectIdx = filter (\n -> n >= 0 && n < gridSize)
 
 -- | Creeks are painted by stepping from start to end perimeter points
 -- and laying down a 1-cell-wide path plus a 1-cell riparian halo (the
@@ -278,7 +278,7 @@ mergeTinyZones
   -> Map Coord ZoneId
   -> Map ZoneId TerrainClass
   -> (Map Coord ZoneId, Map ZoneId TerrainClass)
-mergeTinyZones g zoneMap classMap0 = loop zoneMap classMap0
+mergeTinyZones g = loop
   where
     loop zm cm =
       let sizes = zoneSizes zm

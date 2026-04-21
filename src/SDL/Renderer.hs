@@ -21,10 +21,11 @@ module SDL.Renderer
   , sweepFeatherCh
   ) where
 
-import           Control.Monad (when)
+import           Control.Monad (unless, void, when)
 import           Data.IORef
 import           Data.List (intercalate, sortOn)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import           Data.Maybe (fromMaybe)
 import           Foreign.C.Types (CInt)
 import qualified SDL
@@ -107,6 +108,38 @@ drawHLine :: FontContext -> Int -> CInt -> IO ()
 drawHLine fc cols row =
   renderText fc (replicate cols '-') separatorColor (0, row)
 
+-- | Fixed clockwise order of compass rose labels.  Rendered as a full
+-- rose with present directions highlighted so the player always sees
+-- the same eight-point silhouette regardless of how many exits this
+-- location actually has.
+compassRoseOrder :: [String]
+compassRoseOrder = ["N","NE","E","SE","S","SW","W","NW"]
+
+-- | Draw the compass rose on @row@, centered horizontally in @cols@.
+-- Directions present in @exits@ render bright; absent ones dim to the
+-- separator so the rose reads as a stable chrome element rather than
+-- a list of labels.  Consecutive labels are joined by a thin middle
+-- dot rendered in the separator color regardless.
+drawCompassRose :: FontContext -> Int -> CInt -> [String] -> IO ()
+drawCompassRose fc cols row exits =
+  let present  = Set.fromList exits
+      sep      = "  ·  "
+      sepLen   = fromIntegral (length sep)
+      totalW   = sum (map length compassRoseOrder)
+               + length sep * (length compassRoseOrder - 1)
+      startCol = max marginLeft (fromIntegral (cols - totalW) `div` 2)
+      drawLabel col lbl = do
+        let color = if Set.member lbl present then greyText else separatorColor
+        renderText fc lbl color (col, row)
+        pure (col + fromIntegral (length lbl))
+      draw _   []         = pure ()
+      draw col [lbl]      = void (drawLabel col lbl)
+      draw col (lbl:rest) = do
+        col' <- drawLabel col lbl
+        renderText fc sep separatorColor (col', row)
+        draw (col' + sepLen) rest
+  in draw startCol compassRoseOrder
+
 -- ---------------------------------------------------------------------------
 -- Layout constants
 -- ---------------------------------------------------------------------------
@@ -156,10 +189,7 @@ renderWorldSDL ctx _layout statusLine sparkleFn zoneTintFn frame you world actio
       timeStr      = fromMaybe "" (engineTimeStatus world)
       timeCol      = max (marginLeft + 1)
                        (fromIntegral cols - fromIntegral (length timeStr) - marginLeft)
-      compassExits = [ (lbl, b) | (_, lbl, b) <- exitBearings you world ]
-      compassStr   = case compassExits of
-        [] -> ""
-        es -> intercalate "  ·  " (map fst (sortExits es))
+      compassDirs  = [ lbl | (_, lbl, _) <- exitBearings you world ]
 
   -- Center location name
   let locCol = max marginLeft (fromIntegral (cols - length locName) `div` 2)
@@ -168,9 +198,8 @@ renderWorldSDL ctx _layout statusLine sparkleFn zoneTintFn frame you world actio
   case timeStr of
     "" -> pure ()
     _  -> renderText fc timeStr dimText (timeCol, 0)
-  -- Center compass
-  let compassCol = max marginLeft (fromIntegral (cols - length compassStr) `div` 2)
-  renderText fc compassStr dimText (compassCol, 1)
+  -- Centered compass rose
+  drawCompassRose fc cols 1 compassDirs
   drawHLine fc cols 2
 
   -- -----------------------------------------------------------------------
@@ -281,17 +310,13 @@ renderWorldFrame ctx _layout statusLine sparkleFn zoneTintFn frame you world act
       timeStr      = fromMaybe "" (engineTimeStatus world)
       timeCol      = max (marginLeft + 1)
                        (fromIntegral cols - fromIntegral (length timeStr) - marginLeft)
-      compassExits = [ (lbl, b) | (_, lbl, b) <- exitBearings you world ]
-      compassStr   = case compassExits of
-        [] -> ""
-        es -> intercalate "  ·  " (map fst (sortExits es))
+      compassDirs  = [ lbl | (_, lbl, _) <- exitBearings you world ]
   let locCol = max marginLeft (fromIntegral (cols - length locName) `div` 2)
   renderText fc locName defaultText (locCol, 0)
   case timeStr of
     "" -> pure ()
     _  -> renderText fc timeStr dimText (timeCol, 0)
-  let compassCol = max marginLeft (fromIntegral (cols - length compassStr) `div` 2)
-  renderText fc compassStr dimText (compassCol, 1)
+  drawCompassRose fc cols 1 compassDirs
   drawHLine fc cols 2
 
   -- Bottom HUD
@@ -507,7 +532,7 @@ drawSpatialHUD fc sparkleFn zoneTintFn frame you world hud spatialLeft spatialTo
   -- relationship inverts.  The soft feather around the sweep gives
   -- the effect of a light glow rather than a hard edge.
   mapM_ (\(cell, sweep, darkening, fragment) ->
-    when (not (null fragment)) $ do
+    unless (null fragment) $ do
       let baseRow = spatialTopRow + fromIntegral (hudRow cell) + 1
           baseCol = spatialLeft   + fromIntegral (hudCol cell)
           py      = baseRow * cellHeight fc
@@ -688,17 +713,6 @@ padTo :: Int -> String -> String
 padTo n s
   | length s >= n = s
   | otherwise     = s <> replicate (n - length s) ' '
-
--- | Sort exit labels clockwise by bearing.
-sortExits :: [(String, Double)] -> [(String, Double)]
-sortExits = insertionSort
-  where
-    insertionSort [] = []
-    insertionSort (x:xs) = insert x (insertionSort xs)
-    insert x [] = [x]
-    insert x (y:ys)
-      | snd x <= snd y = x : y : ys
-      | otherwise       = y : insert x ys
 
 -- | Split a list into chunks of N.
 chunksOf :: Int -> [a] -> [[a]]
