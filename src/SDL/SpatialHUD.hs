@@ -99,27 +99,14 @@ layoutHUD you world actions totalCols =
   let prevLoc = case Map.lookup you (worldLocationHistory world) of
         Just (p:_) -> Just p
         _          -> Nothing
-      base = case Map.lookup you (worldLocations world) of
-        Nothing       -> flatLayout actions
-        Just playerLoc ->
-          let lg = worldLocationGraph world
-          in case Map.lookup playerLoc (lgCoords lg) of
-               Nothing     -> flatLayout actions
-               Just (px, py) -> spatialLayout actions playerLoc (px, py) lg totalCols
-  in markPreviousLocation prevLoc base
-
--- | Prepend a back-arrow to the label of the cell whose movement target
--- is the player's most recent previous location.  Gives the player an
--- at-a-glance "this is the way you came" cue on the selection HUD —
--- complementing (not replacing) the subtler trail-mark breadcrumbs.
-markPreviousLocation :: Maybe Location -> SpatialHUD -> SpatialHUD
-markPreviousLocation Nothing  hud = hud
-markPreviousLocation (Just p) hud =
-  hud { shSpatialCells = map mark (shSpatialCells hud) }
-  where
-    mark c
-      | hudTarget c == Just p = c { hudLabel = "\x2190 " <> hudLabel c }
-      | otherwise             = c
+  in case Map.lookup you (worldLocations world) of
+       Nothing       -> flatLayout actions
+       Just playerLoc ->
+         let lg = worldLocationGraph world
+         in case Map.lookup playerLoc (lgCoords lg) of
+              Nothing     -> flatLayout actions
+              Just (px, py) -> spatialLayout actions prevLoc playerLoc
+                                             (px, py) lg totalCols
 
 -- | Prefix for the action with 1-based index @n@ drawn from the given
 -- key pool — "q) ", "a) ", etc.  Matches the key the player actually
@@ -140,9 +127,9 @@ flatLayout actions = SpatialHUD
 
 -- | Spatial layout: split actions into movement/non-movement, position movement
 -- actions by relative direction, scaled by actual graph distance.
-spatialLayout :: [AnyAction] -> Location -> (Double, Double)
+spatialLayout :: [AnyAction] -> Maybe Location -> Location -> (Double, Double)
               -> LocationGraph -> Int -> SpatialHUD
-spatialLayout actions _playerLoc (px, py) lg totalCols =
+spatialLayout actions prevLoc _playerLoc (px, py) lg totalCols =
   let -- Classify by shape first: movement actions with known target
       -- coords vs. general (non-movement) actions.  Order within each
       -- bucket matches the order in @actions@ so keys stay stable
@@ -182,8 +169,12 @@ spatialLayout actions _playerLoc (px, py) lg totalCols =
       -- readable spread.
       spreadMovements = angularSpread movements
 
-      -- Map each movement action to a grid cell, scaled relative to max distance
-      cells = map (placeMovement boxW boxH centerCol centerRow maxDist) spreadMovements
+      -- Map each movement action to a grid cell, scaled relative to max distance.
+      -- 'prevLoc' is passed in so the "← " prefix that marks the way
+      -- you came is added BEFORE the clamp — otherwise the prefix
+      -- gets applied after placement and the label runs off the right
+      -- edge.
+      cells = map (placeMovement prevLoc boxW boxH centerCol centerRow maxDist) spreadMovements
 
       -- Resolve overlaps: nudge cells that collide with each other or the center
       resolved = resolveOverlaps centerCol centerRow boxW boxH cells
@@ -239,12 +230,16 @@ angularSpread movements =
 -- | Place a movement action in the spatial grid based on its relative direction.
 -- Distance is scaled relative to the farthest neighbor so closer spots are
 -- visibly nearer and farther spots reach the edges — irregular, like a map.
-placeMovement :: Int -> Int -> Int -> Int -> Double
+placeMovement :: Maybe Location -> Int -> Int -> Int -> Int -> Double
               -> (Int, AnyAction, Double, Double) -> HUDCell
-placeMovement boxW boxH centerCol centerRow maxDist (n, act, dx, dy) =
+placeMovement prevLoc boxW boxH centerCol centerRow maxDist (n, act, dx, dy) =
   let target = movementTarget act
-      label = optionLabel movementOptionKeys n act
-      labelLen = length label
+      baseLabel = optionLabel movementOptionKeys n act
+      isReturn  = case prevLoc of
+        Just p  -> target == Just p
+        Nothing -> False
+      label     = if isReturn then "\x2190 " <> baseLabel else baseLabel
+      labelLen  = length label
       -- Reserve space for the label itself
       maxColDisp = (boxW - labelLen) `div` 2 - 1
       maxRowDisp = centerRow - 1
@@ -286,35 +281,36 @@ resolveOverlaps cx cy bw bh cells = go [] cells
       let cell' = nudge placed cell
       in go (placed ++ [cell']) rest
 
-    -- Check if two cells overlap.  Labels on the same row obviously
-    -- collide if their column ranges overlap; labels on adjacent rows
-    -- can also visually collide once the pixel nudge ±cellHeight/4 is
-    -- applied (the text from row N leaks into row N+1's upper
-    -- descenders space).  Treating adjacent rows as collisions keeps
-    -- cells at least two rows apart when their columns would overlap.
+    -- Check if two cells overlap.  We treat rows within 2 of each
+    -- other as colliding: the label itself gets a ±¼-cell pixel nudge
+    -- (one-row leakage), and an active sensory fragment renders on
+    -- the row directly below each cell (second-row leakage).  Without
+    -- this the sensory text for cell A would regularly land on top
+    -- of cell B's label one row down.  Column padding is also more
+    -- generous (4 cells) so pixel nudges left/right can't bring
+    -- neighbouring labels into contact.
     overlaps :: HUDCell -> HUDCell -> Bool
     overlaps a b =
-      let rowsClose = abs (hudRow a - hudRow b) <= 1
-          pad      = 2   -- extra columns of breathing room
+      let rowsClose = abs (hudRow a - hudRow b) <= 2
+          pad      = 4
           aEnd = hudCol a + length (hudLabel a) + pad
           bEnd = hudCol b + length (hudLabel b) + pad
           colsOverlap = not (aEnd <= hudCol b || bEnd <= hudCol a)
       in rowsClose && colsOverlap
 
-    -- Check if a cell overlaps the player marker "You" at center,
-    -- with extra padding on either side so pixel nudges can't push a
-    -- label into the marker cell either.  Also clears the rows just
-    -- above and below so labels on the center row's neighbours don't
-    -- graze the marker either.
+    -- Check if a cell overlaps the player marker "You" at center.
+    -- The marker lives at exactly (cx, cy); we reserve a generous
+    -- horizontal and *vertical* halo around it so a label whose
+    -- pixel nudge drifts up or down can't collide with the marker.
     overlapsCenter :: HUDCell -> Bool
     overlapsCenter cell =
-      let cEnd        = hudCol cell + length (hudLabel cell) + 1
+      let cEnd        = hudCol cell + length (hudLabel cell) + 2
           markerLen   = 3  -- "You"
-          markerPad   = 3  -- breathing room on each side (in cells)
+          markerPad   = 4  -- breathing room on each side (in cells)
           markerStart = cx - markerLen `div` 2 - markerPad
           markerEnd   = cx + markerLen `div` 2 + markerPad
           horizontalHit = not (cEnd <= markerStart || hudCol cell >= markerEnd)
-          rowHit       = abs (hudRow cell - cy) <= 0
+          rowHit       = abs (hudRow cell - cy) <= 1
       in rowHit && horizontalHit
 
     -- Try to nudge a cell to avoid overlapping placed cells and center

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP           #-}
 {-# LANGUAGE TupleSections #-}
 -- | SDL2 game runner: constructs a RuntimeUI that renders to an SDL2 window.
 module SDL.Runner (sdlUI) where
@@ -29,7 +30,10 @@ import           SDL.Palette
 import           SDL.Renderer
 import           SDL.SpatialHUD        (SpatialHUD(..), HUDCell(..), layoutHUD)
 import           SDL.Text              (stripAnsi, wrapWords)
-import           SDL.Debug             (cycleDebug, learningModeLines)
+import           SDL.Debug             (learningModeLines)
+#ifndef RELEASE_BUILD
+import           SDL.Debug             (cycleDebug)
+#endif
 import           SDL.Layout            (ScenarioDisplay(..), LayoutConfig(..))
 
 -- | Font asset path (relative to working directory).
@@ -179,10 +183,18 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
       case mc of
         Nothing -> pure Nothing
         Just c
-          | c == quitKeyChar  -> pure Nothing
+          | c == quitKeyChar  -> do
+              confirmed <- confirmQuit ctx
+              drainSDLEvents
+              render' finalReveal
+              if confirmed
+                then pure Nothing
+                else awaitKeyLoop acts debugRef' Nothing worldNow render'
+#ifndef RELEASE_BUILD
           | c == debugKeyChar -> do
               modifyIORef' debugRef' cycleDebug
               awaitKeyLoop acts debugRef' Nothing worldNow render'
+#endif
           | c == '1' -> do
               journalOverlayLoop ctx display worldNow TabToday
               drainSDLEvents
@@ -192,6 +204,24 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
           | Just a <- safeOptionIndexIn generalOptionKeys  c generals  -> pure (Just a)
           | Just a <- safeOptionIndexIn movementOptionKeys c movements -> pure (Just a)
           | otherwise -> awaitKeyLoop acts debugRef' Nothing worldNow render'
+
+-- | Ask the player to confirm a mid-hunt quit.  Every action autosaves
+-- so leaving truly costs nothing, but a stray Escape keypress shouldn't
+-- send them back to the launcher — confirmation protects against that.
+confirmQuit :: SDLContext -> IO Bool
+confirmQuit ctx = do
+  clearSDL ctx
+  let fc = sdlFont ctx
+  renderText fc "Quit hunt?"                              defaultText (3, 2)
+  renderText fc ""                                        dimText     (3, 3)
+  renderText fc "Your progress has been saved."           dimText     (3, 4)
+  renderText fc "You can pick up where you left off."     dimText     (3, 5)
+  renderText fc ""                                        dimText     (3, 6)
+  renderText fc "y) Yes, quit"                            defaultText (4, 8)
+  renderText fc "n) No, keep hunting"                     defaultText (4, 9)
+  presentSDL ctx
+  mc <- awaitKeySDL
+  pure (mc == Just 'y' || mc == Just 'Y')
 
 -- | Drive the journal overlay.  Pressing the number of a *different*
 -- tab switches to it; pressing the number of the *current* tab
