@@ -472,37 +472,68 @@ locationVocab cls = case cls of
 -- Step 6 — Edges
 -- ---------------------------------------------------------------------------
 
--- | For each location, connect it to its @kNearest@ same-zone
--- neighbours.  Between-zone bridges come from locations whose nearest
--- neighbour happens to sit across a zone boundary.
+-- | For each location, pick its geometric nearest neighbours covering
+-- multiple angular sectors.  The goal is continuity: when the player
+-- moves to B, the neighbours of B should include (or at least sit
+-- near) whatever they could have reached from A, so the map reads as
+-- an actual landscape rather than a disjoint graph of scenes.
+--
+-- Strategy: sort all other nodes by distance; walk that list and keep
+-- a node only if it sits in a sector not already filled, up to
+-- 'sectorCount' sectors and 'minDegree' edges.  This guarantees every
+-- node has neighbours in (roughly) every direction it could plausibly
+-- look.  Zone identity is ignored here — zone-based connectivity
+-- caused the "teleporting" feel because bushes far apart on the grid
+-- got connected while bushes nearer but across a road did not.
 buildEdges
   :: [(Location, ZoneId, (Double, Double))]
   -> Set (Location, Location)
 buildEdges nodes =
-  let sameZoneEdges = concatMap (nearestInZone 3) byZone
-      crossZoneEdges = concatMap (nearestCrossZone 1) nodes
-  in Set.fromList (map normalize (sameZoneEdges ++ crossZoneEdges))
+  Set.fromList (map normalize (concatMap neighboursFor nodes))
   where
-    -- Group nodes by zone for intra-zone edges.
-    byZone :: [[(Location, ZoneId, (Double, Double))]]
-    byZone = Map.elems
-           $ Map.fromListWith (++) [ (z, [n]) | n@(_, z, _) <- nodes ]
+    -- Tunables.  'sectorCount' = 6 covers the compass rose densely
+    -- enough that "there's always something to the NE" holds, while
+    -- leaving the graph sparse enough not to flood the HUD.
+    -- 'minDegree' is a minimum, not a maximum: sector filling stops
+    -- once every sector has one entry, but the early candidates may
+    -- have filled several before that.
+    sectorCount, minDegree, maxDegree :: Int
+    sectorCount = 6
+    minDegree   = 4
+    maxDegree   = 6
+    -- Hard distance ceiling as a fraction of the unit-square diagonal.
+    -- Without this, a node on the edge of the map can end up
+    -- connected to its opposite edge just to fill its last sector.
+    maxDist     = 0.55
 
-    nearestInZone :: Int
-                  -> [(Location, ZoneId, (Double, Double))]
-                  -> [(Location, Location)]
-    nearestInZone k zs =
-      [ (la, lb)
-      | (la, _, pa) <- zs
-      , (lb, _) <- take k (sortByDist pa [ (x, p) | (x, _, p) <- zs, x /= la ])
-      ]
+    neighboursFor (la, _, pa) =
+      let candidates = sortByDist pa
+            [ (lb, p) | (lb, _, p) <- nodes, lb /= la ]
+          picked = pickBySector pa candidates
+      in [ (la, lb) | (lb, _) <- picked ]
 
-    nearestCrossZone :: Int
-                     -> (Location, ZoneId, (Double, Double))
-                     -> [(Location, Location)]
-    nearestCrossZone k (la, za, pa) =
-      let others = [ (lb, p) | (lb, zb, p) <- nodes, zb /= za ]
-      in [ (la, lb) | (lb, _) <- take k (sortByDist pa others) ]
+    -- Walk candidates in distance order.  Keep a candidate if its
+    -- sector hasn't been filled yet OR we're still under 'minDegree';
+    -- stop once we hit 'maxDegree' or run out.
+    pickBySector :: (Double, Double)
+                 -> [(Location, (Double, Double))]
+                 -> [(Location, (Double, Double))]
+    pickBySector origin = go Set.empty 0
+      where
+        go _sectorsFilled _count [] = []
+        go sectorsFilled count ((lb, pb) : rest)
+          | count >= maxDegree = []
+          | dist2 origin pb > maxDist * maxDist = []
+          | sectorIx `Set.notMember` sectorsFilled
+              || count < minDegree
+          = (lb, pb) : go (Set.insert sectorIx sectorsFilled) (count + 1) rest
+          | otherwise = go sectorsFilled count rest
+          where
+            (dx, dy) = (fst pb - fst origin, snd pb - snd origin)
+            angle    = atan2 dy dx   -- [-pi, pi]
+            -- Map angle to a sector in [0, sectorCount).
+            sectorIx = floor (((angle + pi) / (2 * pi)) * fromIntegral sectorCount)
+                       `mod` sectorCount :: Int
 
     sortByDist :: (Double, Double)
                -> [(Location, (Double, Double))]
