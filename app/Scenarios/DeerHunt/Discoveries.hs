@@ -13,13 +13,15 @@ module Scenarios.DeerHunt.Discoveries
   , discoveryTag
   , firstFind
   , arrivalDiscoveryAxiom
+  , findDiscoveryAxiom
   ) where
 
+import qualified Data.Map.Strict as Map
 import           Engine.Author.DSL
 import           Engine.Core.Conditions (checkCondition)
 import           GameTypes
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
-import           Scenarios.DeerHunt.World      (HuntWorld, hwClass)
+import           Scenarios.DeerHunt.World      (HuntWorld, hwClass, hwFinds)
 
 -- | High-level categorization for a discoverable entry.  Matches the
 -- groupings the journal's catalog view will display.
@@ -156,3 +158,26 @@ arrivalNoticeChance = 0.35
 -- used by the SDL runner's sensory selection.
 locHash :: Location -> Int
 locHash (Location s) = foldl (\acc c -> acc * 131 + fromEnum c) 7 s
+
+-- ---------------------------------------------------------------------------
+-- Location-bound rare finds
+-- ---------------------------------------------------------------------------
+
+-- | When the player arrives at a location that holds a rare find
+-- (seeded at worldgen via 'placeFinds'), emit the first-find beat.
+-- The discovery tag carried on 'Discovery' dedupes repeat visits, so
+-- this axiom is safe to re-run on every arrival.  Triggers off
+-- 'diffLocations' — the arrival event — not a point-in-time read.
+findDiscoveryAxiom :: HuntWorld -> CharId -> Axiom
+findDiscoveryAxiom hw you = Axiom
+  { axiomId       = ScenarioAxiom "findDiscovery"
+  , axiomPriority = 4
+  , axiomEvaluate = \_world _actions diff ->
+      concatMap (handleFindArrival hw) (playerArrivals you diff)
+  }
+
+handleFindArrival :: HuntWorld -> Location -> [Effect]
+handleFindArrival hw loc =
+  case Map.lookup loc (hwFinds hw) of
+    Nothing   -> []
+    Just name -> firstFind (Discovery Find name)

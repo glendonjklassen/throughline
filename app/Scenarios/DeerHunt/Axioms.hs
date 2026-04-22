@@ -8,7 +8,7 @@ import           Engine.Author.Random        (rollCheck, rollChoice, rollD)
 import           Engine.CRDT.ORSet           (orToList)
 import           GameTypes
 import           Scenarios.DeerHunt.Constants
-import           Scenarios.DeerHunt.Discoveries (arrivalDiscoveryAxiom)
+import           Scenarios.DeerHunt.Discoveries (arrivalDiscoveryAxiom, findDiscoveryAxiom)
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
 import           Scenarios.DeerHunt.Probability
 import           Scenarios.DeerHunt.World      (HuntWorld(..), hwClass, hwLocsOfClass, hwNearestTruck, hwStart)
@@ -46,6 +46,7 @@ allAxioms hw you =
   , weatherNarrationAxiom weatherDesc
   , dayRolloverAxiom hw you
   , arrivalDiscoveryAxiom hw you
+  , findDiscoveryAxiom hw you
   ]
 
 -- ---------------------------------------------------------------------------

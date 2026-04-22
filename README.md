@@ -8,7 +8,7 @@ It sits in the lineage of interactive fiction and MUDs. The ambition is to give 
 
 ## What success would look like
 
-An author somewhere uses this to build a world, a small group of people fall in love with it, and it dovetails with other worlds through shared engine state. I don't have a 1.0 target. The closer signal is that I can sit down and author a scenario in flow — when that happens, the kit is probably real enough to hand to someone else.
+An author somewhere uses this to build a world, a small group of people fall in love with it, and it dovetails with other worlds through shared engine state. The 1.0 signal is that I can sit down and author a scenario in flow — when that happens, the kit is probably real enough to hand to someone else.
 
 ## What it does differently
 
