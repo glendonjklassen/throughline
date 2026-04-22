@@ -232,6 +232,12 @@ sensorySweepInMs  = 900
 sensoryHoldMs     = 1600
 sensorySweepOutMs = 900
 
+-- | Total on-screen life of a single sensory fragment, from first
+-- lit char to last dimmed char.  Drives sequential fragment pacing
+-- so only one fragment animates at a time.
+sensoryTotalMs :: Double
+sensoryTotalMs = sensorySweepInMs + sensoryHoldMs + sensorySweepOutMs
+
 -- | Animate the spatial-HUD reveal continuously at ~30fps, composing a
 -- 'RevealFrame' per frame from elapsed time.  Each cell gets a per-slot
 -- window of length @revealTotalMs / cellCount@ during which its label
@@ -246,23 +252,35 @@ animateReveal render [] = do
   render finalReveal
   pure Nothing
 animateReveal render cellsWithSense = do
-  let n        = length cellsWithSense
-      -- Labels and sensories share the same cell-to-cell cadence.
-      slotMs   = perCellOffsetMs
-      cellMeta = zip [0 :: Int ..] cellsWithSense
+  let n           = length cellsWithSense
+      -- Labels still stagger at the quick per-cell cadence so the
+      -- selection HUD reveals briskly; sensory fragments run
+      -- sequentially so only one animates at a time.
+      slotMs      = perCellOffsetMs
+      cellMeta    = zip [0 :: Int ..] cellsWithSense
+      -- Sense-order index: zero-based position among cells that
+      -- actually have a non-empty fragment.  Drives sequential
+      -- pacing so blank cells don't eat a slot.
+      senseOrder  = Map.fromList
+                      [ (hudLabel c, si)
+                      | (si, (c, _)) <- zip [0 :: Int ..]
+                          [ (c, f) | (_, (c, f)) <- cellMeta, not (null f) ]
+                      ]
+      numSenses   = Map.size senseOrder
       frameAt  :: Double -> RevealFrame
       frameAt elapsed = RevealFrame
         { rfCellAlpha = \cell ->
             case find (\(_, (c, _)) -> hudLabel c == hudLabel cell) cellMeta of
               Nothing     -> 0.0
               Just (i, _) -> labelAlphaAt elapsed (fromIntegral i * slotMs)
-        , rfActiveSenses = activeSensesAt elapsed cellMeta slotMs
+        , rfActiveSenses = activeSensesAt elapsed senseOrder cellMeta
         }
-      -- Last cell's sensory starts at (n-1)*slotMs + labelFadeIn and
-      -- runs its own sweep-in + hold + sweep-out.  Hold the animation
-      -- open at least that long so the final fragment completes.
-      totalMs = fromIntegral (n - 1) * slotMs + labelFadeInMs
-              + sensorySweepInMs + sensoryHoldMs + sensorySweepOutMs
+      -- Two ends: last label finishes fading in, and the last
+      -- fragment finishes its sweep-out.  Take the later of the two
+      -- so neither tail is clipped.
+      labelFinish = fromIntegral (n - 1) * slotMs + labelFadeInMs
+      senseFinish = labelFadeInMs + fromIntegral numSenses * sensoryTotalMs
+      totalMs     = max labelFinish senseFinish
   startTick <- SDL.ticks
   loop startTick frameAt totalMs
   where
@@ -291,22 +309,23 @@ labelAlphaAt elapsed slotStart
       let t = (elapsed - slotStart) / labelFadeInMs
       in max 0.0 (min 1.0 t)
 
--- | Compute the currently active sensory fragments.  Each cell's
--- fragment has its own independent timeline anchored to that cell's
--- slot start: sweep-in (light enters from left), hold (fully lit),
--- sweep-out (shadow enters from left).  Late starters run past the
--- overall reveal window if they need to.  Empty fragments contribute
--- nothing.
+-- | Compute the currently active sensory fragments.  Fragments are
+-- scheduled sequentially — fragment @k@ starts exactly when fragment
+-- @k-1@ finishes its sweep-out — so a player who wants to soak in a
+-- screen can read each one fully before the next begins.  The
+-- sense-order index comes from @senseOrder@; cells with blank
+-- fragments are skipped and don't eat a slot.
 activeSensesAt
   :: Double                          -- ^ elapsed ms
-  -> [(Int, (HUDCell, String))]      -- ^ (slot index, (cell, fragment))
-  -> Double                          -- ^ slot length ms (unused; kept for signature symmetry)
+  -> Map.Map String Int              -- ^ hudLabel -> sense-order index
+  -> [(Int, (HUDCell, String))]      -- ^ (cell slot, (cell, fragment))
   -> [(HUDCell, Double, Bool, String)]
-activeSensesAt elapsed cellMeta _slotMs =
+activeSensesAt elapsed senseOrder cellMeta =
   [ r
-  | (i, (cell, frag)) <- cellMeta
+  | (_, (cell, frag)) <- cellMeta
   , not (null frag)
-  , let sStart   = fromIntegral i * perCellOffsetMs + labelFadeInMs
+  , Just si <- [Map.lookup (hudLabel cell) senseOrder]
+  , let sStart   = labelFadeInMs + fromIntegral si * sensoryTotalMs
         sweepEnd = sStart + sensorySweepInMs
         holdEnd  = sweepEnd + sensoryHoldMs
         totalEnd = holdEnd + sensorySweepOutMs
