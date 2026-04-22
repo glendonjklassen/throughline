@@ -12,6 +12,7 @@ import           Scenarios.DeerHunt.Actions     (allActions)
 import           Scenarios.DeerHunt.Axioms      (allAxioms, dawnRule,
                                                  hunterArrivalMergeAxiom)
 import           Scenarios.DeerHunt.Constants
+import           Scenarios.DeerHunt.Discoveries (discoveryCatalog)
 import           Scenarios.DeerHunt.Generation  (TerrainClass(..))
 import           Scenarios.DeerHunt.Narration   (sensoryFragment)
 import           Scenarios.DeerHunt.Probability (experience)
@@ -49,6 +50,7 @@ deerHuntDisplay = ScenarioDisplay
   , sdLocationSparkle = locationSparkle
   , sdZoneTintFor     = deerHuntZoneTint
   , sdSensoryFor      = deerHuntSensory
+  , sdCatalog         = discoveryCatalog
   }
 
 -- | Pick a fleeting sensory fragment for a neighbor label during the

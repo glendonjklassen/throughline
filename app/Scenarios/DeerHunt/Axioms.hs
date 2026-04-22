@@ -534,6 +534,7 @@ dayRolloverAxiom hw you = Axiom
               -- New-day buck placement: anywhere in bush or ridge,
               -- seeded so it varies across hunts.
               buckSpots = hwLocsOfClass hw CBush ++ hwLocsOfClass hw CRidge
+              nextDay = worldDayNumber world + 1
           in concat
                [ [ immediate (JournalEntry summary)
                  , immediate (Narrate "The drive home. Kitchen light. The knife, the hose, a cold beer. Bed.")
@@ -542,6 +543,7 @@ dayRolloverAxiom hw you = Axiom
                , map (immediate . RemoveWorldTag) allDayScopedTags
                , [ immediate (ModifyRelation Truth you (Capacity Experience) 1)
                  , immediate AdvanceDay
+                 , immediate (JournalEntry ("\x2014 Day " <> show nextDay <> " \x2014"))
                  , immediate (SetLocation you (hwStart hw))
                  , immediate (SetLocationRandom deer saltDayRollover buckSpots)
                  ]

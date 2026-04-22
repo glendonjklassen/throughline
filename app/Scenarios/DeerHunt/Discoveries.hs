@@ -14,11 +14,16 @@ module Scenarios.DeerHunt.Discoveries
   , firstFind
   , arrivalDiscoveryAxiom
   , findDiscoveryAxiom
+  , discoveryCatalog
   ) where
 
+import           Data.List       (sort)
 import qualified Data.Map.Strict as Map
+import           Text.Read       (readMaybe)
+
 import           Engine.Author.DSL
-import           Engine.Core.Conditions (checkCondition)
+import           Engine.CRDT.ORSet       (orToList)
+import           Engine.Core.Conditions  (checkCondition)
 import           GameTypes
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
 import           Scenarios.DeerHunt.World      (HuntWorld, hwClass, hwFinds)
@@ -30,14 +35,16 @@ data DiscoveryKind
   | Animal
   | Sign
   | Find
-  deriving (Show, Eq, Ord)
+  deriving (Show, Read, Eq, Ord, Enum, Bounded)
 
 -- | A discoverable entry: its category plus its name as it appears
 -- in-fiction.  The derived 'Show' instance doubles as the scenario-
 -- tag key, so 'scenarioTag' handles persistence and merge via the
--- existing tag infrastructure.
+-- existing tag infrastructure.  'Read' is derived so the catalog
+-- view can recover entries from the world-tag strings without an
+-- additional registry.
 data Discovery = Discovery DiscoveryKind String
-  deriving (Show, Eq, Ord)
+  deriving (Show, Read, Eq, Ord)
 
 -- | The scenario tag that marks a 'Discovery' as seen.
 discoveryTag :: Discovery -> Tag
@@ -181,3 +188,29 @@ handleFindArrival hw loc =
   case Map.lookup loc (hwFinds hw) of
     Nothing   -> []
     Just name -> firstFind (Discovery Find name)
+
+-- ---------------------------------------------------------------------------
+-- Catalog view
+-- ---------------------------------------------------------------------------
+
+-- | Recover every discovery the player has catalogued from the set of
+-- scenario tags on the world.  Used by the journal overlay's catalog
+-- tab.  Since 'scenarioTag' writes the 'Show' of a 'Discovery' into
+-- the tag string, 'Read' recovers it — no separate registry to keep
+-- in sync with the tag set.
+discoveredEntries :: GameWorld -> [Discovery]
+discoveredEntries world =
+  [ d
+  | ScenarioTag (MkScenarioTag s) <- orToList (worldTags world)
+  , Just d <- [readMaybe s :: Maybe Discovery]
+  ]
+
+-- | Group discoveries by kind for the catalog overlay.  Every kind
+-- gets a row — empty kinds render as a quiet footer in the overlay
+-- so the player sees what's still out there to find.  Names are
+-- sorted alphabetically within each group for stable reading.
+discoveryCatalog :: GameWorld -> [(String, [String])]
+discoveryCatalog world =
+  let entries = discoveredEntries world
+      grouped k = sort [ name | Discovery k' name <- entries, k' == k ]
+  in [ (show k, grouped k) | k <- [minBound .. maxBound :: DiscoveryKind] ]

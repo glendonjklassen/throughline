@@ -42,6 +42,12 @@ data ScenarioDisplay = ScenarioDisplay
     -- during the incremental reveal animation.  The 'Int' is a
     -- per-arrival salt so repeated arrivals read differently.
     -- Returning 'Nothing' suppresses the sensory line.
+  , sdCatalog         :: GameWorld -> [(String, [String])]
+    -- ^ The journal's catalog tab, grouped as @[(categoryLabel,
+    -- [entryName])]@.  Scenarios that don't use a discovery catalog
+    -- return @[]@; the overlay collapses the tab to a one-line hint
+    -- in that case.  Empty groups are dropped by the overlay before
+    -- rendering, so scenarios can safely return all four categories.
   }
 
 -- | Sensible defaults: no end screen, no status line, default layout,
@@ -54,4 +60,5 @@ defaultDisplay = ScenarioDisplay
   , sdLocationSparkle = \_ _ _ -> 0
   , sdZoneTintFor     = \_ _   -> Nothing
   , sdSensoryFor      = \_ _ _ -> Nothing
+  , sdCatalog         = const []
   }

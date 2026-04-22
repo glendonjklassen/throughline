@@ -20,6 +20,7 @@ module SDL.Renderer
   , hiddenReveal
   , sweepFeatherCh
   , renderJournalOverlay
+  , JournalTab(..)
   ) where
 
 import           Control.Monad (unless, void, when)
@@ -41,7 +42,7 @@ import           SDL.SpatialHUD (SpatialHUD(..), HUDCell(..),
                                  trailMarks)
 import           Engine.Core.World (playerLocationName, engineTimeStatus, exitBearings)
 import           Engine.Core.NarrativeMessage
-import           SDL.Layout (LayoutConfig(..))
+import           SDL.Layout (LayoutConfig(..), ScenarioDisplay(..))
 import           SDL.Debug (learningModeLines)
 import           GameTypes
 
@@ -728,28 +729,164 @@ takeLast n xs = drop (max 0 (length xs - n)) xs
 -- Journal overlay
 -- ---------------------------------------------------------------------------
 
--- | Render the journal as a full-screen page.  Minimal Phase 1 view:
--- header, chronological entries, footer hint.  Wraps long lines to the
--- page width.  The caller awaits a keypress to dismiss, then redraws
--- the world frame.
-renderJournalOverlay :: SDLContext -> GameWorld -> IO ()
-renderJournalOverlay ctx world = do
+-- | Which page the journal overlay is showing.
+data JournalTab = TabToday | TabPast | TabCatalog
+  deriving (Eq, Show)
+
+-- | A day marker journal line has the shape "\x2014 Day <n> \x2014"
+-- (em-dash space Day n space em-dash).  The rollover axiom inserts
+-- one at the start of each new day, so pages are everything between
+-- two markers.
+isDayMarker :: String -> Bool
+isDayMarker s = "\x2014 Day " `isPrefixOf'` s
+  where
+    isPrefixOf' p xs = p == take (length p) xs
+
+-- | Split the journal into day pages, oldest-first.  Each page keeps
+-- its leading day marker so the overlay can show the header with
+-- the entries it introduces.  The final page is "today."
+journalPages :: [String] -> [[String]]
+journalPages = go []
+  where
+    go acc [] = [reverse acc | not (null acc)]
+    go acc (e:rest)
+      | isDayMarker e && not (null acc) = reverse acc : go [e] rest
+      | otherwise                        = go (e : acc) rest
+
+-- | Render the journal overlay on the given tab.  The caller cycles
+-- tabs with 1/2/3 and dismisses with any other key.
+renderJournalOverlay :: SDLContext -> ScenarioDisplay -> GameWorld -> JournalTab -> IO ()
+renderJournalOverlay ctx display world tab = do
   clearSDL ctx
   let fc        = sdlFont ctx
       cols      = gridCols ctx
       rows      = gridRows ctx
-      pageW     = cols - 2 * fromIntegral marginLeft
-      entries   = worldJournal world
-      wrapped   = concatMap (wrapWords (max 10 pageW)) entries
       headerRow = 1
-      firstRow  = headerRow + 2
+      firstRow  = headerRow + 3
       lastRow   = rows - 2
-      budget    = max 1 (lastRow - firstRow + 1)
-      visible   = takeLast budget wrapped
-  renderText fc "— journal —" defaultText (marginLeft, fromIntegral headerRow)
-  drawHLine fc cols (fromIntegral (headerRow + 1))
-  mapM_ (\(idx, line) ->
-    renderText fc line defaultText (marginLeft, fromIntegral (firstRow + idx))
-    ) (zip [0 :: Int ..] visible)
-  renderText fc "press any key to close" greyText (marginLeft, fromIntegral lastRow)
+  drawJournalHeader fc cols headerRow tab
+  case tab of
+    TabToday   -> drawToday   fc cols rows firstRow lastRow world
+    TabPast    -> drawPast    fc cols     firstRow lastRow world
+    TabCatalog -> drawCatalog fc cols     firstRow lastRow display world
+  renderText fc "1 today  2 past days  3 catalog   any other key: close" greyText
+    (marginLeft, fromIntegral lastRow)
   presentSDL ctx
+
+drawJournalHeader :: FontContext -> Int -> Int -> JournalTab -> IO ()
+drawJournalHeader fc cols row tab = do
+  let title = case tab of
+        TabToday   -> "— journal · today —"
+        TabPast    -> "— journal · past days —"
+        TabCatalog -> "— journal · catalog —"
+  renderText fc title defaultText (marginLeft, fromIntegral row)
+  drawHLine fc cols (fromIntegral (row + 1))
+
+-- | Today: entries since the last day marker, plus a small sketch map
+-- tucked at the top.  If the journal has never seen a day boundary,
+-- the whole thing is "today."
+drawToday :: FontContext -> Int -> Int -> Int -> Int -> GameWorld -> IO ()
+drawToday fc cols rows firstRow lastRow world = do
+  let pages      = journalPages (worldJournal world)
+      today      = if null pages then [] else last pages
+      pageW      = cols - 2 * fromIntegral marginLeft
+      mapHeight  = min 8 (max 0 (rows `div` 6))
+      mapRows    = sketchMapRows world (cols - 2 * fromIntegral marginLeft - 4) mapHeight
+      afterMap   = firstRow + length mapRows + 1
+      budget     = max 1 (lastRow - afterMap)
+      wrapped    = concatMap (wrapWords (max 10 pageW)) today
+      visible    = takeLast budget wrapped
+  mapM_ (\(i, line) ->
+    renderText fc line dimText (marginLeft + 2, fromIntegral (firstRow + i))
+    ) (zip [0 :: Int ..] mapRows)
+  mapM_ (\(i, line) ->
+    renderText fc line defaultText (marginLeft, fromIntegral (afterMap + i))
+    ) (zip [0 :: Int ..] visible)
+
+-- | Past days: every completed day's entries, paginated by the day
+-- markers.  Today is deliberately excluded (it lives in its own tab).
+-- The last N lines across all past pages are shown.
+drawPast :: FontContext -> Int -> Int -> Int -> GameWorld -> IO ()
+drawPast fc cols firstRow lastRow world = do
+  let pages   = journalPages (worldJournal world)
+      past    = if null pages then [] else init pages
+      pageW   = cols - 2 * fromIntegral marginLeft
+      flatten = concatMap (wrapWords (max 10 pageW)) (concat past)
+      budget  = max 1 (lastRow - firstRow)
+      visible = takeLast budget flatten
+  case past of
+    [] -> renderText fc "No past days yet." greyText (marginLeft, fromIntegral firstRow)
+    _  -> mapM_ (\(i, line) ->
+            renderText fc line defaultText (marginLeft, fromIntegral (firstRow + i))
+            ) (zip [0 :: Int ..] visible)
+
+-- | Catalog: every discovery the scenario exposes, grouped by
+-- category.  Empty groups render as a quiet footer line naming what
+-- you still haven't seen.  Scenarios without a catalog get a single
+-- hint.
+drawCatalog :: FontContext -> Int -> Int -> Int -> ScenarioDisplay -> GameWorld -> IO ()
+drawCatalog fc cols firstRow lastRow display world = do
+  let groups    = sdCatalog display world
+      pageW     = cols - 2 * fromIntegral marginLeft
+      budget    = max 1 (lastRow - firstRow)
+      lines'    = concatMap renderGroup groups
+      wrapped   = concatMap (wrapWords (max 10 pageW)) lines'
+      visible   = take budget wrapped
+  case groups of
+    [] -> renderText fc "This scenario doesn't keep a catalog."
+            greyText (marginLeft, fromIntegral firstRow)
+    _  -> mapM_ (\(i, line) ->
+            let color = if line `elem` lines' && null (dropWhile (/= ':') line)
+                          then greyText else defaultText
+            in renderText fc line color (marginLeft, fromIntegral (firstRow + i))
+            ) (zip [0 :: Int ..] visible)
+  where
+    renderGroup (label, names) =
+      let header = label <> "s:"
+          body   = if null names
+                     then ["  you haven't catalogued any yet."]
+                     else map ("  " <>) names
+      in header : body ++ [""]
+
+-- ---------------------------------------------------------------------------
+-- Sketch map
+-- ---------------------------------------------------------------------------
+
+-- | Render a small unicode sketch of where the player has been this
+-- hunt, derived from the location graph's normalized coords plus the
+-- player's location history.  Returns the map as a list of rows of
+-- text so the overlay caller can position it freely.  Empty when the
+-- graph has no coord data.
+sketchMapRows :: GameWorld -> Int -> Int -> [String]
+sketchMapRows _ _ 0 = []
+sketchMapRows world width height =
+  let coordMap = lgCoords (worldLocationGraph world)
+  in if Map.null coordMap
+       then []
+       else
+         let history    = concat (Map.elems (worldLocationHistory world))
+             historySet = Set.fromList history
+             playerLoc  = case Map.elems (worldLocations world) of
+                            (l:_) -> Just l
+                            []    -> Nothing
+             w          = max 8 (min 40 width)
+             h          = max 3 (min 10 height)
+             cellAt x y =
+               let matches =
+                     [ loc
+                     | (loc, (nx, ny)) <- Map.toList coordMap
+                     , round (nx * fromIntegral (w - 1)) == (x :: Int)
+                     , round (ny * fromIntegral (h - 1)) == (y :: Int)
+                     ]
+               in pickGlyph matches playerLoc historySet
+         in [ [ cellAt x y | x <- [0 .. w - 1] ] | y <- [0 .. h - 1] ]
+
+-- | Choose which glyph represents the cell: 'P' for the player, '*'
+-- for a history cell, '.' for a mapped but unvisited cell, ' ' when
+-- no location falls here.
+pickGlyph :: [Location] -> Maybe Location -> Set.Set Location -> Char
+pickGlyph locs playerLoc hist
+  | any (\l -> Just l == playerLoc) locs = 'P'
+  | any (`Set.member` hist) locs         = '*'
+  | not (null locs)                      = '.'
+  | otherwise                            = ' '

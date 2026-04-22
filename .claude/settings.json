@@ -13,7 +13,8 @@
       "Bash(git -C /mnt/c/Users/GlendonKlassen/code/throughline-engine log --oneline -15)",
       "Bash(stack exec *)",
       "Bash(hlint src/ app/ test/)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(grep -rn \"ScenarioDisplay$\\\\|ScenarioDisplay {\" app/ --include=\"*.hs\")"
     ],
     "additionalDirectories": [
       "/tmp"
