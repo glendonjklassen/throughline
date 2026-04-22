@@ -486,9 +486,9 @@ sensoryPool = Map.fromList
       , "loose stone, frost under it — footing's bad"
       ])
   , ((CRoad, Bridge),
-      [ "gravel running into green"
-      , "a short, bright exposure"
-      , "ten seconds of open"
+      [ "gravel running into green — cover starts just past the shoulder"
+      , "brief open stretch; cross it quick"
+      , "about ten seconds exposed before you reach cover"
       , "cover close on the far side"
       ])
   , ((CBush, Interior),

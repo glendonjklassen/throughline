@@ -193,19 +193,26 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
           | Just a <- safeOptionIndexIn movementOptionKeys c movements -> pure (Just a)
           | otherwise -> awaitKeyLoop acts debugRef' Nothing worldNow render'
 
--- | Drive the journal overlay.  Keys 1/2/3 switch tabs; any other
--- key dismisses.  Returns when the overlay closes; the caller
--- redraws the world frame.
+-- | Drive the journal overlay.  Pressing the number of a *different*
+-- tab switches to it; pressing the number of the *current* tab
+-- closes the overlay (so the key that opened the journal also
+-- closes it).  Any other key dismisses.
 journalOverlayLoop :: SDLContext -> ScenarioDisplay -> GameWorld -> JournalTab -> IO ()
 journalOverlayLoop ctx display world tab = do
   renderJournalOverlay ctx display world tab
   mc <- awaitKeySDL
   case mc of
-    Nothing  -> pure ()
-    Just '1' -> journalOverlayLoop ctx display world TabToday
-    Just '2' -> journalOverlayLoop ctx display world TabPast
-    Just '3' -> journalOverlayLoop ctx display world TabCatalog
-    Just _   -> pure ()
+    Nothing -> pure ()
+    Just c
+      | c == currentTabKey tab -> pure ()
+      | c == '1'               -> journalOverlayLoop ctx display world TabToday
+      | c == '2'               -> journalOverlayLoop ctx display world TabPast
+      | c == '3'               -> journalOverlayLoop ctx display world TabCatalog
+      | otherwise              -> pure ()
+  where
+    currentTabKey TabToday   = '1'
+    currentTabKey TabPast    = '2'
+    currentTabKey TabCatalog = '3'
 
 -- | Hash a location (or its absence) into an Int for seeded sensory
 -- selection.  Co-arrivals at the same tick and location pick the same
