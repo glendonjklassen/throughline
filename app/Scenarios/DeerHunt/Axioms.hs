@@ -50,6 +50,57 @@ allAxioms hw you =
   , dayRolloverAxiom hw you
   , arrivalDiscoveryAxiom hw you
   , findDiscoveryAxiom hw you
+  , handFeelAxiom
+  ]
+
+-- ---------------------------------------------------------------------------
+-- Hand-feel beats
+-- ---------------------------------------------------------------------------
+
+-- | One-line body-state anchors sprinkled into the hunt.  Fires at a
+-- low per-tick rate so the hunter feels embodied — mittens, thermos,
+-- knees after a sit — without turning the log into a running stream
+-- of small observations.  Silent during the morning/dusk montage,
+-- the truck, and the post-hunt wrap.
+handFeelAxiom :: Axiom
+handFeelAxiom = Axiom
+  { axiomId       = ScenarioAxiom "handFeel"
+  , axiomPriority = 6
+  , axiomEvaluate = \world _actions _diff ->
+      if not (eligible world)
+        then []
+        else
+          let tick = lcTick (worldClock world)
+              roll = (tick * 2654435761 + 17) `mod` 100
+              idx  = (tick `div` 7) `mod` length handFeelPool
+          in if roll < handFeelChancePct
+               then [immediate (Narrate (handFeelPool !! idx))]
+               else []
+  }
+  where
+    -- Skip when the hunter is at the truck or the day/season is
+    -- winding down — body-state prose on those ticks would clash
+    -- with the montage.
+    eligible world =
+      not (hasTag world backAtTruck)
+      && not (hasTag world dayOver)
+      && not (hasTag world seasonOver)
+
+handFeelChancePct :: Int
+handFeelChancePct = 6   -- ~1 in 17 ticks; tunable
+
+handFeelPool :: [String]
+handFeelPool =
+  [ "Your hands are cold inside the mittens."
+  , "You pull the thermos out. Coffee still warm, just."
+  , "Your knees remind you about the long sit earlier."
+  , "You rub your thumb along the stock out of habit."
+  , "Breath condensing on your eyelashes."
+  , "Your boots have settled into the ground a little."
+  , "You flex your trigger finger. It's stiff."
+  , "You shift the rifle sling off the sore shoulder."
+  , "The cold has found a seam in your coat."
+  , "You sniff. The air has that frost-on-metal smell."
   ]
 
 -- | Prose lines for DeerHunt's time-of-day transitions.  Returning
