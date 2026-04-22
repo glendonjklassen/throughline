@@ -11,6 +11,16 @@ extra-source-files:
 
 description:         A narrative engine written in Haskell for modeling experience with specificity through composable effects and world state.
 
+# Cabal flag for release builds.  When enabled, compiles out the F3
+# debug-cycle key and the learning-mode overlay so a shipped Steam
+# bundle doesn't expose dev-only tooling.  Dev builds default to off
+# (flag absent) so the F3 tooling is always available locally.
+flags:
+  release:
+    description: Strip debug-only UI (F3 cycle, learning mode overlay).
+    default: false
+    manual: true
+
 dependencies:
 - base >= 4.7 && < 5
 - mtl
@@ -45,11 +55,51 @@ ghc-options:
 
 library:
   source-dirs: src
+  # When the 'release' flag is on, define RELEASE_BUILD so CPP guards
+  # in SDL.Runner (and anywhere else dev-only tooling hides) can
+  # branch on it.
+  when:
+  - condition: flag(release)
+    cpp-options: -DRELEASE_BUILD
 
 executables:
+  # Multi-scenario dev launcher.  Sees every scenario under app/Scenarios/.
   throughline-exe:
     main:                Main.hs
-    source-dirs:         app
+    source-dirs:
+    - app/dev
+    - app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - throughline
+
+  # Single-scenario Steam bundle: Deer Hunt only.  Listing the exact
+  # scenario modules in other-modules keeps the other scenarios from
+  # being linked even though they sit next to DeerHunt under app/.
+  deerhunt-exe:
+    main:                Main.hs
+    source-dirs:
+    - app/deerhunt
+    - app
+    when:
+    - condition: true
+      other-modules:
+      - Scenarios.DeerHunt
+      - Scenarios.DeerHunt.Actions
+      - Scenarios.DeerHunt.Axioms
+      - Scenarios.DeerHunt.Constants
+      - Scenarios.DeerHunt.Discoveries
+      - Scenarios.DeerHunt.Generation
+      - Scenarios.DeerHunt.Help
+      - Scenarios.DeerHunt.Narration
+      - Scenarios.DeerHunt.Probability
+      - Scenarios.DeerHunt.Rack
+      - Scenarios.DeerHunt.Section
+      - Scenarios.DeerHunt.Terrain
+      - Scenarios.DeerHunt.World
     ghc-options:
     - -threaded
     - -rtsopts
@@ -140,6 +190,10 @@ tests:
     - Engine.Sync.ConvergenceSpec
     - Engine.Sync.EventLogSpec
     - Engine.Sync.IdentitySpec
+    - SDL.CrashHandlerSpec
+    - SDL.PaletteSpec
+    - SDL.SaveSlotsSpec
+    - SDL.SettingsSpec
     - SDL.TextSpec
 
 benchmarks:

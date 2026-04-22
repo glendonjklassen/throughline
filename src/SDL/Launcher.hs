@@ -1,0 +1,299 @@
+-- | Entry-point scaffolding shared between the multi-scenario dev
+-- launcher and single-scenario Steam bundles.
+--
+-- An executable tells 'runLauncher' which scenarios it wants to offer
+-- and the launcher decides whether to render a picker (multiple) or a
+-- title screen with Continue / New hunt (one).  It also hosts the
+-- crash-handler wrap, so every shipped executable gets the same
+-- on-crash behavior for free.
+--
+-- What lives here is all the Main-ish plumbing.  Scenario bodies stay
+-- scenario-local; bundle-specific metadata (title, tagline, display)
+-- travels in 'ScenarioEntry'.
+module SDL.Launcher
+  ( ScenarioEntry(..)
+  , runLauncher
+  ) where
+
+import           Control.Exception      (SomeException, try)
+
+import           Engine
+import           GameTypes              (CharId(..), PlayerId, Scenario, scenarioName)
+import           SDL.CrashHandler       (withCrashHandler)
+import           SDL.FontContext        (renderText)
+import           SDL.InputHandler       (awaitKeySDL)
+import           SDL.Layout             (ScenarioDisplay)
+import qualified Data.Version           as Version
+
+import           Paths_throughline      (version)
+import           SDL.Onboarding         (defaultHowToPlay, howToPlayLoop)
+import           SDL.Palette            (PaletteMode(..), defaultText, dimText, greyText, warningColor)
+import           SDL.Renderer           (SDLContext(..), clearSDL, freeSDL, initSDLWith, presentSDL)
+import           SDL.Runner             (sdlUI)
+import           SDL.SaveSlots          (SaveStatus(..), resetScenarioSave,
+                                         scenarioSaveStatus)
+import           SDL.Settings           (Settings(..), loadSettings)
+import           SDL.SettingsMenu       (settingsMenu)
+
+-- | What the launcher needs to know about one scenario.  'label' and
+-- 'tagline' are the player-facing strings; 'display' is wired into
+-- the runner for scenario-specific rendering; 'make' is the seed-
+-- and-playerId-parameterized scenario constructor; 'howToPlay' lets
+-- a scenario ship a custom help screen, falling back to generic help
+-- when absent.
+data ScenarioEntry = ScenarioEntry
+  { entryLabel     :: String
+  , entryTagline   :: String
+  , entryDisplay   :: ScenarioDisplay
+  , entryMake      :: Int -> CharId -> Scenario
+  , entryHowToPlay :: Maybe [String]
+  }
+
+-- | Font asset path — same for every bundle, shipped alongside the
+-- binary.  If we ever need per-bundle fonts this moves into
+-- 'ScenarioEntry' or a bundle config.
+fontAsset :: FilePath
+fontAsset = "assets/JetBrainsMono-Regular.ttf"
+
+-- ---------------------------------------------------------------------------
+-- Top-level entry
+-- ---------------------------------------------------------------------------
+
+-- | Run the launcher for a bundle.  Empty list is a programmer error;
+-- a one-entry list skips the picker and shows a title screen; many
+-- entries render the scenario menu.
+runLauncher :: [ScenarioEntry] -> IO ()
+runLauncher []       = error "runLauncher: no scenarios in bundle"
+runLauncher entries  = withCrashHandler renderCrashScreen (launcherMain entries)
+
+launcherMain :: [ScenarioEntry] -> IO ()
+launcherMain entries = do
+  settings <- loadSettings
+  let mode  = if sHighContrast settings then HighContrast else Autumn
+      title = case entries of
+        [single] -> entryLabel single <> " — throughline"
+        _        -> "throughline"
+  ctx    <- initSDLWith fontAsset title (sFontScale settings) mode
+  ident  <- loadOrCreate =<< defaultIdentityPath
+  let pid = playerIdOf ident
+  choice <- case entries of
+    [single] -> singleScenarioMenu ctx pid single
+    _        -> multiScenarioMenu  ctx pid entries
+  freeSDL ctx
+  case choice of
+    Nothing    -> pure ()
+    Just entry -> runScenario (sdlUI (entryDisplay entry)) (entryMake entry)
+
+-- ---------------------------------------------------------------------------
+-- Single-scenario bundle: title screen with Continue / New hunt
+-- ---------------------------------------------------------------------------
+
+-- | Title screen for a one-scenario Steam bundle.  Shows Continue only
+-- when a save exists; always offers New (with a confirmation if a
+-- save would be discarded).
+singleScenarioMenu :: SDLContext -> PlayerId -> ScenarioEntry -> IO (Maybe ScenarioEntry)
+singleScenarioMenu ctx pid entry = do
+  status <- scenarioEntryStatus pid entry
+  renderSingleMenu ctx entry status
+  pickSingle ctx pid entry status
+
+renderSingleMenu :: SDLContext -> ScenarioEntry -> SaveStatus -> IO ()
+renderSingleMenu ctx entry status = do
+  clearSDL ctx
+  let fc = sdlFont ctx
+  renderText fc (entryLabel entry)                  defaultText (3, 2)
+  renderText fc (entryTagline entry)                dimText     (3, 3)
+  renderText fc ""                                  dimText     (3, 4)
+  if hasSave status
+    then do
+      renderText fc "1) Continue"                   defaultText (4, 6)
+      renderText fc (continueHint status)           dimText     (4, 7)
+      renderText fc "2) New hunt (discards save)"   defaultText (4, 9)
+    else
+      renderText fc "1) Begin"                      defaultText (4, 6)
+  renderText fc "h) How to play"                    greyText    (4, 11)
+  renderText fc "s) Settings"                       greyText    (4, 12)
+  renderText fc "q) Quit"                           greyText    (4, 13)
+  renderText fc versionTag                          dimText     (4, 15)
+  presentSDL ctx
+  where
+    continueHint s = "   " <> show (saveEntryCount s) <> " actions logged"
+
+pickSingle :: SDLContext -> PlayerId -> ScenarioEntry -> SaveStatus -> IO (Maybe ScenarioEntry)
+pickSingle ctx pid entry status = loop
+  where
+    loop = do
+      mc <- awaitKeySDL
+      case mc of
+        Nothing  -> pure Nothing
+        Just 'q' -> pure Nothing
+        Just 'h' -> showHelp
+        Just 'H' -> showHelp
+        Just 's' -> showSettings
+        Just 'S' -> showSettings
+        Just '1'
+          | hasSave status -> pure (Just entry)       -- Continue
+          | otherwise      -> pure (Just entry)       -- Begin (no save yet)
+        Just '2'
+          | hasSave status -> do
+              confirmed <- confirmDiscard ctx (entryLabel entry)
+              if confirmed
+                then do
+                  resetScenarioSave pid (scenarioName (entryMake entry 0 dummyChar))
+                  pure (Just entry)
+                else do
+                  renderSingleMenu ctx entry status
+                  loop
+          | otherwise -> loop
+        _ -> loop
+    showHelp = do
+      howToPlayLoop ctx (entryLabel entry) (helpPagesFor entry)
+      renderSingleMenu ctx entry status
+      loop
+    showSettings = do
+      _ <- settingsMenu ctx
+      renderSingleMenu ctx entry status
+      loop
+
+-- | A placeholder CharId used only to ask a scenario for its 'scenarioName'.
+-- Scenario names are static strings that never depend on the player
+-- CharId passed at construction, so feeding in a throwaway value is
+-- safe and saves the launcher from having to know the real one early.
+dummyChar :: CharId
+dummyChar = Truth
+
+-- ---------------------------------------------------------------------------
+-- Multi-scenario bundle: dev launcher with numeric picker
+-- ---------------------------------------------------------------------------
+
+-- | Render the scenario menu in the SDL window and await a choice.
+-- Shows a save indicator next to scenarios with in-progress hunts.
+multiScenarioMenu :: SDLContext -> PlayerId -> [ScenarioEntry] -> IO (Maybe ScenarioEntry)
+multiScenarioMenu ctx pid entries = do
+  statuses <- mapM (scenarioEntryStatus pid) entries
+  renderMultiMenu ctx entries statuses
+  pickMulti statuses
+  where
+    pickMulti statuses = do
+      mc <- awaitKeySDL
+      case mc of
+        Nothing  -> pure Nothing
+        Just 'q' -> pure Nothing
+        Just 'h' -> showHelp statuses
+        Just 'H' -> showHelp statuses
+        Just 's' -> showSettings statuses
+        Just 'S' -> showSettings statuses
+        Just ch  ->
+          let n = fromEnum ch - fromEnum '0'
+          in if n >= 1 && n <= length entries
+               then pure (Just (entries !! (n - 1)))
+               else pickMulti statuses
+    showHelp statuses = do
+      howToPlayLoop ctx "how to play" defaultHowToPlay
+      renderMultiMenu ctx entries statuses
+      pickMulti statuses
+    showSettings statuses = do
+      _ <- settingsMenu ctx
+      renderMultiMenu ctx entries statuses
+      pickMulti statuses
+
+renderMultiMenu :: SDLContext -> [ScenarioEntry] -> [SaveStatus] -> IO ()
+renderMultiMenu ctx entries statuses = do
+  clearSDL ctx
+  let fc = sdlFont ctx
+  renderText fc "throughline" defaultText (3, 2)
+  renderText fc "A narrative engine." dimText (3, 3)
+  renderText fc "" dimText (3, 4)
+  mapM_ (renderRow fc) (zip3 [1 :: Int ..] entries statuses)
+  let helpRow     = fromIntegral (4 + length entries * 2 + 2)
+      settingsRow = helpRow + 1
+      quitRow     = settingsRow + 1
+  renderText fc "h) How to play" greyText (4, helpRow)
+  renderText fc "s) Settings"    greyText (4, settingsRow)
+  renderText fc "q) Quit"        greyText (4, quitRow)
+  renderText fc versionTag       dimText  (4, quitRow + 2)
+  presentSDL ctx
+  where
+    renderRow fc (n, e, s) = do
+      let row   = fromIntegral (4 + n * 2)
+          label = show n <> ". " <> entryLabel e <> saveTag s
+      renderText fc label           defaultText (4, row)
+      renderText fc ("   " <> entryTagline e) dimText (4, row + 1)
+    saveTag s
+      | hasSave s = "  (in progress)"
+      | otherwise = ""
+
+-- ---------------------------------------------------------------------------
+-- Shared helpers
+-- ---------------------------------------------------------------------------
+
+scenarioEntryStatus :: PlayerId -> ScenarioEntry -> IO SaveStatus
+scenarioEntryStatus pid e =
+  scenarioSaveStatus pid (scenarioName (entryMake e 0 dummyChar))
+
+-- | Short human-readable version tag pulled from the cabal file at
+-- build time.  Shown in the footer of the launcher menus so players
+-- can include it when filing bug reports.
+versionTag :: String
+versionTag = "v" <> Version.showVersion version
+
+-- | Pick the help pages for a scenario entry, falling back to the
+-- generic 'defaultHowToPlay' when the entry didn't supply any.
+helpPagesFor :: ScenarioEntry -> [String]
+helpPagesFor e = case entryHowToPlay e of
+  Just pages -> pages
+  Nothing    -> defaultHowToPlay
+
+-- | Two-key confirmation: y starts over, anything else cancels.  Kept
+-- deliberately spartan — the "discards save" wording already does the
+-- warning work on the main screen.
+confirmDiscard :: SDLContext -> String -> IO Bool
+confirmDiscard ctx label = do
+  clearSDL ctx
+  let fc = sdlFont ctx
+  renderText fc "Start a new hunt?"             defaultText  (3, 2)
+  renderText fc ("This deletes your " <> label) warningColor (3, 3)
+  renderText fc "save permanently."             warningColor (3, 4)
+  renderText fc ""                              dimText      (3, 5)
+  renderText fc "y) Yes, start over"            defaultText  (4, 7)
+  renderText fc "n) Cancel"                     defaultText  (4, 8)
+  presentSDL ctx
+  mc <- awaitKeySDL
+  pure (mc == Just 'y' || mc == Just 'Y')
+
+-- ---------------------------------------------------------------------------
+-- Crash screen
+-- ---------------------------------------------------------------------------
+
+-- | GUI fallback for the crash handler: try to spin up a fresh SDL
+-- context (the old one might be dead) and show the crash-report path
+-- and a short excerpt of the exception.  Any failure here falls
+-- through — the handler also logs to stderr and disk.
+renderCrashScreen :: FilePath -> String -> IO ()
+renderCrashScreen reportPath message = do
+  -- Spin up a fresh context with default settings — the user's own
+  -- settings might have been implicated in the crash, so we don't
+  -- re-read them here.
+  r <- try (initSDLWith fontAsset "throughline — crash" 1.0 Autumn)
+         :: IO (Either SomeException SDLContext)
+  case r of
+    Left _    -> pure ()
+    Right ctx -> do
+      clearSDL ctx
+      let fc = sdlFont ctx
+      renderText fc "throughline crashed."                    warningColor (3, 2)
+      renderText fc ""                                        dimText      (3, 3)
+      renderText fc "A crash report was written to:"          defaultText  (3, 4)
+      renderText fc reportPath                                defaultText  (3, 5)
+      renderText fc ""                                        dimText      (3, 6)
+      renderText fc "You can attach that file when reporting" dimText      (3, 7)
+      renderText fc "this issue."                             dimText      (3, 8)
+      renderText fc ""                                        dimText      (3, 9)
+      renderText fc (excerpt message)                         greyText     (3, 10)
+      renderText fc ""                                        dimText      (3, 11)
+      renderText fc "Press any key to close."                 greyText     (3, 12)
+      presentSDL ctx
+      _ <- awaitKeySDL
+      freeSDL ctx
+  where
+    excerpt s = take 80 (takeWhile (/= '\n') s)
