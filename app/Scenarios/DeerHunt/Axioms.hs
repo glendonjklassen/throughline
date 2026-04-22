@@ -9,6 +9,7 @@ import           Engine.CRDT.ORSet           (orToList)
 import           GameTypes
 import           Scenarios.DeerHunt.Constants
 import           Scenarios.DeerHunt.Discoveries (arrivalDiscoveryAxiom, findDiscoveryAxiom)
+import           Scenarios.DeerHunt.Rack        (currentRack, describeRack)
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
 import           Scenarios.DeerHunt.Probability
 import           Scenarios.DeerHunt.World      (HuntWorld(..), hwClass, hwLocsOfClass, hwNearestTruck, hwStart)
@@ -525,8 +526,9 @@ dayRolloverAxiom hw you = Axiom
         else
           let killed  = hasTag world deerKilled
               missed  = hasTag world deerGone
+              rack    = currentRack hw (worldDayNumber world)
               summary
-                | killed    = "End of the day. Took the buck. Meat in the freezer."
+                | killed    = "End of the day. Took the buck. " <> describeRack rack <> ". Meat in the freezer."
                 | missed    = "End of the day. Missed my chance. He's off the section."
                 | otherwise = "Called it. Packed it in. Tomorrow."
               -- New-day buck placement: anywhere in bush or ridge,

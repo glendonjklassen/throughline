@@ -104,6 +104,7 @@ tests:
     - Scenarios.DeerHunt.Generation
     - Scenarios.DeerHunt.Narration
     - Scenarios.DeerHunt.Probability
+    - Scenarios.DeerHunt.Rack
     - Scenarios.DeerHunt.Section
     - Scenarios.DeerHunt.Terrain
     - Scenarios.DeerHunt.World
@@ -184,6 +185,7 @@ benchmarks:
     - Scenarios.DeerHunt.Generation
     - Scenarios.DeerHunt.Narration
     - Scenarios.DeerHunt.Probability
+    - Scenarios.DeerHunt.Rack
     - Scenarios.DeerHunt.Section
     - Scenarios.DeerHunt.Terrain
     - Scenarios.DeerHunt.World
