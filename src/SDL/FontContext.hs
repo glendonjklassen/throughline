@@ -3,6 +3,7 @@
 module SDL.FontContext
   ( FontContext(..)
   , initFont
+  , initFontWith
   , freeFont
   , cellWidth
   , cellHeight
@@ -19,15 +20,19 @@ import           Data.Word (Word8)
 import           Foreign.C.Types (CInt)
 import qualified SDL
 import qualified SDL.Font as SDLTTF
-import           SDL.Palette (Color(..))
+import           SDL.Palette (Color(..), PaletteMode(..), remapColor)
 
--- | Holds the loaded font and renderer reference.
+-- | Holds the loaded font and renderer reference.  'fcPalette' is
+-- applied at every 'renderChar' / 'renderText' call so switching the
+-- accessibility mode is a single field update instead of a codebase-
+-- wide refactor.
 data FontContext = FontContext
   { fcFont     :: SDLTTF.Font
   , fcRenderer :: SDL.Renderer
   , fcCellW    :: !CInt       -- ^ character cell width in pixels
   , fcCellH    :: !CInt       -- ^ character cell height in pixels
   , fcCache    :: IORef (Map.Map (Char, Word8, Word8, Word8) SDL.Texture)
+  , fcPalette  :: !PaletteMode
   }
 
 cellWidth :: FontContext -> CInt
@@ -36,12 +41,17 @@ cellWidth = fcCellW
 cellHeight :: FontContext -> CInt
 cellHeight = fcCellH
 
--- | Load the embedded font at the given point size.
+-- | Load the embedded font at the given point size, defaulting to the
+-- 'Autumn' palette.  Use 'initFontWith' to choose a different palette
+-- mode at load time.
 initFont :: SDL.Renderer -> FilePath -> Int -> IO FontContext
-initFont renderer fontPath ptSize = do
+initFont renderer fontPath ptSize = initFontWith renderer fontPath ptSize Autumn
+
+-- | Load the embedded font at the given point size and palette mode.
+initFontWith :: SDL.Renderer -> FilePath -> Int -> PaletteMode -> IO FontContext
+initFontWith renderer fontPath ptSize mode = do
   SDLTTF.initialize
   font <- SDLTTF.load fontPath ptSize
-  -- Measure a reference character to get cell dimensions
   (w, h) <- SDLTTF.size font "M"
   cache <- newIORef Map.empty
   pure FontContext
@@ -50,6 +60,7 @@ initFont renderer fontPath ptSize = do
     , fcCellW    = fromIntegral w
     , fcCellH    = fromIntegral h
     , fcCache    = cache
+    , fcPalette  = mode
     }
 
 -- | Clean up font resources.
@@ -61,6 +72,9 @@ freeFont fc = do
   SDLTTF.quit
 
 -- | Render a string at a grid position (column, row) in the given color.
+-- Color remapping for the active palette mode happens once, in
+-- 'renderChar' / 'renderCharAtPixel', so high-level callers don't
+-- need to know about it.
 renderText :: FontContext -> String -> Color -> (CInt, CInt) -> IO ()
 renderText _ [] _ _ = pure ()
 renderText fc str color (col, row) = go str col
@@ -85,8 +99,9 @@ renderTextAtPixel fc str color (x0, y0) = go str x0
 
 -- | Render a single character at an absolute pixel position.
 renderCharAtPixel :: FontContext -> Char -> Color -> (CInt, CInt) -> IO ()
-renderCharAtPixel fc c (Color r g b a) (x, y) = do
-  let key = (c, r, g, b)
+renderCharAtPixel fc c color (x, y) = do
+  let Color r g b a = remapColor (fcPalette fc) color
+      key = (c, r, g, b)
   cache <- readIORef (fcCache fc)
   tex <- case Map.lookup key cache of
     Just t  -> pure t
@@ -113,8 +128,9 @@ renderTextTinted
   -> (CInt, CInt)   -- ^ grid (col, row)
   -> IO ()
 renderTextTinted _ [] _ _ _ = pure ()
-renderTextTinted fc str (Color br bg bb ba) fg (col, row) = do
-  let ren = fcRenderer fc
+renderTextTinted fc str bgc fg (col, row) = do
+  let Color br bg bb ba = remapColor (fcPalette fc) bgc
+      ren = fcRenderer fc
       x   = col * fcCellW fc
       y   = row * fcCellH fc
       w   = fromIntegral (length str) * fcCellW fc
@@ -129,8 +145,9 @@ renderTextTinted fc str (Color br bg bb ba) fg (col, row) = do
 -- color's alpha channel modulates the glyph's opacity via the texture's
 -- alphaMod, so callers can fade glyphs without needing a new cache entry.
 renderChar :: FontContext -> Char -> Color -> (CInt, CInt) -> IO ()
-renderChar fc c (Color r g b a) (col, row) = do
-  let key = (c, r, g, b)
+renderChar fc c color (col, row) = do
+  let Color r g b a = remapColor (fcPalette fc) color
+      key = (c, r, g, b)
   cache <- readIORef (fcCache fc)
   tex <- case Map.lookup key cache of
     Just t  -> pure t

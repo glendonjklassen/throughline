@@ -4,6 +4,7 @@
 module SDL.Renderer
   ( SDLContext(..)
   , initSDL
+  , initSDLWith
   , freeSDL
   , renderWorldSDL
   , renderWorldFrame
@@ -29,6 +30,7 @@ import           Data.List (intercalate, sortOn)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import           Data.Maybe (fromMaybe)
+import qualified Data.Text as T
 import           Foreign.C.Types (CInt)
 import qualified SDL
 import           SDL.FontContext
@@ -71,14 +73,25 @@ windowHeight = 800
 fontSize :: Int
 fontSize = 16
 
+-- | Init with default settings (Autumn palette, 1.0 font scale,
+-- windowed) and a generic window title.  Callers with a 'Settings'
+-- value and a bundle-specific title should use 'initSDLWith'.
 initSDL :: FilePath -> IO SDLContext
-initSDL fontPath = do
+initSDL fontPath = initSDLWith fontPath "Throughline" 1.0 Autumn
+
+-- | Init with explicit window title, font-scale and palette mode.
+-- Font scale is clamped to a sensible range so a bogus settings file
+-- can't render text unreadably tiny or clip text off the window.
+initSDLWith :: FilePath -> String -> Double -> PaletteMode -> IO SDLContext
+initSDLWith fontPath title scale mode = do
   SDL.initializeAll
-  window <- SDL.createWindow "Throughline"
+  window <- SDL.createWindow (T.pack title)
     SDL.defaultWindow { SDL.windowInitialSize = SDL.V2 windowWidth windowHeight }
   renderer <- SDL.createRenderer window (-1)
     SDL.defaultRenderer { SDL.rendererType = SDL.AcceleratedVSyncRenderer }
-  fc <- initFont renderer fontPath fontSize
+  let clamped = max 0.75 (min 2.0 scale)
+      ptSize  = max 8 (round (fromIntegral fontSize * clamped))
+  fc <- initFontWith renderer fontPath ptSize mode
   let cols = windowWidth  `div` cellWidth fc
       rows = windowHeight `div` cellHeight fc
   pure SDLContext
@@ -98,7 +111,7 @@ freeSDL ctx = do
 
 clearSDL :: SDLContext -> IO ()
 clearSDL ctx = do
-  let Color r g b a = bgColor
+  let Color r g b a = remapBgColor (fcPalette (sdlFont ctx))
   SDL.rendererDrawColor (sdlRenderer ctx) SDL.$= SDL.V4 r g b a
   SDL.clear (sdlRenderer ctx)
 

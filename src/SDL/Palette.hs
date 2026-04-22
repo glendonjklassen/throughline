@@ -1,7 +1,14 @@
 -- | Color palette for the SDL2 frontend.
 -- Late-autumn prairie: desaturated, warm-shifting.
+--
+-- High-contrast mode is a palette-level swap: 'remapColor' maps any
+-- low-level named color into a brighter, higher-contrast equivalent.
+-- The renderer threads a 'PaletteMode' through 'FontContext' so the
+-- mapping happens automatically and call-sites don't change when
+-- accessibility is toggled.
 module SDL.Palette
   ( Color(..)
+  , PaletteMode(..)
   , bgColor
   , defaultText, dimText, greyText
   , narratorColor, dialogueColor, thoughtColor
@@ -15,12 +22,22 @@ module SDL.Palette
   , ageFadeColor
   , familiarityColor
   , zoneTintDefault
+  , remapColor
+  , remapBgColor
   ) where
 
 import           Data.Word (Word8)
 
 -- | RGBA color.
 data Color = Color !Word8 !Word8 !Word8 !Word8
+  deriving (Show, Eq)
+
+-- | Which palette the renderer should use.  'Autumn' is the default
+-- prairie palette; 'HighContrast' is an accessibility mode that
+-- brightens foreground text and darkens backgrounds for better
+-- contrast on low-vision setups.  Colorblind-safe variants could be
+-- added as further constructors.
+data PaletteMode = Autumn | HighContrast
   deriving (Show, Eq)
 
 -- ---------------------------------------------------------------------------
@@ -162,6 +179,43 @@ zoneTintDefault name = case name of
   "SouthRoad"    -> Just (Color 120 112  98  32)
   "WestRoad"     -> Just (Color 120 112  98  32)
   _              -> Nothing
+
+-- ---------------------------------------------------------------------------
+-- High-contrast remap
+-- ---------------------------------------------------------------------------
+--
+-- The prairie palette is intentionally low-contrast — dried mud,
+-- parchment, fence post.  For players who need more separation, we
+-- lift every foreground toward bright bone and push the background
+-- closer to pure black.  The remap is idempotent: calling
+-- 'remapColor Autumn' is identity.
+
+-- | Remap a foreground color through the given palette mode.
+remapColor :: PaletteMode -> Color -> Color
+remapColor Autumn       c                 = c
+remapColor HighContrast c@(Color r g b a)
+  -- Leave fully-transparent or near-transparent overlays alone: the
+  -- zone tints and sparkle glyphs depend on low alpha to read as
+  -- halos, not solid blocks.
+  | a < 200   = c
+  -- Any near-black foreground is likely a separator or tombstone;
+  -- lift those to visible grey.
+  | isDim     = Color 170 170 170 a
+  | otherwise = Color (lift r) (lift g) (lift b) a
+  where
+    lumin = fromIntegral r * 0.3 + fromIntegral g * 0.59 + fromIntegral b * 0.11 :: Double
+    isDim = lumin < 80
+    lift v =
+      let d = fromIntegral v :: Double
+          -- push toward 255 by 45% of the gap
+          f = d + (255 - d) * 0.45
+      in round (min 255 f)
+
+-- | Remap the background color.  In HighContrast we darken further
+-- so text pops; in Autumn we return the canonical 'bgColor'.
+remapBgColor :: PaletteMode -> Color
+remapBgColor Autumn       = bgColor
+remapBgColor HighContrast = Color 8 8 8 255
 
 -- | Breathing pulse color: interpolate between dim and parchment.
 -- phase is 0.0 to 1.0 (sine wave position).
