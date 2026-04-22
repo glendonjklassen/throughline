@@ -6,6 +6,9 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  # Manual dispatch so release bundles can be produced on demand
+  # without waiting for a tag push.
+  workflow_dispatch:
 
 jobs:
   hlint:
@@ -20,7 +23,7 @@ jobs:
             | sh -s src/ app/ test/
 
   build-and-test:
-    name: build + test
+    name: build + test (linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,3 +55,100 @@ jobs:
 
       - name: Test
         run: stack test --no-terminal
+
+  # Cross-platform release bundles.  Runs only on tag pushes and on
+  # manual dispatch, because Haskell cross-compilation is slow and
+  # every run consumes a lot of CI minutes.  Each job produces a zip
+  # named throughline-<scenario>-<os>.zip uploaded as an artifact.
+  release-artifacts:
+    name: release bundle (${{ matrix.os }})
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux
+          - os: windows-latest
+            label: windows
+          - os: macos-latest
+            label: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # SDL2 installation varies by platform.  Linux uses apt, macOS
+      # uses Homebrew, Windows uses the pre-built MSYS2 packages that
+      # pkg-config can find.
+      - name: Install SDL2 (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libsdl2-ttf-dev pkg-config
+
+      - name: Install SDL2 (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install sdl2 sdl2_ttf pkg-config
+
+      - name: Install SDL2 (Windows via MSYS2)
+        if: matrix.os == 'windows-latest'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-SDL2_ttf
+            mingw-w64-x86_64-pkg-config
+
+      - name: Set up Haskell (Stack)
+        uses: haskell-actions/setup@v2
+        with:
+          enable-stack: true
+          stack-no-global: true
+          stack-setup-ghc: true
+
+      - name: Cache stack work and dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.stack
+            .stack-work
+          key: ${{ runner.os }}-stack-release-${{ hashFiles('stack.yaml', 'stack.yaml.lock', 'package.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-stack-release-
+            ${{ runner.os }}-stack-
+
+      - name: Build release bundles
+        run: stack build --no-terminal --flag throughline:release
+
+      # Stage the deerhunt bundle next to its assets so the zip is
+      # runnable from any extraction location.  Other single-scenario
+      # bundles follow the same pattern when they exist.
+      - name: Stage deerhunt bundle
+        shell: bash
+        run: |
+          BIN_DIR=$(stack path --local-install-root)/bin
+          STAGE=dist-release/deerhunt
+          mkdir -p "$STAGE"
+          cp "$BIN_DIR/deerhunt-exe"* "$STAGE/" 2>/dev/null || true
+          cp -r assets "$STAGE/"
+          cp README.md "$STAGE/" 2>/dev/null || true
+
+      - name: Zip deerhunt bundle
+        shell: bash
+        run: |
+          cd dist-release
+          if command -v 7z >/dev/null; then
+            7z a "deerhunt-${{ matrix.label }}.zip" deerhunt
+          else
+            zip -r "deerhunt-${{ matrix.label }}.zip" deerhunt
+          fi
+
+      - name: Upload deerhunt artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deerhunt-${{ matrix.label }}
+          path: dist-release/deerhunt-${{ matrix.label }}.zip
+          if-no-files-found: error
+          retention-days: 30

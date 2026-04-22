@@ -190,10 +190,13 @@ tests:
     - Engine.Sync.ConvergenceSpec
     - Engine.Sync.EventLogSpec
     - Engine.Sync.IdentitySpec
+    - SDL.AchievementsSpec
+    - SDL.AudioBackendSpec
     - SDL.CrashHandlerSpec
     - SDL.PaletteSpec
     - SDL.SaveSlotsSpec
     - SDL.SettingsSpec
+    - SDL.SteamInputSpec
     - SDL.TextSpec
 
 benchmarks:
