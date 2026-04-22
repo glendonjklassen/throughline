@@ -7,7 +7,7 @@ import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Reader   (asks)
 import           Control.Monad.State    (get)
 import           Data.IORef
-import           Data.List       (find, sortOn)
+import           Data.List       (find, partition, sortOn)
 import qualified Data.Map.Strict as Map
 import           Data.Maybe      (fromMaybe)
 import           Data.Word       (Word32)
@@ -157,27 +157,41 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
   liftIO $ writeIORef lastLocRef currentLoc
   liftIO (awaitKeyLoop actions debugRef skipChar world render)
   where
+    -- Split actions into the two pools the input handler expects:
+    -- non-movement actions land on the home row, movement actions
+    -- land on the top letter row.  Order within each pool matches
+    -- the action-list order so keys stay stable across turns.
+    partitionActions xs = partition (\a -> not (isMovement a)) xs
+    isMovement a = any isSetLocation (map effectBody (anyActionEffects a))
+    isSetLocation (SetLocation _ _)           = True
+    isSetLocation SetLocationRandom {}        = True
+    isSetLocation (SetLocationAdjacent _ _)   = True
+    isSetLocation SetLocationAdjacentPrefer {}= True
+    isSetLocation _                           = False
+
     awaitKeyLoop :: [AnyAction] -> IORef DebugMode -> Maybe Char -> GameWorld
                  -> (RevealFrame -> IO ()) -> IO (Maybe AnyAction)
     awaitKeyLoop acts debugRef' pending worldNow render' = do
       mc <- case pending of
         Just c  -> pure (Just c)
         Nothing -> awaitKeySDL
+      let (generals, movements) = partitionActions acts
       case mc of
-        Nothing   -> pure Nothing
-        Just 'q'  -> pure Nothing
-        Just 'd'  -> do
-          modifyIORef' debugRef' cycleDebug
-          awaitKeyLoop acts debugRef' Nothing worldNow render'
-        Just '1'  -> do
-          journalOverlayLoop ctx display worldNow TabToday
-          drainSDLEvents
-          render' finalReveal
-          render' finalReveal
-          awaitKeyLoop acts debugRef' Nothing worldNow render'
-        Just c    -> case safeOptionIndex c acts of
-          Just a  -> pure (Just a)
-          Nothing -> awaitKeyLoop acts debugRef' Nothing worldNow render'
+        Nothing -> pure Nothing
+        Just c
+          | c == quitKeyChar  -> pure Nothing
+          | c == debugKeyChar -> do
+              modifyIORef' debugRef' cycleDebug
+              awaitKeyLoop acts debugRef' Nothing worldNow render'
+          | c == '1' -> do
+              journalOverlayLoop ctx display worldNow TabToday
+              drainSDLEvents
+              render' finalReveal
+              render' finalReveal
+              awaitKeyLoop acts debugRef' Nothing worldNow render'
+          | Just a <- safeOptionIndexIn generalOptionKeys  c generals  -> pure (Just a)
+          | Just a <- safeOptionIndexIn movementOptionKeys c movements -> pure (Just a)
+          | otherwise -> awaitKeyLoop acts debugRef' Nothing worldNow render'
 
 -- | Drive the journal overlay.  Keys 1/2/3 switch tabs; any other
 -- key dismisses.  Returns when the overlay closes; the caller

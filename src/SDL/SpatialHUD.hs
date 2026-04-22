@@ -19,7 +19,7 @@ import           Data.List       (find, sortOn)
 import qualified Data.Map.Strict as Map
 import           Data.Maybe      (catMaybes)
 
-import           SDL.InputHandler (optionKeyFor)
+import           SDL.InputHandler (generalOptionKeys, movementOptionKeys, poolKeyFor)
 import           SDL.Palette      (Color, separatorColor)
 import           SDL.Text         (stripAnsi)
 import           GameTypes
@@ -121,15 +121,17 @@ markPreviousLocation (Just p) hud =
       | hudTarget c == Just p = c { hudLabel = "\x2190 " <> hudLabel c }
       | otherwise             = c
 
--- | Prefix for the action with 1-based index @n@ — "a) ", "b) ", etc.
--- Matches the key the player actually presses to pick that action.
-optionLabel :: Int -> AnyAction -> String
-optionLabel n act = optionKeyFor n : ") " <> stripAnsi (anyActionLabel act)
+-- | Prefix for the action with 1-based index @n@ drawn from the given
+-- key pool — "q) ", "a) ", etc.  Matches the key the player actually
+-- presses to pick that action.  Pool is typically 'generalOptionKeys'
+-- or 'movementOptionKeys'.
+optionLabel :: String -> Int -> AnyAction -> String
+optionLabel pool n act = poolKeyFor pool n : ") " <> stripAnsi (anyActionLabel act)
 
--- | Fallback: all actions listed linearly.
+-- | Fallback: all actions listed linearly, drawn from the general pool.
 flatLayout :: [AnyAction] -> SpatialHUD
 flatLayout actions = SpatialHUD
-  { shGeneralLabels = zipWith optionLabel [1 :: Int ..] actions
+  { shGeneralLabels = zipWith (optionLabel generalOptionKeys) [1 :: Int ..] actions
   , shSpatialCells  = []
   , shPlayerMarker  = (0, 0)
   , shBoxWidth      = 0
@@ -141,20 +143,24 @@ flatLayout actions = SpatialHUD
 spatialLayout :: [AnyAction] -> Location -> (Double, Double)
               -> LocationGraph -> Int -> SpatialHUD
 spatialLayout actions _playerLoc (px, py) lg totalCols =
-  let -- Number all actions sequentially
-      numbered = zip [1 :: Int ..] actions
-
-      -- Classify: movement actions with known target coords vs general
-      classify (n, act) = case movementTarget act of
+  let -- Classify by shape first: movement actions with known target
+      -- coords vs. general (non-movement) actions.  Order within each
+      -- bucket matches the order in @actions@ so keys stay stable
+      -- across turns when the action set is unchanged.
+      classify act = case movementTarget act of
         Just targetLoc
           | Just (tx, ty) <- Map.lookup targetLoc (lgCoords lg)
-          -> Right (n, act, tx - px, ty - py)
-        _ -> Left (n, act)
+          -> Right (act, tx - px, ty - py)
+        _ -> Left act
 
-      (generals, movements) = partitionEither (map classify numbered)
+      (generals, movementsRaw) = partitionEither (map classify actions)
 
-      -- General labels
-      genLabels = map (uncurry optionLabel) generals
+      -- Each pool is numbered independently from 1.  Generals land on
+      -- the home row (asdfghjkl); movements land on the top letter
+      -- row (qwertyuiop) through 'placeMovement'.
+      genLabels = zipWith (optionLabel generalOptionKeys) [1 :: Int ..] generals
+      movements = zipWith (\i (act, dx, dy) -> (i, act, dx, dy))
+                          [1 :: Int ..] movementsRaw
 
       -- Spatial box dimensions — use most of the screen width
       boxW = totalCols - 8
@@ -237,7 +243,7 @@ placeMovement :: Int -> Int -> Int -> Int -> Double
               -> (Int, AnyAction, Double, Double) -> HUDCell
 placeMovement boxW boxH centerCol centerRow maxDist (n, act, dx, dy) =
   let target = movementTarget act
-      label = optionLabel n act
+      label = optionLabel movementOptionKeys n act
       labelLen = length label
       -- Reserve space for the label itself
       maxColDisp = (boxW - labelLen) `div` 2 - 1

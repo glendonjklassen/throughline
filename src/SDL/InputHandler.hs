@@ -10,6 +10,12 @@ module SDL.InputHandler
   , optionKeys
   , optionKeyFor
   , safeOptionIndex
+  , movementOptionKeys
+  , generalOptionKeys
+  , poolKeyFor
+  , safeOptionIndexIn
+  , quitKeyChar
+  , debugKeyChar
   ) where
 
 import           Control.Applicative ((<|>))
@@ -63,6 +69,8 @@ keycodeToChar kc = lookup kc letterCodes <|> lookup kc digitCodes
       [ (KC.Keycode1, '1'), (KC.Keycode2, '2'), (KC.Keycode3, '3')
       , (KC.Keycode4, '4'), (KC.Keycode5, '5'), (KC.Keycode6, '6')
       , (KC.Keycode7, '7'), (KC.Keycode8, '8'), (KC.Keycode9, '9')
+      , (KC.KeycodeEscape, quitKeyChar)
+      , (KC.KeycodeF3,     debugKeyChar)
       ]
 
 -- | Check if a quit event is pending (non-blocking).
@@ -146,7 +154,50 @@ optionKeyFor n
 -- | Pick an element by its option-key character.  'a' → index 0, 'b' → 1,
 -- etc.  Returns @Nothing@ for unmapped keys or out-of-range picks.
 safeOptionIndex :: Char -> [x] -> Maybe x
-safeOptionIndex c xs =
-  case elemIndex c optionKeys of
+safeOptionIndex = safeOptionIndexIn optionKeys
+
+-- ---------------------------------------------------------------------------
+-- Positional pools
+-- ---------------------------------------------------------------------------
+--
+-- The runtime splits action options across two keyboard rows so the
+-- player's fingers fall naturally: movement on the top letter row,
+-- general (non-movement) actions on the home row.  Reserved roles
+-- live on non-letter keys — Escape quits, F3 cycles debug — so every
+-- letter is free for a scenario option.
+
+-- | Top-row keys, left to right.  Carry movement (spatial HUD) options.
+movementOptionKeys :: String
+movementOptionKeys = "qwertyuiop"
+
+-- | Home-row keys, left to right.  Carry non-movement actions.
+generalOptionKeys :: String
+generalOptionKeys = "asdfghjkl"
+
+-- | Placeholder character used internally for the Escape keycode.
+-- Chosen to be outside ASCII and outside any letter/digit pool so
+-- option-key lookups never confuse it with a real selection.
+quitKeyChar :: Char
+quitKeyChar = '\x1B'  -- ASCII ESC
+
+-- | Placeholder for F3 (debug cycle), same rationale as 'quitKeyChar'.
+debugKeyChar :: Char
+debugKeyChar = '\x7F'  -- ASCII DEL, not emitted by any text key
+
+-- | Option-key character for the @n@'th (1-based) entry of the pool.
+-- Falls back to the decimal representation of @n@ only if @n@
+-- overflows the pool (practically unreachable for the HUD's cell
+-- counts, but kept safe).
+poolKeyFor :: String -> Int -> Char
+poolKeyFor pool n
+  | n >= 1 && n <= length pool = pool !! (n - 1)
+  | otherwise = case show n of
+      (c:_) -> c
+      []    -> '?'
+
+-- | Pick an element from @xs@ by its position in @pool@.
+safeOptionIndexIn :: String -> Char -> [x] -> Maybe x
+safeOptionIndexIn pool c xs =
+  case elemIndex c pool of
     Just i | i < length xs -> Just (xs !! i)
     _                      -> Nothing
