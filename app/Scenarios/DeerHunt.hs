@@ -31,7 +31,7 @@ deerHunt seed you =
        , scenarioMergeAxioms  = [hunterArrivalMergeAxiom you]
        , scenarioRules        = [dawnRule you]
        , scenarioMergeRules   = []
-       , scenarioTerminal     = Any [HasWorldTag deerKilled, HasWorldTag hunterShot, HasWorldTag deerGone]
+       , scenarioTerminal     = Any [HasWorldTag seasonOver, HasWorldTag hunterShot]
        , scenarioDebugDefault = Off
        , scenarioPlayerCharId = you
        }

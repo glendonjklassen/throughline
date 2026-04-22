@@ -1,5 +1,5 @@
--- | SDL2 input handling. Maps key events to the same character set
--- as the terminal UI: digits 1-9, 'q', 'd', 'm'.
+-- | SDL2 input handling.  Maps key events to characters, and provides
+-- the option-key scheme used to label and pick player actions in-game.
 module SDL.InputHandler
   ( awaitKeySDL
   , awaitAnyKeySDL
@@ -7,12 +7,15 @@ module SDL.InputHandler
   , pollAnyKey
   , waitOrKey
   , waitOrKeyChar
-  , safeIndex
+  , optionKeys
+  , optionKeyFor
+  , safeOptionIndex
   ) where
 
+import           Control.Applicative ((<|>))
+import           Data.List           (elemIndex)
 import qualified SDL
 import qualified SDL.Input.Keyboard.Codes as KC
-import           Text.Read (readMaybe)
 
 -- | Block until a relevant keypress, returning the character.
 -- Returns Nothing on window close.
@@ -38,22 +41,29 @@ awaitAnyKeySDL = do
       | SDL.keyboardEventKeyMotion kd == SDL.Pressed -> pure True
     _ -> awaitAnyKeySDL
 
--- | Map SDL keycodes to the characters our game loop expects.
+-- | Map SDL keycodes to the characters our game loop expects.  All 26
+-- letter keys and digits 1-9 are mapped through; other keys are
+-- ignored.  The keysym is the physical key, so shift state doesn't
+-- flip case — we always return lowercase.
 keycodeToChar :: SDL.Keycode -> Maybe Char
-keycodeToChar kc
-  | kc == KC.Keycode1 = Just '1'
-  | kc == KC.Keycode2 = Just '2'
-  | kc == KC.Keycode3 = Just '3'
-  | kc == KC.Keycode4 = Just '4'
-  | kc == KC.Keycode5 = Just '5'
-  | kc == KC.Keycode6 = Just '6'
-  | kc == KC.Keycode7 = Just '7'
-  | kc == KC.Keycode8 = Just '8'
-  | kc == KC.Keycode9 = Just '9'
-  | kc == KC.KeycodeQ = Just 'q'
-  | kc == KC.KeycodeD = Just 'd'
-  | kc == KC.KeycodeM = Just 'm'
-  | otherwise         = Nothing
+keycodeToChar kc = lookup kc letterCodes <|> lookup kc digitCodes
+  where
+    letterCodes =
+      [ (KC.KeycodeA, 'a'), (KC.KeycodeB, 'b'), (KC.KeycodeC, 'c')
+      , (KC.KeycodeD, 'd'), (KC.KeycodeE, 'e'), (KC.KeycodeF, 'f')
+      , (KC.KeycodeG, 'g'), (KC.KeycodeH, 'h'), (KC.KeycodeI, 'i')
+      , (KC.KeycodeJ, 'j'), (KC.KeycodeK, 'k'), (KC.KeycodeL, 'l')
+      , (KC.KeycodeM, 'm'), (KC.KeycodeN, 'n'), (KC.KeycodeO, 'o')
+      , (KC.KeycodeP, 'p'), (KC.KeycodeQ, 'q'), (KC.KeycodeR, 'r')
+      , (KC.KeycodeS, 's'), (KC.KeycodeT, 't'), (KC.KeycodeU, 'u')
+      , (KC.KeycodeV, 'v'), (KC.KeycodeW, 'w'), (KC.KeycodeX, 'x')
+      , (KC.KeycodeY, 'y'), (KC.KeycodeZ, 'z')
+      ]
+    digitCodes =
+      [ (KC.Keycode1, '1'), (KC.Keycode2, '2'), (KC.Keycode3, '3')
+      , (KC.Keycode4, '4'), (KC.Keycode5, '5'), (KC.Keycode6, '6')
+      , (KC.Keycode7, '7'), (KC.Keycode8, '8'), (KC.Keycode9, '9')
+      ]
 
 -- | Check if a quit event is pending (non-blocking).
 pollQuit :: IO Bool
@@ -104,10 +114,39 @@ waitOrKeyChar ms = do
             pure (keycodeToChar (SDL.keysymKeycode (SDL.keyboardEventKeysym kd)))
       _ -> pure Nothing
 
--- | Map a single character to a 1-based index into the list.
--- Returns Nothing for non-digit input, '0', or indices beyond the list length.
-safeIndex :: Char -> [x] -> Maybe x
-safeIndex c as =
-  case readMaybe [c] of
-    Just i | i >= 1, i <= length as -> Just (as !! (i - 1))
-    _                               -> Nothing
+-- ---------------------------------------------------------------------------
+-- Option-key scheme
+-- ---------------------------------------------------------------------------
+--
+-- Action lists can exceed nine options, so numeric selection doesn't
+-- stretch far enough.  We use letters instead, walking the alphabet
+-- in order and skipping keys reserved for global UI ('q' quit, 'd'
+-- debug).  Option 1 → 'a', option 2 → 'b', option 3 → 'c', option 4 →
+-- 'e' (skipping 'd'), and so on.
+
+-- | Characters reserved for global commands and unavailable as option keys.
+reservedOptionKeys :: String
+reservedOptionKeys = "qd"
+
+-- | Letter keys available for option selection, in presentation order.
+-- 24 keys — plenty for any realistic action list.
+optionKeys :: String
+optionKeys = filter (`notElem` reservedOptionKeys) ['a' .. 'z']
+
+-- | The character that labels option @n@ (1-based).  Falls back to the
+-- decimal representation of @n@ if the option index exceeds the
+-- available letter pool (shouldn't happen in practice).
+optionKeyFor :: Int -> Char
+optionKeyFor n
+  | n >= 1 && n <= length optionKeys = optionKeys !! (n - 1)
+  | otherwise = case show n of
+      (c:_) -> c
+      []    -> '?'
+
+-- | Pick an element by its option-key character.  'a' → index 0, 'b' → 1,
+-- etc.  Returns @Nothing@ for unmapped keys or out-of-range picks.
+safeOptionIndex :: Char -> [x] -> Maybe x
+safeOptionIndex c xs =
+  case elemIndex c optionKeys of
+    Just i | i < length xs -> Just (xs !! i)
+    _                      -> Nothing

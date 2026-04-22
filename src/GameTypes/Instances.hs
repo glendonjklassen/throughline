@@ -155,6 +155,8 @@ instance ToJSON WorldDiff where
     , nonEmpty "worldTagsAdded"   (diffWorldTagsAdded d)
     , nonEmpty "worldTagsRemoved" (diffWorldTagsRemoved d)
     , nonEmpty "locations"        (diffLocations d)
+    , nonEmpty "journal"          (diffJournal d)
+    , if diffDayDelta d == 0 then Nothing else Just ("dayDelta" .= diffDayDelta d)
     ]
     where nonEmpty k xs = if null xs then Nothing else Just (k .= xs)
 
@@ -167,6 +169,8 @@ instance FromJSON WorldDiff where
     <*> o .:? "worldTagsAdded"   .!= []
     <*> o .:? "worldTagsRemoved" .!= []
     <*> o .:? "locations"        .!= []
+    <*> o .:? "journal"          .!= []
+    <*> o .:? "dayDelta"         .!= 0
 
 instance ToJSON   PlayerId
 instance FromJSON PlayerId

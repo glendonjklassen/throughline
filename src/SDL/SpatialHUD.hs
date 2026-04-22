@@ -19,8 +19,9 @@ import           Data.List       (find, sortOn)
 import qualified Data.Map.Strict as Map
 import           Data.Maybe      (catMaybes)
 
-import           SDL.Palette (Color, separatorColor)
-import           SDL.Text    (stripAnsi)
+import           SDL.InputHandler (optionKeyFor)
+import           SDL.Palette      (Color, separatorColor)
+import           SDL.Text         (stripAnsi)
 import           GameTypes
 
 -- ---------------------------------------------------------------------------
@@ -95,25 +96,45 @@ movementTarget act = go (anyActionEffects act)
 -- (all actions in shGeneralLabels, no spatial cells).
 layoutHUD :: CharId -> GameWorld -> [AnyAction] -> Int -> SpatialHUD
 layoutHUD you world actions totalCols =
-  case Map.lookup you (worldLocations world) of
-    Nothing       -> flatLayout actions
-    Just playerLoc ->
-      let lg = worldLocationGraph world
-      in case Map.lookup playerLoc (lgCoords lg) of
-           Nothing     -> flatLayout actions
-           Just (px, py) -> spatialLayout actions playerLoc (px, py) lg totalCols
+  let prevLoc = case Map.lookup you (worldLocationHistory world) of
+        Just (p:_) -> Just p
+        _          -> Nothing
+      base = case Map.lookup you (worldLocations world) of
+        Nothing       -> flatLayout actions
+        Just playerLoc ->
+          let lg = worldLocationGraph world
+          in case Map.lookup playerLoc (lgCoords lg) of
+               Nothing     -> flatLayout actions
+               Just (px, py) -> spatialLayout actions playerLoc (px, py) lg totalCols
+  in markPreviousLocation prevLoc base
+
+-- | Prepend a back-arrow to the label of the cell whose movement target
+-- is the player's most recent previous location.  Gives the player an
+-- at-a-glance "this is the way you came" cue on the selection HUD —
+-- complementing (not replacing) the subtler trail-mark breadcrumbs.
+markPreviousLocation :: Maybe Location -> SpatialHUD -> SpatialHUD
+markPreviousLocation Nothing  hud = hud
+markPreviousLocation (Just p) hud =
+  hud { shSpatialCells = map mark (shSpatialCells hud) }
+  where
+    mark c
+      | hudTarget c == Just p = c { hudLabel = "\x2190 " <> hudLabel c }
+      | otherwise             = c
+
+-- | Prefix for the action with 1-based index @n@ — "a) ", "b) ", etc.
+-- Matches the key the player actually presses to pick that action.
+optionLabel :: Int -> AnyAction -> String
+optionLabel n act = optionKeyFor n : ") " <> stripAnsi (anyActionLabel act)
 
 -- | Fallback: all actions listed linearly.
 flatLayout :: [AnyAction] -> SpatialHUD
 flatLayout actions = SpatialHUD
-  { shGeneralLabels = zipWith mkLabel [1 :: Int ..] actions
+  { shGeneralLabels = zipWith optionLabel [1 :: Int ..] actions
   , shSpatialCells  = []
   , shPlayerMarker  = (0, 0)
   , shBoxWidth      = 0
   , shBoxHeight     = 0
   }
-  where
-    mkLabel n act = show n <> ") " <> stripAnsi (anyActionLabel act)
 
 -- | Spatial layout: split actions into movement/non-movement, position movement
 -- actions by relative direction, scaled by actual graph distance.
@@ -133,7 +154,7 @@ spatialLayout actions _playerLoc (px, py) lg totalCols =
       (generals, movements) = partitionEither (map classify numbered)
 
       -- General labels
-      genLabels = map (\(n, act) -> show n <> ") " <> stripAnsi (anyActionLabel act)) generals
+      genLabels = map (uncurry optionLabel) generals
 
       -- Spatial box dimensions — use most of the screen width
       boxW = totalCols - 8
@@ -216,7 +237,7 @@ placeMovement :: Int -> Int -> Int -> Int -> Double
               -> (Int, AnyAction, Double, Double) -> HUDCell
 placeMovement boxW boxH centerCol centerRow maxDist (n, act, dx, dy) =
   let target = movementTarget act
-      label = show n <> ") " <> stripAnsi (anyActionLabel act)
+      label = optionLabel n act
       labelLen = length label
       -- Reserve space for the label itself
       maxColDisp = (boxW - labelLen) `div` 2 - 1

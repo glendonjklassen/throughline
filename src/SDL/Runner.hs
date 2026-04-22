@@ -155,10 +155,11 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
   liftIO $ render finalReveal
   liftIO $ render finalReveal
   liftIO $ writeIORef lastLocRef currentLoc
-  liftIO (awaitKeyLoop actions debugRef skipChar)
+  liftIO (awaitKeyLoop actions debugRef skipChar world render)
   where
-    awaitKeyLoop :: [AnyAction] -> IORef DebugMode -> Maybe Char -> IO (Maybe AnyAction)
-    awaitKeyLoop acts debugRef' pending = do
+    awaitKeyLoop :: [AnyAction] -> IORef DebugMode -> Maybe Char -> GameWorld
+                 -> (RevealFrame -> IO ()) -> IO (Maybe AnyAction)
+    awaitKeyLoop acts debugRef' pending worldNow render' = do
       mc <- case pending of
         Just c  -> pure (Just c)
         Nothing -> awaitKeySDL
@@ -167,12 +168,17 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
         Just 'q'  -> pure Nothing
         Just 'd'  -> do
           modifyIORef' debugRef' cycleDebug
-          awaitKeyLoop acts debugRef' Nothing
-        Just 'm'  ->
-          awaitKeyLoop acts debugRef' Nothing
-        Just c    -> case safeIndex c acts of
+          awaitKeyLoop acts debugRef' Nothing worldNow render'
+        Just '1'  -> do
+          renderJournalOverlay ctx worldNow
+          _ <- awaitAnyKeySDL
+          drainSDLEvents
+          render' finalReveal
+          render' finalReveal
+          awaitKeyLoop acts debugRef' Nothing worldNow render'
+        Just c    -> case safeOptionIndex c acts of
           Just a  -> pure (Just a)
-          Nothing -> awaitKeyLoop acts debugRef' Nothing
+          Nothing -> awaitKeyLoop acts debugRef' Nothing worldNow render'
 
 -- | Hash a location (or its absence) into an Int for seeded sensory
 -- selection.  Co-arrivals at the same tick and location pick the same

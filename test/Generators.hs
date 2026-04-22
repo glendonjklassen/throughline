@@ -122,7 +122,8 @@ instance Arbitrary WorldDiff where
     <$> arbitrary <*> arbitrary
     <*> arbitrary <*> arbitrary
     <*> arbitrary <*> arbitrary
-    <*> arbitrary
+    <*> arbitrary <*> arbitrary
+    <*> choose (0, 2)
 
 instance Arbitrary LogEntry where
   arbitrary = do

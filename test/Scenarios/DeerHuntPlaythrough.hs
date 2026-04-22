@@ -90,6 +90,7 @@ pinnedDeerHunt you =
       pinned = filter (\a -> axiomId a `notElem`
                   [ ScenarioAxiom "deerMovement"
                   , ScenarioAxiom "spook"
+                  , ScenarioAxiom "dayRollover"
                   ]) (scenarioAxioms base)
       w0 = scenarioInitial base
       w0pinned = w0 { worldLocations = Map.insert deer fieldEnd (worldLocations w0) }
@@ -125,6 +126,8 @@ findHitTick you offset =
                    , worldSeed = 0
                    , worldLocationHistory = Map.empty
                    , worldLocationVisits  = Map.empty
+                   , worldJournal         = []
+                   , worldDayNumber       = 1
                    }
            , doesShotHit w you
            , not (isFriendlyFire w)

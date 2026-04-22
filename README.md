@@ -2,96 +2,93 @@
 
 [![CI](https://github.com/glendonjklassen/throughline-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/glendonjklassen/throughline-engine/actions/workflows/ci.yml)
 
-Throughline is a Haskell narrative engine for deterministic simulation, replayable event logs, and local-first story sync.
+Throughline is a Haskell engine for authoring shared narrative worlds. Two people can play a scenario independently, merge their signed event logs, and end up in the same world — with history neither of them wrote alone.
 
-It is a personal R&D project focused on modeling narrative state with precision: effects, conditions, relationships, and time are first-class, and scenarios are authored declaratively in Haskell.
+It sits in the lineage of interactive fiction and MUDs. The ambition is to give an author the tools to do what Tolkien called subcreation — to build a secondary world with the kind of depth a reader can live in, not just move through.
 
-## What it is
+## What success would look like
 
-- Deterministic world updates and replayable logs
-- A small DSL for authoring scenarios in Haskell
-- Narrative state built from effects, conditions, axioms, and relationship data
-- A spatial HUD that renders movement as a compass of neighbors around the player, with biome tints, density cues, and a fading trail of where you've been
-- Optional local-first sync that merges separate play histories into a shared world
+An author somewhere uses this to build a world, a small group of people fall in love with it, and it dovetails with other worlds through shared engine state. I don't have a 1.0 target. The closer signal is that I can sit down and author a scenario in flow — when that happens, the kit is probably real enough to hand to someone else.
 
-Instead of centering hit points, inventories, or XP bars, Throughline models capacity and context first. A change in `Strength` might mean injury, fatigue, panic, or grief; the scenario decides how to interpret it.
+## What it does differently
 
-## What it isn't
+Narrative state is modeled as effects, conditions, axioms, and relationships, not HP or inventory. A Strength drop might be injury, fatigue, panic, or grief; the scenario decides which.
 
-Throughline is not a commercial engine, a generic RPG toolkit, or a real-time multiplayer framework. It is optimized for learning, experimentation, and strong tests rather than product completeness.
+The event log is the source of truth; `GameWorld` is a replayable cache. Five paths through state — fresh replay, snapshot plus tail, merged divergent logs, snapshot merge, and active-effect union — are tested to converge to the same world. See [test/ConvergenceSpec.hs](test/ConvergenceSpec.hs).
+
+Merges surface contradictions instead of hiding them. If one history has a character that another doesn't, the engine names the conflict and hands it to the scenario to narrate.
+
+Identity is cryptographic: a character is an Ed25519 keypair. A scenario is pure data unless it ships custom axioms, which are Haskell plugins. Data is safe to accept from anyone; axioms are code.
+
+How the shared universe actually shows up inside a given world — a stranger in your save, a rumor, a dream — is up to the scenario author.
 
 ## Quick start
 
-Requires [Stack](https://docs.haskellstack.org/) and SDL2 system libraries.
+Requires Stack and SDL2 system libraries.
 
-**System dependencies** (Ubuntu/Debian/WSL):
+Ubuntu/Debian/WSL:
 
 ```bash
 sudo apt-get install libsdl2-dev libsdl2-ttf-dev pkg-config
 ```
 
-**macOS** (via Homebrew):
+Arch:
+
+```bash
+sudo pacman -S sdl2 sdl2_ttf pkgconf
+```
+
+macOS:
 
 ```bash
 brew install sdl2 sdl2_ttf pkg-config
 ```
 
-Then build and run:
+Then:
 
 ```bash
 stack build
-stack run     # opens the SDL2 window; pick a scenario from the menu
+stack run     # opens the SDL2 window; pick a scenario
 stack test
 ```
 
 ## Scenarios
 
-Pick one from the launcher:
-
-- **Deer Hunt** — mid-November in southern Manitoba, one square mile, one buck. The richest scenario. Uses the spatial HUD, zone tints, sparkle hints for deer sign, and a directional neighbor-selection model.
+- **Deer Hunt** — mid-November in southern Manitoba, one square mile, one buck. The richest scenario: spatial HUD, zone tints, sparkle hints for deer sign, directional neighbor selection.
 - **Top Buy** — a retail ethics dilemma. Your coworker is stealing.
-- **Late Night Diner** / **Diner: Maya** — the same 2 AM scene from two different seats at the counter.
-- **Customer** — a prototype walking scene.
+- **Late Night Diner** / **Diner: Maya** — the same 2 AM scene from two seats at the counter.
+- **Customer** — a walking prototype.
 
-Scenario modules live under `app/Scenarios/`. Deer Hunt is the most developed starting point for authoring; Top Buy is a simpler read.
+Scenario modules live under `app/Scenarios/`. Deer Hunt is the deepest read; Top Buy is the simplest.
 
 ## Authoring
 
-Authors mainly work with:
+Authors work with:
 
 - `Action`s that emit effects
-- `Condition`s that gate actions and outcomes
+- `Condition`s that gate actions and outcomes against any world state (stats, tags, locations, relationships, time)
 - `Axiom`s that watch world diffs and react each tick
-- Scenario-specific tags, characters, locations, and terminal conditions
+- `ScenarioDisplay` for per-scenario HUD customization (status line, end screen, zone tint, sparkle)
 
-A `ScenarioDisplay` hook lets a scenario customize the SDL HUD (status line, end screen, shiny-sense sparkle, per-zone tint).
+The engine is supposed to handle most of what narratives need — hunger, fatigue, mood, shelter, social dynamics, psychology. Scenarios should compose those primitives, not reinvent them.
 
-## Project layout
+## Layout
 
-- `src/Engine/` — core engine: effects, conditions, axioms, world state, sync
+- `src/Engine/` — effects, conditions, axioms, world state, CRDTs, sync
 - `src/GameTypes/` — public types (`GameWorld`, `Action`, `Effect`, etc.)
-- `src/SDL/` — SDL2 frontend: renderer, font, spatial HUD, palette, input
+- `src/SDL/` — renderer, font, spatial HUD, palette, input
 - `app/Scenarios/` — scenarios that consume the engine
-- `test/` — hspec suites for engine behavior, scenarios, and sync
-- `bench/` — tasty-bench performance fixtures
-- `docs/` — design notes and proposals
-- `proposals/` — forward-looking design work
-
-## Local-first sync
-
-The event log is the source of truth; `GameWorld` is a replayable cache.
-
-Each player writes signed local events, can exchange session directories out-of-band, and then deterministically replays the merged log into the same world state. This is not real-time multiplayer. The interesting case is emergent shared state: two independent histories converge into something neither player authored alone.
-
-See [docs/multiplayer.md](./docs/multiplayer.md) and [proposals/shared-universe.md](./proposals/shared-universe.md).
+- `test/` — hspec suites and QuickCheck properties
+- `bench/` — tasty-bench fixtures
+- `docs/`, `proposals/` — design
 
 ## More
 
-- Architecture and layer model: [ARCHITECTURE.md](./ARCHITECTURE.md)
-- Design notes and authoring philosophy: [CLAUDE.md](./CLAUDE.md)
-- Sync internals: [docs/multiplayer.md](./docs/multiplayer.md)
-- Forward-looking design: [proposals/](./proposals/)
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — three-layer model
+- [CLAUDE.md](./CLAUDE.md) — vision, pillars, priorities
+- [docs/multiplayer.md](./docs/multiplayer.md) — sync internals
+- [proposals/shared-universe.md](./proposals/shared-universe.md) — forward-looking design
 
 ## On AI usage
 
-I use Claude and Codex as pair programmers on this project. Architecture, design decisions, and narrative direction are mine; the AI translates intent into idiomatic Haskell, catches type errors, and writes the prose you're reading right now. Mileage varies.
+I use Claude and Codex as pair programmers. Architecture, design decisions, and narrative direction are mine; the AI translates intent into idiomatic Haskell, catches type errors, and writes prose like this.

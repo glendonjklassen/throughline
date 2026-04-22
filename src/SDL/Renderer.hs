@@ -19,6 +19,7 @@ module SDL.Renderer
   , finalReveal
   , hiddenReveal
   , sweepFeatherCh
+  , renderJournalOverlay
   ) where
 
 import           Control.Monad (unless, void, when)
@@ -461,14 +462,14 @@ drawSpatialHUD fc sparkleFn zoneTintFn frame you world hud spatialLeft spatialTo
   -- scatter can avoid them.  Boxes are generous (padded ±6 px) so
   -- sprites never crowd the text.
   let sortedCells = sortOn hudDist (shSpatialCells hud)
-      -- Only cells whose frame alpha is > 0 matter for collision — a
-      -- hidden cell shouldn't reserve space.  We still use the final
-      -- (alpha=1.0) positions for stability: the bbox doesn't grow
-      -- and shrink as labels fade in.
+      -- Reserve space for *every* cell regardless of current reveal
+      -- alpha.  If we filtered by alpha here, the exclusion set would
+      -- grow as cells fade in, re-pick different positions from the
+      -- seeded stream, and the ground scatter would appear to reset
+      -- between repaints.  Scatter must be a function of (location,
+      -- panel geom, full cell set) only.
       labelBBoxes =
-        [ labelBBoxPx fc spatialLeft spatialTopRow c
-        | c <- sortedCells
-        , rfCellAlpha frame c > 0.01 ]
+        [ labelBBoxPx fc spatialLeft spatialTopRow c | c <- sortedCells ]
       panelOriginX :: Int
       panelOriginX = fromIntegral (spatialLeft  * cellWidth  fc)
       panelOriginY :: Int
@@ -722,3 +723,33 @@ chunksOf n xs = take n xs : chunksOf n (drop n xs)
 -- | Re-export for Runner.
 takeLast :: Int -> [a] -> [a]
 takeLast n xs = drop (max 0 (length xs - n)) xs
+
+-- ---------------------------------------------------------------------------
+-- Journal overlay
+-- ---------------------------------------------------------------------------
+
+-- | Render the journal as a full-screen page.  Minimal Phase 1 view:
+-- header, chronological entries, footer hint.  Wraps long lines to the
+-- page width.  The caller awaits a keypress to dismiss, then redraws
+-- the world frame.
+renderJournalOverlay :: SDLContext -> GameWorld -> IO ()
+renderJournalOverlay ctx world = do
+  clearSDL ctx
+  let fc        = sdlFont ctx
+      cols      = gridCols ctx
+      rows      = gridRows ctx
+      pageW     = cols - 2 * fromIntegral marginLeft
+      entries   = worldJournal world
+      wrapped   = concatMap (wrapWords (max 10 pageW)) entries
+      headerRow = 1
+      firstRow  = headerRow + 2
+      lastRow   = rows - 2
+      budget    = max 1 (lastRow - firstRow + 1)
+      visible   = takeLast budget wrapped
+  renderText fc "— journal —" defaultText (marginLeft, fromIntegral headerRow)
+  drawHLine fc cols (fromIntegral (headerRow + 1))
+  mapM_ (\(idx, line) ->
+    renderText fc line defaultText (marginLeft, fromIntegral (firstRow + idx))
+    ) (zip [0 :: Int ..] visible)
+  renderText fc "press any key to close" greyText (marginLeft, fromIntegral lastRow)
+  presentSDL ctx

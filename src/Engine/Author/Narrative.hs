@@ -33,6 +33,8 @@ narrateEffect _ _ SetLocationAdjacentPrefer {} = Nothing
 narrateEffect _ _ (OnExpire _ _)   = Nothing
 narrateEffect _ _ (CycleMany _ _)  = Nothing
 narrateEffect _ _ (Cycle {})       = Nothing
+narrateEffect _ _ (JournalEntry _) = Nothing  -- writes silently to worldJournal
+narrateEffect _ _ AdvanceDay       = Nothing
 narrateEffect _ _ DoNothing        = Nothing
 
 -- | Select narration detail based on the player's Understanding.

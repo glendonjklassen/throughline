@@ -66,12 +66,12 @@ spec = describe "JSON round-trips" $ do
     \(d :: WorldDiff) -> roundTrip d
 
   it "empty WorldDiff round-trips (all fields omitted in JSON)" $
-    let empty = WorldDiff [] [] [] [] [] [] []
+    let empty = WorldDiff [] [] [] [] [] [] [] [] 0
     in decode (encode empty) `shouldBe` Just empty
 
   it "WorldDiff with only worldTagsAdded round-trips" $ property $
     \(tags :: [Tag]) ->
-      let d = WorldDiff [] [] [] [] tags [] []
+      let d = WorldDiff [] [] [] [] tags [] [] [] 0
       in roundTrip d
 
   -- -------------------------------------------------------------------------

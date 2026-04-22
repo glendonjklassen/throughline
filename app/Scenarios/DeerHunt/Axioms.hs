@@ -8,9 +8,10 @@ import           Engine.Author.Random        (rollCheck, rollChoice, rollD)
 import           Engine.CRDT.ORSet           (orToList)
 import           GameTypes
 import           Scenarios.DeerHunt.Constants
+import           Scenarios.DeerHunt.Discoveries (arrivalDiscoveryAxiom)
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
 import           Scenarios.DeerHunt.Probability
-import           Scenarios.DeerHunt.World      (HuntWorld(..), hwClass, hwLocsOfClass, hwNearestTruck)
+import           Scenarios.DeerHunt.World      (HuntWorld(..), hwClass, hwLocsOfClass, hwNearestTruck, hwStart)
 
 -- ---------------------------------------------------------------------------
 -- Shared predicate
@@ -43,6 +44,8 @@ allAxioms hw you =
   , nightfallAxiom hw you
   , tensionAxiom you
   , weatherNarrationAxiom weatherDesc
+  , dayRolloverAxiom hw you
+  , arrivalDiscoveryAxiom hw you
   ]
 
 -- ---------------------------------------------------------------------------
@@ -209,7 +212,7 @@ spookAxiom hw you = Axiom
 -- in the same terrain class of the section.  Clears DeerSpooked after
 -- one tick so the deer can be found again.
 deerPresenceAxiom :: HuntWorld -> CharId -> Axiom
-deerPresenceAxiom hw you = Axiom
+deerPresenceAxiom _hw you = Axiom
   { axiomId       = ScenarioAxiom "deerPresence"
   , axiomPriority = 3
   , axiomEvaluate = \world _actions _diff ->
@@ -219,13 +222,24 @@ deerPresenceAxiom hw you = Axiom
           sameNode  = case (playerLoc, deerLoc) of
             (Just pl, Just dl) -> pl == dl
             _                  -> False
-          sameClass = case (playerLoc, deerLoc) of
-            (Just pl, Just dl) -> hwClass hw pl == hwClass hw dl
-            _                  -> False
+          -- Close = same named zone (e.g. both in "North Field"), not
+          -- just same terrain class.  Class-level matching covered the
+          -- whole section — bush anywhere on the map, field anywhere —
+          -- so freshSign and its tension bump kept firing when the deer
+          -- was on the far side of things.  Zone granularity keeps the
+          -- cue honest: you're actually near him, not just in similar
+          -- terrain.
+          regions   = lgRegions (worldLocationGraph world)
+          close     = case (playerLoc, deerLoc) of
+            (Just pl, Just dl) ->
+              case (Map.lookup pl regions, Map.lookup dl regions) of
+                (Just ra, Just rb) -> ra == rb
+                _                  -> False
+            _ -> False
           clearSpotted = [immediate (RemoveWorldTag deerSpotted) | hasTag world deerSpotted && not sameNode && not over]
-          clearSign    = [immediate (RemoveWorldTag freshSign) | hasTag world freshSign && not sameClass && not over]
+          clearSign    = [immediate (RemoveWorldTag freshSign) | hasTag world freshSign && not close && not over]
           clearSpooked = [immediate (RemoveWorldTag deerSpooked) | hasTag world deerSpooked]
-          addSign      = [immediate (AddWorldTag freshSign) | sameClass && not (hasTag world freshSign) && not over]
+          addSign      = [immediate (AddWorldTag freshSign) | close && not (hasTag world freshSign) && not over]
       in if over then clearSpotted ++ clearSign
          else clearSpotted ++ clearSign ++ clearSpooked ++ addSign
   }
@@ -403,9 +417,11 @@ nightfallAxiom hw you = Axiom
           truck    = hwNearestTruck hw startLoc
       in if evening && not (huntOver world)
          then [ immediate (Narrate "The light is going. Legal shooting is over. You mark your spot mentally and head back to the road.")
+              , immediate (JournalEntry "Ran out of light. Tomorrow.")
               , immediate (SetLocation you truck)
               , immediate (AddWorldTag nightFall)
               , immediate (AddWorldTag backAtTruck)
+              , immediate (AddWorldTag dayOver)
               , immediate (RemoveWorldTag deerSpotted)
               , immediate (RemoveWorldTag freshSign)
               , immediate (RemoveWorldTag movingFast)
@@ -486,3 +502,48 @@ hunterArrivalMergeAxiom you = MergeAxiom
       in [ immediate (Narrate "There's another hunter on the section. You didn't hear them come in.")
          | any arrivedHere (mergeLocations md) ]
   }
+
+-- ---------------------------------------------------------------------------
+-- Day rollover
+-- ---------------------------------------------------------------------------
+
+-- | When 'dayOver' is set (by a kill, a miss, or the player calling it
+-- for the day), wrap the day: narrate the drive-home / morning-back
+-- montage, write the summary into the journal, grant +1 Experience,
+-- advance the day counter, clear per-day tags, move the player to the
+-- truck, and re-place the buck somewhere new.  The section of land
+-- stays the same.  Long-lived location tags (seeded treasure sign)
+-- persist.
+dayRolloverAxiom :: HuntWorld -> CharId -> Axiom
+dayRolloverAxiom hw you = Axiom
+  { axiomId       = ScenarioAxiom "dayRollover"
+  , axiomPriority = 100
+  , axiomEvaluate = \world _actions diff ->
+      if dayOver `notElem` diffWorldTagsAdded diff
+        then []
+        else
+          let killed  = hasTag world deerKilled
+              missed  = hasTag world deerGone
+              summary
+                | killed    = "End of the day. Took the buck. Meat in the freezer."
+                | missed    = "End of the day. Missed my chance. He's off the section."
+                | otherwise = "Called it. Packed it in. Tomorrow."
+              -- New-day buck placement: anywhere in bush or ridge,
+              -- seeded so it varies across hunts.
+              buckSpots = hwLocsOfClass hw CBush ++ hwLocsOfClass hw CRidge
+          in concat
+               [ [ immediate (JournalEntry summary)
+                 , immediate (Narrate "The drive home. Kitchen light. The knife, the hose, a cold beer. Bed.")
+                 , immediate (Narrate "5:15 AM. Coffee in the dark. The drive back out.")
+                 ]
+               , map (immediate . RemoveWorldTag) allDayScopedTags
+               , [ immediate (ModifyRelation Truth you (Capacity Experience) 1)
+                 , immediate AdvanceDay
+                 , immediate (SetLocation you (hwStart hw))
+                 , immediate (SetLocationRandom deer saltDayRollover buckSpots)
+                 ]
+               ]
+  }
+  where
+    saltDayRollover :: Int
+    saltDayRollover = 87551

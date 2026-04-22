@@ -25,9 +25,11 @@ deer = Named "deer"
 -- Tags
 -- ---------------------------------------------------------------------------
 
-data DeerHuntTag
+-- | Day-scoped tags — cleared by the day-rollover axiom.  If a state
+-- belongs here, 'allDayScopedTags' automatically picks it up; no more
+-- hand-listing in the rollover.
+data DeerHuntDayTag
   = DeerKilled
-  | HunterShot
   | DeerGone
   | DeerSpooked
   | DeerSpotted
@@ -36,20 +38,36 @@ data DeerHuntTag
   | ShotTaken
   | NightFall
   | BackAtTruck
-  | DayTwo
-  | DayThree
-  | WindAngle Int        -- ^ Wind direction in hundredths of degrees (0–36000)
-  | WindStrength Int     -- ^ Wind strength in hundredths (0–100, maps to 0.0–1.0)
-  | PlayerSitting        -- ^ Player is sitting (toggle state)
+  | PlayerSitting
   | SignTracks           -- ^ Fresh tracks at a location
   | SignBed              -- ^ Bedding site found
   | SignRub              -- ^ Antler rub found (repeated visits)
   | SignScrape           -- ^ Ground scrape (very recent activity)
+  | DayOver              -- ^ Current day is ending; triggers rollover axiom
+  deriving (Show, Eq, Ord, Enum, Bounded)
+
+-- | Season-scoped tags — persist across day rollovers.  Things the
+-- hunter has learned or accumulated over the run, plus terminal
+-- states that end the scenario entirely.
+data DeerHuntSeasonTag
+  = HunterShot
+  | SeasonOver
+  | DayTwo
+  | DayThree
   | FoundSignTracks      -- ^ First time finding tracks (experience gate)
   | FoundSignBed         -- ^ First time finding a bed
   | FoundSignRub         -- ^ First time finding a rub
   | FoundSignScrape      -- ^ First time finding a scrape
+  | WindAngle Int        -- ^ Wind direction in hundredths of degrees (0–36000)
+  | WindStrength Int     -- ^ Wind strength in hundredths (0–100, maps to 0.0–1.0)
   deriving (Show, Eq, Ord)
+
+-- | Every day-scoped tag, as engine 'Tag' values.  Consumed by the
+-- day-rollover axiom to clear per-day state in one sweep.  New
+-- day-scoped tags picked up automatically by adding to
+-- 'DeerHuntDayTag'.
+allDayScopedTags :: [Tag]
+allDayScopedTags = map scenarioTag [minBound .. maxBound :: DeerHuntDayTag]
 
 deerKilled :: Tag
 deerKilled = scenarioTag DeerKilled
@@ -113,6 +131,12 @@ foundSignRub = scenarioTag FoundSignRub
 
 foundSignScrape :: Tag
 foundSignScrape = scenarioTag FoundSignScrape
+
+dayOver :: Tag
+dayOver = scenarioTag DayOver
+
+seasonOver :: Tag
+seasonOver = scenarioTag SeasonOver
 
 -- ---------------------------------------------------------------------------
 -- Per-location sign tags (string-encoded)
@@ -547,5 +571,7 @@ initialWorld hw you = GameWorld
   , worldSeed          = hwSeed hw
   , worldLocationHistory = Map.empty
   , worldLocationVisits  = Map.empty
+  , worldJournal         = []
+  , worldDayNumber       = 1
   }
 

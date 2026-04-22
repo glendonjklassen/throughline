@@ -100,6 +100,7 @@ tests:
     - Scenarios.DeerHunt.Actions
     - Scenarios.DeerHunt.Axioms
     - Scenarios.DeerHunt.Constants
+    - Scenarios.DeerHunt.Discoveries
     - Scenarios.DeerHunt.Generation
     - Scenarios.DeerHunt.Narration
     - Scenarios.DeerHunt.Probability
@@ -179,6 +180,7 @@ benchmarks:
     - Scenarios.DeerHunt.Actions
     - Scenarios.DeerHunt.Axioms
     - Scenarios.DeerHunt.Constants
+    - Scenarios.DeerHunt.Discoveries
     - Scenarios.DeerHunt.Generation
     - Scenarios.DeerHunt.Narration
     - Scenarios.DeerHunt.Probability

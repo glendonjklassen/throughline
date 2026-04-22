@@ -38,6 +38,12 @@ think = Think
 moveTo :: CharId -> Location -> EffectBody
 moveTo = SetLocation
 
+-- | Append a line to the player's journal.  Renders no prose — the
+-- entry is visible when the player opens the journal.  Pair with a
+-- regular 'Narrate' if you also want the event surfaced in the moment.
+journal :: String -> EffectBody
+journal = JournalEntry
+
 -- ---------------------------------------------------------------------------
 -- Effect builders
 -- ---------------------------------------------------------------------------
