@@ -51,7 +51,82 @@ allAxioms hw you =
   , arrivalDiscoveryAxiom hw you
   , findDiscoveryAxiom hw you
   , handFeelAxiom
+  , rareEventAxiom
   ]
+
+-- ---------------------------------------------------------------------------
+-- Rare events
+-- ---------------------------------------------------------------------------
+
+-- | Small catalog of once-in-a-while atmospheric beats — a coyote
+-- along the treeline, a distant shot, geese overhead.  These are
+-- ephemeral (unlike the location-bound rare finds), firing whenever
+-- their per-tick roll lands.  Each event is its own small story worth
+-- a journal line.
+data RareEvent = RareEvent
+  { reNarrate  :: String
+  , reJournal  :: String
+  }
+
+rareEventPool :: [RareEvent]
+rareEventPool =
+  [ RareEvent
+      "A coyote slides along the treeline, not looking at you, and is gone."
+      "Saw a coyote track the treeline. Didn't see me."
+  , RareEvent
+      "A shot rolls across the section from somewhere east. Not yours."
+      "Heard a shot east of me. Someone else out here today."
+  , RareEvent
+      "A vee of geese heads south. You hear them before you see them."
+      "Geese going south, high up."
+  , RareEvent
+      "A flurry kicks up out of nowhere and is done in thirty seconds."
+      "Quick snow flurry mid-morning. Felt late-fall."
+  , RareEvent
+      "Skunk on the wind. Somewhere not close enough to worry about."
+      "Skunk on the air."
+  , RareEvent
+      "A small plane crosses the sky high up. You watch until it's past."
+      "Small plane overhead."
+  , RareEvent
+      "A red-tail slides off a fencepost and out over the stubble."
+      "Hawk hunting the stubble edge."
+  , RareEvent
+      "Somewhere to the north, a single owl call. Big one."
+      "Heard a horned owl north of me."
+  ]
+
+-- | Rare-event axiom.  A low per-tick chance picks one event from
+-- the pool; if it fires, prose plus a journal line are emitted.
+-- Events can repeat across days — they're atmosphere, not
+-- collectibles.  Silent at the truck and during rollover.
+rareEventAxiom :: Axiom
+rareEventAxiom = Axiom
+  { axiomId       = ScenarioAxiom "rareEvent"
+  , axiomPriority = 6
+  , axiomEvaluate = \world _actions _diff ->
+      if not (eligible world) || null rareEventPool
+        then []
+        else
+          let tick = lcTick (worldClock world)
+              hit  = (tick * 2654435761 + 991) `mod` 1000 < rareEventChanceX10
+              ev   = rareEventPool !! ((tick `div` 3) `mod` length rareEventPool)
+          in if hit
+               then [ immediate (Narrate  (reNarrate ev))
+                    , immediate (JournalEntry (reJournal ev))
+                    ]
+               else []
+  }
+  where
+    eligible world =
+      not (hasTag world backAtTruck)
+      && not (hasTag world dayOver)
+      && not (hasTag world seasonOver)
+
+-- | Rare-event fire chance, expressed in tenths of a percent.  25 =
+-- 2.5% per tick.  Tunable.
+rareEventChanceX10 :: Int
+rareEventChanceX10 = 25
 
 -- ---------------------------------------------------------------------------
 -- Hand-feel beats
@@ -73,9 +148,7 @@ handFeelAxiom = Axiom
           let tick = lcTick (worldClock world)
               roll = (tick * 2654435761 + 17) `mod` 100
               idx  = (tick `div` 7) `mod` length handFeelPool
-          in if roll < handFeelChancePct
-               then [immediate (Narrate (handFeelPool !! idx))]
-               else []
+          in [immediate (Narrate (handFeelPool !! idx)) | roll < handFeelChancePct]
   }
   where
     -- Skip when the hunter is at the truck or the day/season is

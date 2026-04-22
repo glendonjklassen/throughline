@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
 -- | First-find tracking for DeerHunt: the hunter's field catalog of
 -- trees, animals, sign, and rare finds.  A 'Discovery' is a scenario
 -- tag in the existing 'scenarioTag' shape — no new engine machinery.

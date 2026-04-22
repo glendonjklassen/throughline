@@ -161,8 +161,8 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
     -- non-movement actions land on the home row, movement actions
     -- land on the top letter row.  Order within each pool matches
     -- the action-list order so keys stay stable across turns.
-    partitionActions xs = partition (\a -> not (isMovement a)) xs
-    isMovement a = any isSetLocation (map effectBody (anyActionEffects a))
+    partitionActions = partition (not . isMovement)
+    isMovement a = any (isSetLocation . effectBody) (anyActionEffects a)
     isSetLocation (SetLocation _ _)           = True
     isSetLocation SetLocationRandom {}        = True
     isSetLocation (SetLocationAdjacent _ _)   = True
