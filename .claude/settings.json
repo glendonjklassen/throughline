@@ -14,7 +14,8 @@
       "Bash(stack exec *)",
       "Bash(hlint src/ app/ test/)",
       "Bash(git checkout *)",
-      "Bash(grep -rn \"ScenarioDisplay$\\\\|ScenarioDisplay {\" app/ --include=\"*.hs\")"
+      "Bash(grep -rn \"ScenarioDisplay$\\\\|ScenarioDisplay {\" app/ --include=\"*.hs\")",
+      "Bash(grep -n \"import qualified.*Spec\\\\|\\\\.spec$\\\\|TimeSpec\" /mnt/c/Users/GlendonKlassen/code/throughline-engine/test/Spec.hs)"
     ],
     "additionalDirectories": [
       "/tmp"

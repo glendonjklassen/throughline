@@ -133,6 +133,7 @@ tests:
     - Engine.Core.AxiomsSpec
     - Engine.Core.SystemAxiomsSpec
     - Engine.Core.ConditionsSpec
+    - Engine.Core.TimeSpec
     - Engine.Core.EffectsSpec
     - Engine.Core.WorldSpec
     - Engine.Sync.CausalitySpec

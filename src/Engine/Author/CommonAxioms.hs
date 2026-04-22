@@ -3,10 +3,14 @@ module Engine.Author.CommonAxioms
   ( weatherNarrationAxiom
   , weatherInfluenceAxiom
   , moodDriftAxiom
+  , timeOfDayNarrationAxiom
   ) where
+
+import           Data.Maybe             (mapMaybe)
 
 import           Engine.Author.DSL
 import           Engine.Core.Conditions (getCharStat)
+import           Engine.Core.Time       (TimePhase, timeOfDayPhase)
 import           Engine.Core.World      (getWeather)
 import           GameTypes
 
@@ -47,6 +51,38 @@ weatherInfluenceAxiom cid influence = Axiom
              Just w  -> map (uncurry (modifyCharacterStatEffect cid))
                             (influence w)
   }
+
+-- ---------------------------------------------------------------------------
+-- Time-of-day narration
+-- ---------------------------------------------------------------------------
+
+-- | Narrates a scenario-provided line when the clock crosses a
+-- 'TimePhase' boundary (e.g. Dawn → Morning, GoldenHour → Dusk).
+-- Scenarios supply a prose function over 'TimePhase'; returning
+-- 'Nothing' for a phase suppresses the beat so authors can stay
+-- silent on transitions that don't need calling out.
+--
+-- Triggers off 'diffWorldTagsAdded' for TimeOfDay tags — diff-driven,
+-- not a point-in-time read — and fires exactly once per boundary
+-- even when the hour advances several times in one tick.
+timeOfDayNarrationAxiom :: (TimePhase -> Maybe String) -> Axiom
+timeOfDayNarrationAxiom phaseProse = Axiom
+  { axiomId       = ScenarioAxiom "timeOfDayNarration"
+  , axiomPriority = 1
+  , axiomEvaluate = \_world _actions diff ->
+      let newHours = mapMaybe hourOfTag (diffWorldTagsAdded diff)
+          transitions = [ timeOfDayPhase h
+                        | h <- newHours
+                        , timeOfDayPhase h /= timeOfDayPhase (h - 1)
+                        ]
+      in [ immediate (Narrate line)
+         | phase <- transitions
+         , Just line <- [phaseProse phase]
+         ]
+  }
+  where
+    hourOfTag (EngineTag (Clock (TimeOfDay h))) = Just h
+    hourOfTag _                                 = Nothing
 
 -- ---------------------------------------------------------------------------
 -- Mood drift toward baseline

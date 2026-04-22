@@ -2,8 +2,9 @@ module Scenarios.DeerHunt.Axioms (allAxioms, dawnRule, hunterArrivalMergeAxiom) 
 
 import           Data.Maybe        (fromMaybe)
 import qualified Data.Map.Strict as Map
-import           Engine.Author.CommonAxioms  (weatherNarrationAxiom)
+import           Engine.Author.CommonAxioms  (timeOfDayNarrationAxiom, weatherNarrationAxiom)
 import           Engine.Author.DSL
+import           Engine.Core.Time            (TimePhase(..))
 import           Engine.Author.Random        (rollCheck, rollChoice, rollD)
 import           Engine.CRDT.ORSet           (orToList)
 import           GameTypes
@@ -45,10 +46,24 @@ allAxioms hw you =
   , nightfallAxiom hw you
   , tensionAxiom you
   , weatherNarrationAxiom weatherDesc
+  , timeOfDayNarrationAxiom deerHuntPhaseProse
   , dayRolloverAxiom hw you
   , arrivalDiscoveryAxiom hw you
   , findDiscoveryAxiom hw you
   ]
+
+-- | Prose lines for DeerHunt's time-of-day transitions.  Returning
+-- 'Nothing' for a phase suppresses that beat — we skip the three-
+-- ways-to-say-midday moments to keep the voice spare.
+deerHuntPhaseProse :: TimePhase -> Maybe String
+deerHuntPhaseProse Dawn       = Just "First light. Grass blue. Your breath hangs in the air."
+deerHuntPhaseProse Morning    = Just "Sun's up. Frost starting to give on the south sides."
+deerHuntPhaseProse Midday     = Just "High sun. The section goes flat, colorless for a while."
+deerHuntPhaseProse Afternoon  = Just "Afternoon. Shadows get long and brown again."
+deerHuntPhaseProse GoldenHour = Just "The light goes amber. Everything stands out."
+deerHuntPhaseProse Dusk       = Just "Dusk. Legal light running out. You start listening harder."
+deerHuntPhaseProse Night      = Just "Full dark. Stars visible already."
+deerHuntPhaseProse _          = Nothing
 
 -- ---------------------------------------------------------------------------
 -- Wind drift

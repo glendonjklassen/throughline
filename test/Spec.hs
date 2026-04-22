@@ -5,6 +5,7 @@ import           Test.Hspec
 import qualified Engine.Core.AxiomsSpec
 import qualified Engine.ChainSpec
 import qualified Engine.Core.ConditionsSpec
+import qualified Engine.Core.TimeSpec
 import qualified Engine.Author.CommonAxiomsSpec
 import qualified Engine.Author.DSLSpec
 import qualified Engine.Author.SceneSpec
@@ -37,6 +38,7 @@ import qualified Scenarios.TopBuySpec
 main :: IO ()
 main = hspec $ do
   Engine.Core.ConditionsSpec.spec
+  Engine.Core.TimeSpec.spec
   Engine.Core.EffectsSpec.spec
   Engine.Author.CommonAxiomsSpec.spec
   Engine.Author.DSLSpec.spec
