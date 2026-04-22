@@ -4,7 +4,8 @@ module Engine.JSONRoundTripSpec (spec) where
 import           Test.Hspec
 import           Test.QuickCheck
 import           Data.Aeson         (encode, decode, ToJSON, FromJSON)
-import qualified Data.ByteString    as BS
+import qualified Data.ByteString            as BS
+import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Data.List.NonEmpty (NonEmpty(..))
 import           Data.Word          (Word8)
 
@@ -85,6 +86,16 @@ spec = describe "JSON round-trips" $ do
     \(e :: LogEntry) (sig :: [Word8]) ->
       let e' = e { entrySignature = Just (BS.pack sig) }
       in roundTrip e'
+
+  -- A log entry written before the schema-version field existed omits
+  -- "schema" entirely.  'FromJSON' must accept it and default to 1, so
+  -- existing player saves keep working across the upgrade.
+  it "LogEntry without a schema field loads as version 1" $
+    let legacy = BLC.pack
+          "{\"action\":{\"actionIdText\":\"act\"},\
+          \\"clock\":{\"lcPlayerId\":\"p\",\"lcTick\":1},\
+          \\"diff\":{},\"frontier\":{},\"id\":\"1-p\",\"player\":\"p\"}"
+    in fmap entrySchemaVersion (decode legacy :: Maybe LogEntry) `shouldBe` Just 1
 
   -- -------------------------------------------------------------------------
   -- ORSet — custom instance (entries/tombstones structure)

@@ -33,14 +33,19 @@ data LamportClock = LamportClock
   , lcPlayerId :: PlayerId
   } deriving (Show, Eq, Ord, Generic)
 
+-- | One action's worth of log, written append-only to the event log.
+-- 'entrySchemaVersion' stamps the on-disk format so future schema changes
+-- can migrate older logs rather than rejecting them. Absent from a parsed
+-- entry means "pre-versioning" and is treated as version 1.
 data LogEntry = LogEntry
-  { entryId        :: String
-  , entryClock     :: LamportClock
-  , entryPlayerId  :: PlayerId
-  , entryActionId  :: ActionId
-  , entryDiff      :: WorldDiff
-  , entrySignature :: Maybe BS.ByteString
-  , entryFrontier  :: CausalFrontier
+  { entryId            :: String
+  , entryClock         :: LamportClock
+  , entryPlayerId      :: PlayerId
+  , entryActionId      :: ActionId
+  , entryDiff          :: WorldDiff
+  , entrySignature     :: Maybe BS.ByteString
+  , entryFrontier      :: CausalFrontier
+  , entrySchemaVersion :: Int
   } deriving (Show, Eq, Generic)
 
 -- ---------------------------------------------------------------------------

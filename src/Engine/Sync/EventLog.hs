@@ -7,6 +7,7 @@ module Engine.Sync.EventLog
   , appendLogEntry
   , loadLog
   , logFileName
+  , currentLogSchemaVersion
   , mkLogEntry
   , logAction
   , mergeLogs
@@ -104,6 +105,13 @@ removeIfExists path = do
 logFileName :: FilePath
 logFileName = "events.jsonl"
 
+-- | The schema version that new 'LogEntry' writes are stamped with.
+-- Bump when the on-disk log format changes in a way that needs migration.
+-- 'FromJSON' defaults missing versions to 1, so pre-versioning logs still
+-- load.
+currentLogSchemaVersion :: Int
+currentLogSchemaVersion = 1
+
 appendLogEntry :: FilePath -> LogEntry -> IO ()
 appendLogEntry path entry = do
   createDirectoryIfMissing True (takeDirectory path)
@@ -129,13 +137,14 @@ mkLogEntry pid clock aid diff frontier =
   let tick = lcTick clock
       PlayerId p = pid
   in LogEntry
-    { entryId        = show tick <> "-" <> p
-    , entryClock     = clock { lcPlayerId = pid }
-    , entryPlayerId  = pid
-    , entryActionId  = aid
-    , entryDiff      = diff
-    , entrySignature = Nothing
-    , entryFrontier  = frontier
+    { entryId            = show tick <> "-" <> p
+    , entryClock         = clock { lcPlayerId = pid }
+    , entryPlayerId      = pid
+    , entryActionId      = aid
+    , entryDiff          = diff
+    , entrySignature     = Nothing
+    , entryFrontier      = frontier
+    , entrySchemaVersion = currentLogSchemaVersion
     }
 
 -- ---------------------------------------------------------------------------
