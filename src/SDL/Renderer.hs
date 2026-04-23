@@ -28,8 +28,9 @@ module SDL.Renderer
   ) where
 
 import           Control.Monad (unless, void, when)
+import           Data.Char (isDigit, toLower)
 import           Data.IORef
-import           Data.List (intercalate, sortOn)
+import           Data.List (intercalate, intersperse, sortOn)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import           Data.Maybe (fromMaybe)
@@ -45,7 +46,8 @@ import           SDL.SpatialHUD (SpatialHUD(..), HUDCell(..),
                                  TrailMark(..), SpritePlacement(..),
                                  layoutHUD, hudGenRowCount,
                                  terrainSpriteScatter, trailMarks)
-import           Engine.Core.World (playerLocationName, engineTimeStatus, exitBearings)
+import           Text.Read (readMaybe)
+import           Engine.Core.World (playerLocationName, engineTimeStatus, exitBearings, getWeather)
 import           Engine.Core.NarrativeMessage
 import           SDL.Layout (LayoutConfig(..), ScenarioDisplay(..))
 import           SDL.Debug (learningModeLines)
@@ -815,124 +817,151 @@ renderJournalOverlay ctx display world tab = do
     TabToday   -> drawToday   fc cols rows firstRow lastRow world
     TabPast    -> drawPast    fc cols     firstRow lastRow world
     TabCatalog -> drawCatalog fc cols     firstRow lastRow display world
-  renderText fc "1 today  2 past  3 catalog   s share   any other: close" greyText
+  renderText fc "1 today  2 earlier  3 index   s share   any other: close" greyText
     (marginLeft, fromIntegral lastRow)
   presentSDL ctx
 
 drawJournalHeader :: FontContext -> Int -> Int -> JournalTab -> IO ()
 drawJournalHeader fc cols row tab = do
   let title = case tab of
-        TabToday   -> "— journal · today —"
-        TabPast    -> "— journal · past days —"
-        TabCatalog -> "— journal · catalog —"
+        TabToday   -> "— field notes · today —"
+        TabPast    -> "— field notes · earlier —"
+        TabCatalog -> "— field notes · index —"
   renderText fc title defaultText (marginLeft, fromIntegral row)
   drawHLine fc cols (fromIntegral (row + 1))
 
--- | Today: entries since the last day marker, plus a small sketch map
--- tucked at the top.  If the journal has never seen a day boundary,
--- the whole thing is "today."
-drawToday :: FontContext -> Int -> Int -> Int -> Int -> GameWorld -> IO ()
-drawToday fc cols rows firstRow lastRow world = do
-  let pages      = journalPages (worldJournal world)
-      today      = if null pages then [] else last pages
-      pageW      = cols - 2 * fromIntegral marginLeft
-      mapHeight  = min 8 (max 0 (rows `div` 6))
-      mapRows    = sketchMapRows world (cols - 2 * fromIntegral marginLeft - 4) mapHeight
-      afterMap   = firstRow + length mapRows + 1
-      budget     = max 1 (lastRow - afterMap)
-      wrapped    = concatMap (wrapWords (max 10 pageW)) today
-      visible    = takeLast budget wrapped
-  mapM_ (\(i, line) ->
-    renderText fc line dimText (marginLeft + 2, fromIntegral (firstRow + i))
-    ) (zip [0 :: Int ..] mapRows)
-  mapM_ (\(i, line) ->
-    renderText fc line defaultText (marginLeft, fromIntegral (afterMap + i))
-    ) (zip [0 :: Int ..] visible)
+-- ---------------------------------------------------------------------------
+-- Field-notebook layout
+-- ---------------------------------------------------------------------------
 
--- | Past days: every completed day's entries, paginated by the day
--- markers.  Today is deliberately excluded (it lives in its own tab).
--- The last N lines across all past pages are shown.
-drawPast :: FontContext -> Int -> Int -> Int -> GameWorld -> IO ()
-drawPast fc cols firstRow lastRow world = do
-  let pages   = journalPages (worldJournal world)
-      past    = if null pages then [] else init pages
-      pageW   = cols - 2 * fromIntegral marginLeft
-      flatten = concatMap (wrapWords (max 10 pageW)) (concat past)
-      budget  = max 1 (lastRow - firstRow)
-      visible = takeLast budget flatten
-  case past of
-    [] -> renderText fc "No past days yet." greyText (marginLeft, fromIntegral firstRow)
-    _  -> mapM_ (\(i, line) ->
-            renderText fc line defaultText (marginLeft, fromIntegral (firstRow + i))
-            ) (zip [0 :: Int ..] visible)
+-- | A single drawable line of the notebook.  'Nothing' is a blank row
+-- — the page breathes between entries and day blocks.  'Just (color,
+-- leftCol, text)' draws @text@ at @leftCol@ in @color@.  A list of
+-- these is easy to trim (for scrolling) and cheap to render.
+type JournalLine = Maybe (Color, CInt, String)
 
--- | Catalog: every discovery the scenario exposes, grouped by
--- category.  Empty groups render as a quiet footer line naming what
--- you still haven't seen.  Scenarios without a catalog get a single
--- hint.
-drawCatalog :: FontContext -> Int -> Int -> Int -> ScenarioDisplay -> GameWorld -> IO ()
-drawCatalog fc cols firstRow lastRow display world = do
-  let groups    = sdCatalog display world
-      pageW     = cols - 2 * fromIntegral marginLeft
-      budget    = max 1 (lastRow - firstRow)
-      lines'    = concatMap renderGroup groups
-      wrapped   = concatMap (wrapWords (max 10 pageW)) lines'
-      visible   = take budget wrapped
-  case groups of
-    [] -> renderText fc "This scenario doesn't keep a catalog."
-            greyText (marginLeft, fromIntegral firstRow)
-    _  -> mapM_ (\(i, line) ->
-            let color = if line `elem` lines' && null (dropWhile (/= ':') line)
-                          then greyText else defaultText
-            in renderText fc line color (marginLeft, fromIntegral (firstRow + i))
-            ) (zip [0 :: Int ..] visible)
+-- | Columns for the notebook's left gutter.  "Day N" headers sit
+-- snug against the margin so they read like a ribbon; entry text is
+-- indented so the gutter reads as whitespace around the day label.
+notebookHeaderCol, notebookEntryCol, notebookContCol :: CInt
+notebookHeaderCol = marginLeft         -- "Day N"
+notebookEntryCol  = marginLeft + 6     -- "·  entry..."
+notebookContCol   = marginLeft + 9     -- wrapped continuation
+
+-- | Useful text width for wrapping notebook entries.
+notebookTextWidth :: Int -> Int
+notebookTextWidth cols = max 10 (cols - fromIntegral notebookEntryCol - 4)
+
+-- | Draw a vertical slice of notebook lines between @firstRow@ and
+-- @lastRow@ (inclusive).  If @anchorBottom@ is True, the *last* N
+-- lines that fit are shown (useful for live-feeling scroll); if
+-- False, the *first* N are shown (useful for an index that grows
+-- from the top).
+drawJournalLines :: FontContext -> Int -> Int -> Bool -> [JournalLine] -> IO ()
+drawJournalLines fc firstRow lastRow anchorBottom lines_ =
+  let budget  = max 0 (lastRow - firstRow)
+      visible = if anchorBottom
+                  then takeLast budget lines_
+                  else take budget lines_
+  in mapM_ draw (zip [0 :: Int ..] visible)
   where
-    renderGroup (label, names) =
-      let header = label <> "s:"
-          body   = if null names
-                     then ["  you haven't catalogued any yet."]
-                     else map ("  " <>) names
-      in header : body ++ [""]
+    draw (_, Nothing) = pure ()
+    draw (i, Just (color, col, txt)) =
+      renderText fc txt color (fromIntegral col, fromIntegral (firstRow + i))
 
--- ---------------------------------------------------------------------------
--- Sketch map
--- ---------------------------------------------------------------------------
+-- | Format one day's journal page as notebook lines.  The day header
+-- reads "Day N" on its own line; if @msub@ is provided (weather for
+-- today's block, say) it renders dimmed underneath.  Entries flow
+-- below with a middle-dot gutter glyph, wrapped continuation lines
+-- aligned under the first word, and a blank row between each entry
+-- so the page has texture rather than a flat list.
+dayBlockLines :: Int -> Int -> Maybe String -> [String] -> [JournalLine]
+dayBlockLines textW dayNum msub entries =
+  let header = Just (defaultText, notebookHeaderCol, "Day " <> show dayNum)
+      subLine = case msub of
+        Just s  -> [Just (dimText, notebookHeaderCol, s)]
+        Nothing -> []
+      entryRows entry = case wrapWords textW entry of
+        []     -> []
+        (l:ls) -> Just (defaultText, notebookEntryCol, "\x00b7  " <> l)
+                : map (\r -> Just (defaultText, notebookContCol, r)) ls
+      entriesSection = concat (intersperse [Nothing] (map entryRows entries))
+  in [header] <> subLine <> [Nothing] <> entriesSection <> [Nothing]
 
--- | Render a small unicode sketch of where the player has been this
--- hunt, derived from the location graph's normalized coords plus the
--- player's location history.  Returns the map as a list of rows of
--- text so the overlay caller can position it freely.  Empty when the
--- graph has no coord data.
-sketchMapRows :: GameWorld -> Int -> Int -> [String]
-sketchMapRows _ _ 0 = []
-sketchMapRows world width height =
-  let coordMap = lgCoords (worldLocationGraph world)
-  in if Map.null coordMap
-       then []
-       else
-         let history    = concat (Map.elems (worldLocationHistory world))
-             historySet = Set.fromList history
-             playerLoc  = case Map.elems (worldLocations world) of
-                            (l:_) -> Just l
-                            []    -> Nothing
-             w          = max 8 (min 40 width)
-             h          = max 3 (min 10 height)
-             cellAt x y =
-               let matches =
-                     [ loc
-                     | (loc, (nx, ny)) <- Map.toList coordMap
-                     , round (nx * fromIntegral (w - 1)) == (x :: Int)
-                     , round (ny * fromIntegral (h - 1)) == (y :: Int)
-                     ]
-               in pickGlyph matches playerLoc historySet
-         in [ [ cellAt x y | x <- [0 .. w - 1] ] | y <- [0 .. h - 1] ]
+-- | Parse a journal day-marker line like "\x2014 Day 2 \x2014" and
+-- return the integer inside, or 'Nothing' for other lines.
+dayMarkerNumber :: String -> Maybe Int
+dayMarkerNumber s
+  | take 7 s == "\x2014 Day " = readMaybe (takeWhile isDigit (drop 7 s))
+  | otherwise                 = Nothing
 
--- | Choose which glyph represents the cell: 'P' for the player, '*'
--- for a history cell, '.' for a mapped but unvisited cell, ' ' when
--- no location falls here.
-pickGlyph :: [Location] -> Maybe Location -> Set.Set Location -> Char
-pickGlyph locs playerLoc hist
-  | any (\l -> Just l == playerLoc) locs = 'P'
-  | any (`Set.member` hist) locs         = '*'
-  | not (null locs)                      = '.'
-  | otherwise                            = ' '
+-- | Split a journal page into (dayNumber, entriesOnly).  The first
+-- line is treated as a day marker when it parses as one; otherwise
+-- we fall back to the caller-provided default (used for the initial
+-- day, which has no leading marker).
+pageDayAndEntries :: Int -> [String] -> (Int, [String])
+pageDayAndEntries fallback page = case page of
+  (m:rest) | Just n <- dayMarkerNumber m -> (n, rest)
+  _                                      -> (fallback, page)
+
+-- | Today: current day's notebook block.  Header shows the day
+-- number and (if we can read it off the world tags) the weather;
+-- entries follow in paragraph form.  Scrolls from the bottom so the
+-- newest entry is always visible at the edge of the page.
+drawToday :: FontContext -> Int -> Int -> Int -> Int -> GameWorld -> IO ()
+drawToday fc cols _rows firstRow lastRow world =
+  let pages = journalPages (worldJournal world)
+      (todayDay, todayEntries) =
+        pageDayAndEntries (max 1 (length pages))
+                          (if null pages then [] else last pages)
+      weather = fmap (map toLower . weatherName) (getWeather world)
+      textW   = notebookTextWidth cols
+      lines_  = dayBlockLines textW todayDay weather todayEntries
+  in case todayEntries of
+       [] -> renderText fc "Nothing written yet today."
+               greyText (notebookHeaderCol, fromIntegral firstRow)
+       _  -> drawJournalLines fc firstRow lastRow True lines_
+
+-- | Earlier days: every completed day's notebook block stacked in
+-- chronological order.  Day number is read from each page's leading
+-- marker, falling back to a running counter for the initial day
+-- (which is written without a marker).
+drawPast :: FontContext -> Int -> Int -> Int -> GameWorld -> IO ()
+drawPast fc cols firstRow lastRow world =
+  let pages = journalPages (worldJournal world)
+      past  = if null pages then [] else init pages
+      textW = notebookTextWidth cols
+      blocks = zipWith
+        (\i p ->
+          let (d, es) = pageDayAndEntries (i + 1) p
+          in dayBlockLines textW d Nothing es)
+        [0 :: Int ..]
+        past
+      lines_ = concat blocks
+  in case past of
+       [] -> renderText fc "No earlier days yet."
+               greyText (notebookHeaderCol, fromIntegral firstRow)
+       _  -> drawJournalLines fc firstRow lastRow True lines_
+
+-- | Index: things noticed on this hunt, as diary paragraphs rather
+-- than a ledger.  Each scenario emits pre-formatted prose (day,
+-- sighting, short factoid), and the renderer just wraps and spaces
+-- them out — no counts, no grouping, no checklist texture.  Empty
+-- catalog reads as one dim line so the page doesn't go blank.
+drawCatalog :: FontContext -> Int -> Int -> Int -> ScenarioDisplay -> GameWorld -> IO ()
+drawCatalog fc cols firstRow lastRow display world =
+  let entries = sdCatalog display world
+      textW   = notebookTextWidth cols
+      lines_  = concat (intersperse [Nothing] (map (entryLines textW) entries))
+  in case entries of
+       [] -> renderText fc "Nothing kept in this ledger yet."
+               greyText (notebookHeaderCol, fromIntegral firstRow)
+       _  -> drawJournalLines fc firstRow lastRow False lines_
+  where
+    entryLines textW paragraph =
+      case wrapWords textW paragraph of
+        []     -> []
+        (l:ls) ->
+          Just (defaultText, notebookEntryCol, "\x00b7  " <> l)
+          : map (\r -> Just (defaultText, notebookContCol, r)) ls
+

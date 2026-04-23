@@ -42,12 +42,13 @@ data ScenarioDisplay = ScenarioDisplay
     -- during the incremental reveal animation.  The 'Int' is a
     -- per-arrival salt so repeated arrivals read differently.
     -- Returning 'Nothing' suppresses the sensory line.
-  , sdCatalog         :: GameWorld -> [(String, [String])]
-    -- ^ The journal's catalog tab, grouped as @[(categoryLabel,
-    -- [entryName])]@.  Scenarios that don't use a discovery catalog
-    -- return @[]@; the overlay collapses the tab to a one-line hint
-    -- in that case.  Empty groups are dropped by the overlay before
-    -- rendering, so scenarios can safely return all four categories.
+  , sdCatalog         :: GameWorld -> [String]
+    -- ^ The journal's index tab: each element is one already-formatted
+    -- diary paragraph written in the scenario's own voice (e.g.
+    -- @"Day 2 — a raven. Clever bird; pairs stay together for years."@).
+    -- The overlay renders them with blank rows between as loose
+    -- field-notebook prose — scenarios that don't keep a catalog
+    -- return @[]@ and the tab shows a single hint line.
   }
 
 -- | Sensible defaults: no end screen, no status line, default layout,

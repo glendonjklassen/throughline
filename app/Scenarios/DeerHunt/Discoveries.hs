@@ -16,7 +16,6 @@ module Scenarios.DeerHunt.Discoveries
   , discoveryCatalog
   ) where
 
-import           Data.List       (sort)
 import qualified Data.Map.Strict as Map
 import           Text.Read       (readMaybe)
 
@@ -204,12 +203,110 @@ discoveredEntries world =
   , Just d <- [readMaybe s :: Maybe Discovery]
   ]
 
--- | Group discoveries by kind for the catalog overlay.  Every kind
--- gets a row — empty kinds render as a quiet footer in the overlay
--- so the player sees what's still out there to find.  Names are
--- sorted alphabetically within each group for stable reading.
-discoveryCatalog :: GameWorld -> [(String, [String])]
+-- | Render each catalogued discovery as a one-paragraph diary entry
+-- in the hunter's voice: the day it was first seen, a terse phrasing
+-- of the sighting, and a short factoid.  Order follows the journal
+-- (chronological) so the index reads as a running log instead of an
+-- alphabetised list.
+discoveryCatalog :: GameWorld -> [String]
 discoveryCatalog world =
   let entries = discoveredEntries world
-      grouped k = sort [ name | Discovery k' name <- entries, k' == k ]
-  in [ (show k, grouped k) | k <- [minBound .. maxBound :: DiscoveryKind] ]
+      dayMap  = discoveryDays (worldJournal world)
+      line d  =
+        let day = Map.findWithDefault 1 (discoveryKey d) dayMap
+        in diaryLine day d
+  in map line entries
+
+-- | Key used to look up a discovery's first-seen day in the journal
+-- scan.  Kind + name is enough: names are unique within a kind.
+discoveryKey :: Discovery -> (DiscoveryKind, String)
+discoveryKey (Discovery k n) = (k, n)
+
+-- | Scan the journal once and record the day each discovery was first
+-- written down.  Day markers (\"— Day N —\") advance the day
+-- counter; \"First Kind: Name.\" lines record an entry.  Day 1 has
+-- no leading marker, so the counter starts there.
+discoveryDays :: [String] -> Map.Map (DiscoveryKind, String) Int
+discoveryDays = go 1 Map.empty
+  where
+    go _   acc []           = acc
+    go day acc (line:rest)
+      | Just d <- dayMarker line         = go d acc rest
+      | Just k <- firstFindKey line      = go day (Map.insert k day acc) rest
+      | otherwise                         = go day acc rest
+
+    dayMarker s
+      | take 7 s == "\x2014 Day " =
+          readMaybe (takeWhile (`elem` ['0'..'9']) (drop 7 s))
+      | otherwise = Nothing
+
+    firstFindKey s
+      | take 6 s == "First " =
+          let (kindWord, afterKind) = break (== ':') (drop 6 s)
+          in case afterKind of
+               (':':' ':nameDot) ->
+                 let name = reverse (dropWhile (== '.') (reverse nameDot))
+                 in case (readMaybe kindWord :: Maybe DiscoveryKind) of
+                      Just k  -> Just (k, name)
+                      Nothing -> Nothing
+               _ -> Nothing
+      | otherwise = Nothing
+
+-- | Format one discovery as a diary paragraph: "Day N — sighting.
+-- Factoid."  The sighting phrase reads naturally in the hunter's
+-- voice (article, verb, species), and the factoid is a short
+-- authored fact that grounds the entry in something specific rather
+-- than a Pokédex-style stat line.  Missing factoids fall through
+-- to bare sighting prose so unknown species still read cleanly.
+diaryLine :: Int -> Discovery -> String
+diaryLine day d@(Discovery kind name) =
+  let sighting = sightingPhrase kind name
+      fact     = factoidFor d
+      header   = "Day " <> show day <> " \x2014 " <> sighting <> "."
+  in case fact of
+       "" -> header
+       f  -> header <> " " <> f
+
+-- | A short verbal phrase like "a raven", "trembling aspen", "a shed
+-- antler" — whatever reads natural in a diary clause after "I saw".
+-- Trees and finds drop the article or use "a patch of" where it
+-- helps the prose land; animals get an indefinite article.
+sightingPhrase :: DiscoveryKind -> String -> String
+sightingPhrase Animal name = "a " <> name <> " went through"
+sightingPhrase Tree   name = "stopped by a " <> name
+sightingPhrase Sign   name = "picked up " <> name
+sightingPhrase Find   name = "found " <> name
+
+-- | Short, authored factoid per species.  Written in the same terse
+-- prairie voice as the rest of the game; each one grounds the entry
+-- in a specific habit, range note, or appearance detail rather than
+-- reading as a trivia card.  Empty string = no factoid (the diary
+-- line will still render with just the sighting header).
+factoidFor :: Discovery -> String
+factoidFor (Discovery Animal name) = case name of
+  "raven"            -> "Clever bird. Pairs stay on a territory for years."
+  "ruffed grouse"    -> "Drums from a log in spring — a heartbeat louder than you'd believe."
+  "snowshoe hare"    -> "Turns white for winter. Moves at the edges of things."
+  "red-tailed hawk"  -> "Rides the ridge thermals. Always hunting."
+  "jackrabbit"       -> "Not really a rabbit. Runs flat out; stops dead."
+  "great horned owl" -> "Nests in old hawk stick nests. Calls a lot before dawn."
+  _                  -> ""
+factoidFor (Discovery Tree name) = case name of
+  "trembling aspen"    -> "Leaves rattle in any breeze. Whole groves grow from one root."
+  "bur oak"            -> "Slow wood. Takes fire and comes back."
+  "chokecherry"        -> "Berries bitter on the tongue, black when ripe."
+  "box elder"          -> "Soft wood, quick growth. Breaks in ice storms."
+  "hazel"              -> "Short and dense. Brush deer push through head-low."
+  "green ash"          -> "Straight grain; splits clean."
+  "willow"             -> "Bent toward water. Roots holding the bank together."
+  "red osier dogwood"  -> "Bright red bark under the snow."
+  _                    -> ""
+factoidFor (Discovery Find name) = case name of
+  "rusty 50s car"    -> "No plates, no glass. Someone left it here long before your time."
+  "shed antler"      -> "Dropped in winter. You tuck it into your pack."
+  "abandoned stand"  -> "Rotten ladder, still nailed up. Not yours to use."
+  "survey stake"     -> "Orange plastic, bleached. Cut lines mean plans."
+  "beaver stump"     -> "Clean bevels. They work by the hour."
+  "skull"            -> "White as paper. You leave it where it lay."
+  _                  -> ""
+factoidFor _ = ""
