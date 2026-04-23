@@ -21,6 +21,7 @@ module SDL.SettingsMenu
   ( settingsMenu
   ) where
 
+import           Data.Char          (isAsciiLower, isAsciiUpper, isDigit)
 import           Data.IORef         (newIORef, readIORef, writeIORef)
 
 import           SDL.ClickMap       (ClickMap, gridRect, gridRowRect, hitTest)
@@ -68,12 +69,12 @@ settingsMenu ctx = do
     -- 'a'/'b'/... = adjust row N-, digits = select row, '.' = save,
     -- ',' = cancel.  This is internal; never seen by the player.
     clickToCmd ch
-      | ch == '.'                   = Commit
-      | ch == ','                   = Cancel
-      | ch >= '0' && ch <= '9'      = SelectRow (fromEnum ch - fromEnum '0')
-      | ch >= 'a' && ch <= 'z'      = AdjustRow (fromEnum ch - fromEnum 'a') (-1)
-      | ch >= 'A' && ch <= 'Z'      = AdjustRow (fromEnum ch - fromEnum 'A')   1
-      | otherwise                   = MoveBy 0   -- no-op
+      | ch == '.'         = Commit
+      | ch == ','         = Cancel
+      | isDigit ch        = SelectRow (fromEnum ch - fromEnum '0')
+      | isAsciiLower ch   = AdjustRow (fromEnum ch - fromEnum 'a') (-1)
+      | isAsciiUpper ch   = AdjustRow (fromEnum ch - fromEnum 'A')   1
+      | otherwise         = MoveBy 0   -- no-op
 
     keyToCmd c sel
       | c == '\x1B'          = Cancel
@@ -136,9 +137,7 @@ valueOf 4 s = pct (sRevealSpeed s)
 valueOf 5 s = pct (sMasterVolume s)
 valueOf 6 s = pct (sMusicVolume s)
 valueOf 7 s = pct (sSfxVolume s)
-valueOf 8 s = case sSharedFolder s of
-  Nothing -> "none"
-  Just p  -> shortenPath p
+valueOf 8 s = maybe "none" shortenPath (sSharedFolder s)
 valueOf _ _ = ""
 
 -- | Truncate a path to the last ~40 chars so it fits in the value

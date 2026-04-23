@@ -5,6 +5,7 @@
 -- on-disk format is conservative — each field is optional on load and
 -- defaults to the 'defaultSettings' value when absent, so a shipped
 -- build can add fields without invalidating older saved configs.
+{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 module SDL.Settings
   ( Settings(..)
@@ -90,7 +91,7 @@ instance Aeson.ToJSON DisplayMode where
   toJSON Fullscreen = Aeson.String "fullscreen"
 
 instance Aeson.FromJSON DisplayMode where
-  parseJSON = Aeson.withText "DisplayMode" $ \t -> case t of
+  parseJSON = Aeson.withText "DisplayMode" $ \case
     "windowed"   -> pure Windowed
     "fullscreen" -> pure Fullscreen
     other        -> fail ("unknown DisplayMode: " <> show other)
@@ -104,7 +105,7 @@ instance Aeson.ToJSON ViewportPreset where
     Viewport4K    -> "4k"
 
 instance Aeson.FromJSON ViewportPreset where
-  parseJSON = Aeson.withText "ViewportPreset" $ \t -> case t of
+  parseJSON = Aeson.withText "ViewportPreset" $ \case
     "low"   -> pure ViewportLow
     "deck"  -> pure ViewportDeck
     "1080p" -> pure Viewport1080p

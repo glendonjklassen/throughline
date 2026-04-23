@@ -1,3 +1,4 @@
+{- HLINT ignore "Use bimap" -}
 -- | Procedural generation pipeline: compile a 'SectionDescriptor' into
 -- a 'LocationGraph'.  Deterministic: same seed + same descriptor
 -- always yields the same map.

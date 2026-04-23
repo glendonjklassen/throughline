@@ -45,6 +45,7 @@ module SDL.SharedFolder
 
 import           Control.Exception      (SomeException, try)
 import           Control.Monad          (forM, when)
+import           Data.Either            (fromRight)
 import           Data.List              (isPrefixOf)
 import           Data.Maybe             (catMaybes)
 import           System.Directory       (copyFile, createDirectoryIfMissing,
@@ -123,7 +124,7 @@ scanSharedLogs sharedDirRaw scenName (PlayerId ownId) = do
     then pure []
     else do
       r <- try (listDirectory sharedDir) :: IO (Either SomeException [FilePath])
-      let subdirs = either (const []) id r
+      let subdirs = fromRight [] r
           -- Exclude own id and hidden entries (".DS_Store" etc.)
           others  = filter (\d -> d /= ownId && not ("." `isPrefixOf` d)) subdirs
       catMaybes <$> forM others (loadOne sharedDir scenName)

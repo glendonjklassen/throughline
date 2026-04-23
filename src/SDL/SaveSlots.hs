@@ -13,6 +13,7 @@ module SDL.SaveSlots
   ) where
 
 import           Control.Exception      (SomeException, try)
+import           Control.Monad          (when)
 import qualified Data.ByteString.Char8  as BS
 import           System.Directory       (doesFileExist, removeFile)
 import           System.FilePath        ((</>))
@@ -59,4 +60,4 @@ resetScenarioSave (PlayerId pid) scenName = do
   where
     removeIfExists p = do
       e <- doesFileExist p
-      if e then removeFile p else pure ()
+      when e $ removeFile p

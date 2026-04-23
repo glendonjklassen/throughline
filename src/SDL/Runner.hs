@@ -3,8 +3,14 @@
 -- | SDL2 game runner: constructs a RuntimeUI that renders to an SDL2 window.
 module SDL.Runner (sdlUI) where
 
+-- The two 'SDL.Debug' imports below look redundant to hlint, but the
+-- second one is CPP-guarded so 'cycleDebug' stays out of release
+-- builds.  Suppress the hint so CI doesn't flag it.
+{- HLINT ignore "Use fewer imports" -}
+
 import           Control.Monad           (unless, when)
 import           Control.Monad.IO.Class (liftIO)
+import           Data.Foldable           (for_)
 import           Control.Monad.Reader   (asks)
 import           Control.Monad.State    (get)
 import           Data.IORef
@@ -386,9 +392,9 @@ journalOverlayLoop ctx scenName playerId display world tab = do
   case me of
     Nothing -> pure ()
     Just (KeyPress c)    -> dispatch c
-    Just (ClickAt px py) -> case hitTest cm px py of
-      Just c  -> dispatch c
-      Nothing -> pure ()          -- click outside tabs dismisses
+    Just (ClickAt px py) ->
+      -- Click outside the tab row dismisses the overlay.
+      for_ (hitTest cm px py) dispatch
   where
     dispatch c
       | c == currentTabKey tab = pure ()

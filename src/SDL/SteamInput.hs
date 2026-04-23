@@ -1,3 +1,4 @@
+{- HLINT ignore "Use head" -}
 -- | Bridge between Steam Input's named digital actions and the
 -- internal keyboard characters the SDL input handler dispatches on.
 --

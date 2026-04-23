@@ -17,6 +17,7 @@ module SDL.Launcher
 
 import           Control.Exception      (SomeException, try)
 
+import           Data.Maybe             (fromMaybe)
 import qualified Data.Version           as Version
 
 import           Engine
@@ -127,7 +128,7 @@ renderSingleMenu ctx entry status = do
   let fc = sdlFont ctx
       -- Each clickable row spans the full screen width so a tap
       -- anywhere on the line selects the option.
-      rowHit r c = gridRowRect fc 0 r 80 c
+      rowHit r = gridRowRect fc 0 r 80
   renderText fc (entryLabel entry)                  defaultText (3, 2)
   renderText fc (entryTagline entry)                dimText     (3, 3)
   renderText fc ""                                  dimText     (3, 4)
@@ -255,7 +256,7 @@ renderMultiMenu :: SDLContext -> [ScenarioEntry] -> [SaveStatus] -> IO ClickMap
 renderMultiMenu ctx entries statuses = do
   clearSDL ctx
   let fc = sdlFont ctx
-      rowHit r c = gridRowRect fc 0 r 80 c
+      rowHit r = gridRowRect fc 0 r 80
   renderText fc "throughline" defaultText (3, 2)
   renderText fc "A narrative engine." dimText (3, 3)
   renderText fc "" dimText (3, 4)
@@ -314,9 +315,7 @@ versionTag = "v" <> Version.showVersion version
 -- | Pick the help pages for a scenario entry, falling back to the
 -- generic 'defaultHowToPlay' when the entry didn't supply any.
 helpPagesFor :: ScenarioEntry -> [String]
-helpPagesFor e = case entryHowToPlay e of
-  Just pages -> pages
-  Nothing    -> defaultHowToPlay
+helpPagesFor e = fromMaybe defaultHowToPlay (entryHowToPlay e)
 
 -- | Two-option confirmation.  Either key (y / n) or a click on the
 -- corresponding row resolves; anything else cancels conservatively.
@@ -326,7 +325,7 @@ confirmDiscard :: SDLContext -> String -> IO Bool
 confirmDiscard ctx label = do
   clearSDL ctx
   let fc = sdlFont ctx
-      rowHit r c = gridRowRect fc 0 r 80 c
+      rowHit r = gridRowRect fc 0 r 80
   renderText fc "Start a new hunt?"             defaultText  (3, 2)
   renderText fc ("This deletes your " <> label) warningColor (3, 3)
   renderText fc "save permanently."             warningColor (3, 4)

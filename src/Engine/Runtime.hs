@@ -40,7 +40,7 @@ data RuntimeUI = RuntimeUI
   }
 
 runScenario :: RuntimeUI -> (Int -> CharId -> Scenario) -> IO ()
-runScenario ui mkScenario = runScenarioWith ui (const (pure [])) mkScenario
+runScenario ui = runScenarioWith ui (const (pure []))
 
 -- | Like 'runScenario', but also folds an extra foreign-logs source
 -- into the merge pipeline.  Used by the shared-folder feature: the
