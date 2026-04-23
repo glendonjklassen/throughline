@@ -1,6 +1,7 @@
 module SDL.SaveSlotsSpec (spec) where
 
 import           Control.Exception  (bracket_)
+import           Control.Monad      (when)
 import           Data.IORef         (newIORef)
 import           System.Directory   (createDirectoryIfMissing, doesFileExist,
                                      removeDirectoryRecursive)
@@ -31,9 +32,7 @@ withCleanSlate = bracket_ (cleanup >> pure (newIORef ())) cleanup
   where
     cleanup = do
       e <- doesFileExist (testDir </> logFileName)
-      if e
-        then removeDirectoryRecursive (sessionsRootDir </> testScenario)
-        else pure ()
+      when e $ removeDirectoryRecursive (sessionsRootDir </> testScenario)
 
 spec :: Spec
 spec = describe "SDL.SaveSlots" $ do

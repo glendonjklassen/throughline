@@ -22,7 +22,8 @@
       "Read(//home/glendonklassen/**)",
       "Bash(hlint --version)",
       "Bash(hlint app/Scenarios/DeerHunt.hs app/Scenarios/DeerHunt/Axioms.hs app/Scenarios/DeerHunt/Constants.hs app/Scenarios/DeerHunt/Discoveries.hs app/Scenarios/Diner.hs app/Scenarios/DinerMaya.hs app/Scenarios/TopBuy.hs src/SDL/Layout.hs src/SDL/Renderer.hs src/SDL/Runner.hs)",
-      "Bash(hlint src/ app/)"
+      "Bash(hlint src/ app/)",
+      "Bash(hlint test/)"
     ],
     "additionalDirectories": [
       "/tmp"
