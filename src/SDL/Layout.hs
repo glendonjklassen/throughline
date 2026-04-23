@@ -45,10 +45,16 @@ data ScenarioDisplay = ScenarioDisplay
   , sdCatalog         :: GameWorld -> [String]
     -- ^ The journal's index tab: each element is one already-formatted
     -- diary paragraph written in the scenario's own voice (e.g.
-    -- @"Day 2 — a raven. Clever bird; pairs stay together for years."@).
+    -- @"Thu, Nov 7 — a raven. Clever bird; pairs stay together for years."@).
     -- The overlay renders them with blank rows between as loose
     -- field-notebook prose — scenarios that don't keep a catalog
     -- return @[]@ and the tab shows a single hint line.
+  , sdDayLabel        :: Int -> String
+    -- ^ Human-readable label for a given 1-based day number.  The
+    -- notebook uses this for day headers (e.g. "Thu, Nov 7" for
+    -- DeerHunt; "Day 1" as a generic default).  Also used in the
+    -- day-end transition overlay so the scenario controls the
+    -- vocabulary of its passage of time.
   }
 
 -- | Sensible defaults: no end screen, no status line, default layout,
@@ -62,4 +68,5 @@ defaultDisplay = ScenarioDisplay
   , sdZoneTintFor     = \_ _   -> Nothing
   , sdSensoryFor      = \_ _ _ -> Nothing
   , sdCatalog         = const []
+  , sdDayLabel        = \n -> "Day " <> show n
   }

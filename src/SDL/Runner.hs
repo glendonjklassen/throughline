@@ -325,6 +325,38 @@ confirmRowRect fc row ch =
       hh = fromIntegral (cellHeight fc) :: Int
   in (0, row * hh, 80 * cw, hh, ch)
 
+-- | Modal shown between ticks when a day rolled over.  Gives the
+-- player a moment to sit with the result — a kill, a miss, or
+-- calling it early — before the new morning's HUD loads.  The
+-- summary lines come straight from the journal entries the scenario
+-- just wrote, so the voice stays the scenario's own.
+dayEndOverlay :: SDLContext -> String -> [String] -> IO ()
+dayEndOverlay ctx dayLabel summary = do
+  clearSDL ctx
+  let fc   = sdlFont ctx
+      cols = gridCols ctx
+      rows = gridRows ctx
+      pageW = max 20 (cols - 2 * fromIntegral marginLeft - 4)
+      wrapped = concatMap (wrapWords pageW) summary
+      headerTxt = "\x2014  end of " <> dayLabel <> "  \x2014"
+      hintTxt   = "any key to continue"
+      -- Vertically center the header + prose block in the top two
+      -- thirds of the screen; hint sits two rows above the bottom.
+      blockH    = 3 + length wrapped  -- header + spacer + lines (approx)
+      headerRow = max 2 ((rows - blockH) `div` 2)
+      firstLine = headerRow + 3
+      hintRow   = rows - 3
+      centerCol s = fromIntegral (max 0 (cols `div` 2 - length s `div` 2))
+  renderText fc headerTxt defaultText (centerCol headerTxt, fromIntegral headerRow)
+  mapM_ (\(i, line) ->
+    renderText fc line defaultText (centerCol line, fromIntegral (firstLine + i))
+    ) (zip [0 :: Int ..] wrapped)
+  renderText fc hintTxt greyText (centerCol hintTxt, fromIntegral hintRow)
+  presentSDL ctx
+  drainSDLEvents
+  _ <- awaitInputSDL (sdlWindow ctx)
+  pure ()
+
 -- | Drive the journal overlay.  Pressing the number of a *different*
 -- tab switches to it; pressing the number of the *current* tab
 -- closes the overlay (so the key that opened the journal also
@@ -624,6 +656,10 @@ sdlStepHook ctx display countRef actionsRef before after _diff = do
   let newCount = length allMsgs
       newMsgs  = reverse (take (newCount - prevCount) allMsgs)
       tension  = getTension after
+      newJournal = drop (length (worldJournal before)) (worldJournal after)
+      crossedDay = any isDayMarker newJournal
+      summary    = dedupe (takeWhile (not . isDayMarker) newJournal)
+      endLabel   = sdDayLabel display (worldDayNumber before)
   if null newMsgs
     then pure ()
     else liftIO $ do
@@ -667,7 +703,27 @@ sdlStepHook ctx display countRef actionsRef before after _diff = do
       -- Drain lingering key events, brief pause, then done
       drainSDLEvents
       SDL.delay 400
-  liftIO $ writeIORef countRef newCount
+      -- Day-end transition: if the tick crossed a day boundary (the
+      -- scenario wrote a "— ... —" marker this tick), pause on a
+      -- recap modal before the new day's HUD loads.  Pulls the
+      -- scenario's pre-marker journal lines as the recap text, and
+      -- uses the ending day's label from 'sdDayLabel'.
+      when crossedDay $ do
+        dayEndOverlay ctx endLabel summary
+        -- New day, clean slate: the on-screen history starts fresh
+        -- so the morning HUD isn't cluttered with yesterday's beats.
+        -- 'worldJournal' is untouched, so the notebook tab still
+        -- remembers every day.
+        writeIORef logRef []
+  liftIO $ writeIORef countRef (if crossedDay then 0 else newCount)
+
+-- | Drop adjacent-duplicate entries.  The day-rollover axiom's
+-- "called it" path repeats the player's own journal entry; we'd
+-- rather show it once on the recap screen.
+dedupe :: [String] -> [String]
+dedupe (x:y:rest) | x == y = dedupe (x:rest)
+dedupe (x:rest)            = x : dedupe rest
+dedupe []                  = []
 
 -- ---------------------------------------------------------------------------
 -- Full-frame typewriter: re-renders the entire screen each tick so both
@@ -701,14 +757,29 @@ typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn frame you world ac
       (genRowCount, hasSpatial) = hudGenRowCount you world actions cols
       Layout{loHistTop = histTop, loHistRows = histAvail} =
         computeLayout rows topBarRows learnRowCount genRowCount hasSpatial
-      -- How many old history lines are visible
-      allOrdered   = reverse allMsgs
-      oldLabelW    = maximum (0 : map (length . neTimeLabel) allOrdered)
+      -- Reserve the bottom of the history area for the typewritten
+      -- new text; only show as many old lines as fit above it.
+      -- Without this, a burst of new narration (e.g. a kill plus the
+      -- rollover axiom's drive-home beats) would typewrite past the
+      -- last row of history and clip off-screen.
+      newLineCount = length newLines
+      availForOld  = max 0 (histAvail - newLineCount)
+      -- 'allMsgs' is newest-first; keep newest entries until their
+      -- formatted line count exhausts the budget, then stop.
+      oldLabelW    = maximum (0 : map (length . neTimeLabel) allMsgs)
       useLabelW    = max labelW oldLabelW
-      oldDispLines = concatMap (fmtOneEntry contentW useLabelW) allOrdered
-      oldVisCount  = min (length oldDispLines) (max 0 histAvail)
-      -- Row where new typewriter text starts
+      trimNewest _ []     = []
+      trimNewest b (e:es) =
+        let lns = length (fmtOneEntry contentW useLabelW e)
+        in if lns <= b then e : trimNewest (b - lns) es else []
+      trimmedOld   = trimNewest availForOld allMsgs
+      trimmedLines = concatMap (fmtOneEntry contentW useLabelW) (reverse trimmedOld)
+      oldVisCount  = length trimmedLines
       twStartRow   = fromIntegral (histTop + oldVisCount)
+  -- Swap the logRef to the trimmed set so 'renderWorldFrame' renders
+  -- exactly what we leave room for — no overlapping old lines under
+  -- the typewritten text.
+  writeIORef logRef trimmedOld
   -- Flatten new lines into individual characters with their screen row
   let charSteps = buildCharSteps newLines twStartRow
   go charSteps

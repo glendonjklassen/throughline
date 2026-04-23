@@ -34,6 +34,7 @@ topBuyDisplay = ScenarioDisplay
   , sdZoneTintFor     = \_ _   -> Nothing
   , sdSensoryFor      = \_ _ _ -> Nothing
   , sdCatalog         = const []
+  , sdDayLabel        = \n -> "Day " <> show n
   }
 
 endScreen :: GameWorld -> [String]

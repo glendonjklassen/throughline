@@ -669,7 +669,7 @@ dayRolloverAxiom hw you = Axiom
               summary
                 | killed    = "End of the day. Took the buck. " <> describeRack rack <> ". Meat in the freezer."
                 | missed    = "End of the day. Missed my chance. He's off the section."
-                | otherwise = "Called it. Packed it in. Tomorrow."
+                | otherwise = "End of the day. Called it early; the section felt cooked."
               -- New-day buck placement: anywhere in bush or ridge,
               -- seeded so it varies across hunts.
               buckSpots = hwLocsOfClass hw CBush ++ hwLocsOfClass hw CRidge
@@ -682,7 +682,7 @@ dayRolloverAxiom hw you = Axiom
                , map (immediate . RemoveWorldTag) allDayScopedTags
                , [ immediate (ModifyRelation Truth you (Capacity Experience) 1)
                  , immediate AdvanceDay
-                 , immediate (JournalEntry ("\x2014 Day " <> show nextDay <> " \x2014"))
+                 , immediate (JournalEntry ("\x2014 " <> formatHuntDate nextDay <> " \x2014"))
                  , immediate (SetLocation you (hwStart hw))
                  , immediate (SetLocationRandom deer saltDayRollover buckSpots)
                  ]

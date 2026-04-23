@@ -5,6 +5,8 @@ import           Data.Maybe           (fromMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 import           Data.List.NonEmpty (NonEmpty(..))
+import           Data.Time.Calendar (Day, DayOfWeek(..), addDays, dayOfWeek,
+                                     fromGregorian, toGregorian)
 import           Engine.Author.DSL
 import           Engine.Author.Random   (rollChoice)
 import           System.Random          (mkStdGen, randomR)
@@ -13,6 +15,51 @@ import           Engine.Core.World      (setCharacterStat)
 import           GameTypes
 import           Scenarios.DeerHunt.Generation (GeneratedMap(..), TerrainClass(..))
 import           Scenarios.DeerHunt.World      (HuntWorld(..), hwClass, hwLocsOfClass, hwStart, hwDeerStart)
+
+-- ---------------------------------------------------------------------------
+-- Calendar
+-- ---------------------------------------------------------------------------
+
+-- | Opening day of rifle season on the Saskatchewan prairie — the
+-- hunt's in-world anchor date.  Changing this shifts every day
+-- marker in the journal so the season still reads as contiguous.
+-- The year is chosen so the weekday order reads right; nothing in
+-- the game depends on it being the current year.
+huntStartDate :: Day
+huntStartDate = fromGregorian 2024 11 7
+
+-- | Calendar date for the @n@'th day of the hunt (1-indexed).
+huntDayDate :: Int -> Day
+huntDayDate n = addDays (fromIntegral (max 0 (n - 1))) huntStartDate
+
+-- | Short journal-style date label for the @n@'th day — e.g.
+-- \"Thu, Nov 7\".  Used for notebook day headers, the day-end
+-- transition overlay, and each discovery's first-seen stamp in the
+-- index.  The weekday makes the passage of time feel lived-in; the
+-- terse month abbreviation keeps headers from crowding a narrow
+-- viewport.
+formatHuntDate :: Int -> String
+formatHuntDate n =
+  let d = huntDayDate n
+      (_y, m, dom) = toGregorian d
+  in dowShort (dayOfWeek d) <> ", " <> monthShort m <> " " <> show dom
+
+dowShort :: DayOfWeek -> String
+dowShort dow = case dow of
+  Monday    -> "Mon"
+  Tuesday   -> "Tue"
+  Wednesday -> "Wed"
+  Thursday  -> "Thu"
+  Friday    -> "Fri"
+  Saturday  -> "Sat"
+  Sunday    -> "Sun"
+
+monthShort :: Int -> String
+monthShort m = case m of
+  1  -> "Jan"; 2  -> "Feb"; 3  -> "Mar"; 4  -> "Apr"
+  5  -> "May"; 6  -> "Jun"; 7  -> "Jul"; 8  -> "Aug"
+  9  -> "Sep"; 10 -> "Oct"; 11 -> "Nov"; 12 -> "Dec"
+  _  -> "?"
 
 -- ---------------------------------------------------------------------------
 -- Characters

@@ -23,6 +23,7 @@ import           Engine.Author.DSL
 import           Engine.CRDT.ORSet       (orToList)
 import           Engine.Core.Conditions  (checkCondition)
 import           GameTypes
+import           Scenarios.DeerHunt.Constants  (formatHuntDate)
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
 import           Scenarios.DeerHunt.World      (HuntWorld, hwClass, hwFinds)
 
@@ -223,22 +224,24 @@ discoveryKey :: Discovery -> (DiscoveryKind, String)
 discoveryKey (Discovery k n) = (k, n)
 
 -- | Scan the journal once and record the day each discovery was first
--- written down.  Day markers (\"— Day N —\") advance the day
--- counter; \"First Kind: Name.\" lines record an entry.  Day 1 has
--- no leading marker, so the counter starts there.
+-- written down.  Each \"— ... —\" line is a day boundary (the text
+-- between the dashes is scenario-specific — dates, day numbers,
+-- whatever the scenario emits); the counter simply increments on
+-- each one, starting at day 1 before any marker.  \"First Kind:
+-- Name.\" lines record an entry at the current day.
 discoveryDays :: [String] -> Map.Map (DiscoveryKind, String) Int
 discoveryDays = go 1 Map.empty
   where
     go _   acc []           = acc
     go day acc (line:rest)
-      | Just d <- dayMarker line         = go d acc rest
-      | Just k <- firstFindKey line      = go day (Map.insert k day acc) rest
-      | otherwise                         = go day acc rest
+      | isBoundaryMarker line        = go (day + 1) acc rest
+      | Just k <- firstFindKey line  = go day (Map.insert k day acc) rest
+      | otherwise                    = go day acc rest
 
-    dayMarker s
-      | take 7 s == "\x2014 Day " =
-          readMaybe (takeWhile (`elem` ['0'..'9']) (drop 7 s))
-      | otherwise = Nothing
+    isBoundaryMarker s =
+      length s >= 4
+      && take 2 s == "\x2014 "
+      && drop (length s - 2) s == " \x2014"
 
     firstFindKey s
       | take 6 s == "First " =
@@ -252,7 +255,7 @@ discoveryDays = go 1 Map.empty
                _ -> Nothing
       | otherwise = Nothing
 
--- | Format one discovery as a diary paragraph: "Day N — sighting.
+-- | Format one discovery as a diary paragraph: "<date> — sighting.
 -- Factoid."  The sighting phrase reads naturally in the hunter's
 -- voice (article, verb, species), and the factoid is a short
 -- authored fact that grounds the entry in something specific rather
@@ -262,7 +265,7 @@ diaryLine :: Int -> Discovery -> String
 diaryLine day d@(Discovery kind name) =
   let sighting = sightingPhrase kind name
       fact     = factoidFor d
-      header   = "Day " <> show day <> " \x2014 " <> sighting <> "."
+      header   = formatHuntDate day <> " \x2014 " <> sighting <> "."
   in case fact of
        "" -> header
        f  -> header <> " " <> f

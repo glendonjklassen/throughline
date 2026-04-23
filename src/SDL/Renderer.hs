@@ -23,14 +23,16 @@ module SDL.Renderer
   , sweepFeatherCh
   , renderJournalOverlay
   , JournalTab(..)
+  , isDayMarker
+  , dayMarkerLabel
   , Layout(..)
   , computeLayout
   ) where
 
 import           Control.Monad (unless, void, when)
-import           Data.Char (isDigit, toLower)
+import           Data.Char (toLower)
 import           Data.IORef
-import           Data.List (intercalate, intersperse, sortOn)
+import           Data.List (intercalate, sortOn)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import           Data.Maybe (fromMaybe)
@@ -46,7 +48,6 @@ import           SDL.SpatialHUD (SpatialHUD(..), HUDCell(..),
                                  TrailMark(..), SpritePlacement(..),
                                  layoutHUD, hudGenRowCount,
                                  terrainSpriteScatter, trailMarks)
-import           Text.Read (readMaybe)
 import           Engine.Core.World (playerLocationName, engineTimeStatus, exitBearings, getWeather)
 import           Engine.Core.NarrativeMessage
 import           SDL.Layout (LayoutConfig(..), ScenarioDisplay(..))
@@ -219,6 +220,12 @@ generalRowStride = 2
 historyRowBudget :: Int
 historyRowBudget = 5
 
+-- | Empty rows left below the history so the last log line doesn't
+-- hug the bottom edge of the window.  Pure breathing room — nothing
+-- renders here.
+bottomMargin :: Int
+bottomMargin = 2
+
 -- | Compute the vertical layout.  Top-down: top bar, optional
 -- learning-mode lines, HUD divider, prompt, general actions (one row
 -- of labels per 'generalRowStride' screen rows), gap, spatial HUD
@@ -236,8 +243,8 @@ computeLayout
   -> Layout
 computeLayout rows topH learnH genRowCount hasSpatial =
   let hudStart   = topH + learnH
-      histRows   = min historyRowBudget (max 0 (rows - hudStart - 4))
-      histTop    = rows - histRows
+      histRows   = min historyRowBudget (max 0 (rows - hudStart - 4 - bottomMargin))
+      histTop    = rows - histRows - bottomMargin
       histSep    = histTop - 1
       genAreaH   = genRowCount * generalRowStride
       spatialTop = hudStart + 2 + genAreaH + (if hasSpatial then 1 else 0)
@@ -342,7 +349,7 @@ renderWorldSDL ctx _layout statusLine sparkleFn zoneTintFn frame you world actio
     ) (zip [0 :: Int ..] genRows)
   let spatialLeft = fromIntegral ((cols - shBoxWidth hud) `div` 2)
   when hasSpatial $
-    drawSpatialHUD fc sparkleFn zoneTintFn frame
+    drawSpatialHUD fc cols sparkleFn zoneTintFn frame
                    you world hud spatialLeft (fromIntegral loSpatialTop)
 
   -- History (bottom, 2nd largest)
@@ -414,7 +421,7 @@ renderWorldFrame ctx _layout statusLine sparkleFn zoneTintFn frame you world act
     ) (zip [0 :: Int ..] genRows)
   let spatialLeft = fromIntegral ((cols - shBoxWidth hud) `div` 2)
   when hasSpatial $
-    drawSpatialHUD fc sparkleFn zoneTintFn frame
+    drawSpatialHUD fc cols sparkleFn zoneTintFn frame
                    you world hud spatialLeft (fromIntegral loSpatialTop)
 
   drawHLine fc cols (fromIntegral loHistSep)
@@ -497,6 +504,7 @@ hiddenReveal = RevealFrame
 -- shouldn't be stealing attention).
 drawSpatialHUD
   :: FontContext
+  -> Int                              -- ^ total cols (for edge clamping)
   -> (Location -> Int)
   -> (Location -> Maybe Color)
   -> RevealFrame
@@ -506,7 +514,7 @@ drawSpatialHUD
   -> CInt        -- ^ spatialLeft (col)
   -> CInt        -- ^ spatialTopRow (row)
   -> IO ()
-drawSpatialHUD fc sparkleFn zoneTintFn frame you world hud spatialLeft spatialTopRow = do
+drawSpatialHUD fc totalCols sparkleFn zoneTintFn frame you world hud spatialLeft spatialTopRow = do
   -- Precompute each neighbor label's pixel bounding box so the terrain
   -- scatter can avoid them.  Boxes are generous (padded ±6 px) so
   -- sprites never crowd the text.
@@ -581,13 +589,23 @@ drawSpatialHUD fc sparkleFn zoneTintFn frame you world hud spatialLeft spatialTo
   -- bright, chars still ahead of it stay dark; during fade-out, the
   -- relationship inverts.  The soft feather around the sweep gives
   -- the effect of a light glow rather than a hard edge.
+  --
+  -- Right-edge clamp: if a fragment anchored to its cell's column
+  -- would overflow the screen, nudge its starting column left just
+  -- enough that the last character fits, leaving a small right
+  -- margin.  Cell-to-fragment visual tie loosens slightly for these
+  -- edge cases, but the alternative (clipping off the tail) is
+  -- strictly worse to read.
   mapM_ (\(cell, sweep, darkening, fragment) ->
     unless (null fragment) $ do
-      let baseRow = spatialTopRow + fromIntegral (hudRow cell) + 1
-          baseCol = spatialLeft   + fromIntegral (hudCol cell)
-          py      = baseRow * cellHeight fc
-          baseX   = baseCol * cellWidth  fc
-          cw      = cellWidth fc
+      let baseRow    = spatialTopRow + fromIntegral (hudRow cell) + 1
+          naturalCol = spatialLeft   + fromIntegral (hudCol cell)
+          rightEdge  = fromIntegral totalCols - 1 :: CInt
+          maxStart   = max 0 (rightEdge - fromIntegral (length fragment))
+          startCol   = max 0 (min naturalCol maxStart)
+          py         = baseRow * cellHeight fc
+          baseX      = startCol * cellWidth fc
+          cw         = cellWidth fc
       mapM_ (\(i, ch) -> do
         let a = charSweepAlpha i sweep darkening
         when (a > 0.01) $
@@ -781,14 +799,25 @@ takeLast n xs = drop (max 0 (length xs - n)) xs
 data JournalTab = TabToday | TabPast | TabCatalog
   deriving (Eq, Show)
 
--- | A day marker journal line has the shape "\x2014 Day <n> \x2014"
--- (em-dash space Day n space em-dash).  The rollover axiom inserts
+-- | A day marker journal line has the shape "\x2014 <label> \x2014"
+-- — em-dash, space, the scenario's day label (day number, date,
+-- whatever it chooses), space, em-dash.  The rollover axiom inserts
 -- one at the start of each new day, so pages are everything between
--- two markers.
+-- two markers.  Label content is deliberately not parsed here —
+-- every scenario can use its own vocabulary for time.
 isDayMarker :: String -> Bool
-isDayMarker s = "\x2014 Day " `isPrefixOf'` s
-  where
-    isPrefixOf' p xs = p == take (length p) xs
+isDayMarker s =
+  length s >= 4
+  && take 2 s == "\x2014 "
+  && drop (length s - 2) s == " \x2014"
+
+-- | Extract the label between the em-dashes of a day marker, or
+-- 'Nothing' for a non-marker line.  Renderers show this directly as
+-- the day header, so the scenario has full control of the text.
+dayMarkerLabel :: String -> Maybe String
+dayMarkerLabel s
+  | isDayMarker s = Just (drop 2 (take (length s - 2) s))
+  | otherwise     = Nothing
 
 -- | Split the journal into day pages, oldest-first.  Each page keeps
 -- its leading day marker so the overlay can show the header with
@@ -814,9 +843,9 @@ renderJournalOverlay ctx display world tab = do
       lastRow   = rows - 2
   drawJournalHeader fc cols headerRow tab
   case tab of
-    TabToday   -> drawToday   fc cols rows firstRow lastRow world
-    TabPast    -> drawPast    fc cols     firstRow lastRow world
-    TabCatalog -> drawCatalog fc cols     firstRow lastRow display world
+    TabToday   -> drawToday   fc display cols rows firstRow lastRow world
+    TabPast    -> drawPast    fc display cols      firstRow lastRow world
+    TabCatalog -> drawCatalog fc cols              firstRow lastRow display world
   renderText fc "1 today  2 earlier  3 index   s share   any other: close" greyText
     (marginLeft, fromIntegral lastRow)
   presentSDL ctx
@@ -870,14 +899,15 @@ drawJournalLines fc firstRow lastRow anchorBottom lines_ =
       renderText fc txt color (fromIntegral col, fromIntegral (firstRow + i))
 
 -- | Format one day's journal page as notebook lines.  The day header
--- reads "Day N" on its own line; if @msub@ is provided (weather for
--- today's block, say) it renders dimmed underneath.  Entries flow
--- below with a middle-dot gutter glyph, wrapped continuation lines
--- aligned under the first word, and a blank row between each entry
--- so the page has texture rather than a flat list.
-dayBlockLines :: Int -> Int -> Maybe String -> [String] -> [JournalLine]
-dayBlockLines textW dayNum msub entries =
-  let header = Just (defaultText, notebookHeaderCol, "Day " <> show dayNum)
+-- reads its scenario-provided label (a date, a day number — whatever
+-- the scenario emits); if @msub@ is provided it renders dimmed
+-- underneath (weather for today, nothing for past days).  Entries
+-- flow below with a middle-dot gutter glyph, wrapped continuation
+-- lines aligned under the first word, and a blank row between each
+-- entry so the page has texture rather than a flat list.
+dayBlockLines :: Int -> String -> Maybe String -> [String] -> [JournalLine]
+dayBlockLines textW dayLabel msub entries =
+  let header = Just (defaultText, notebookHeaderCol, dayLabel)
       subLine = case msub of
         Just s  -> [Just (dimText, notebookHeaderCol, s)]
         Nothing -> []
@@ -885,56 +915,54 @@ dayBlockLines textW dayNum msub entries =
         []     -> []
         (l:ls) -> Just (defaultText, notebookEntryCol, "\x00b7  " <> l)
                 : map (\r -> Just (defaultText, notebookContCol, r)) ls
-      entriesSection = concat (intersperse [Nothing] (map entryRows entries))
+      entriesSection = intercalate [Nothing] (map entryRows entries)
   in [header] <> subLine <> [Nothing] <> entriesSection <> [Nothing]
 
--- | Parse a journal day-marker line like "\x2014 Day 2 \x2014" and
--- return the integer inside, or 'Nothing' for other lines.
-dayMarkerNumber :: String -> Maybe Int
-dayMarkerNumber s
-  | take 7 s == "\x2014 Day " = readMaybe (takeWhile isDigit (drop 7 s))
-  | otherwise                 = Nothing
-
--- | Split a journal page into (dayNumber, entriesOnly).  The first
+-- | Split a journal page into (dayLabel, entriesOnly).  The first
 -- line is treated as a day marker when it parses as one; otherwise
 -- we fall back to the caller-provided default (used for the initial
 -- day, which has no leading marker).
-pageDayAndEntries :: Int -> [String] -> (Int, [String])
-pageDayAndEntries fallback page = case page of
-  (m:rest) | Just n <- dayMarkerNumber m -> (n, rest)
-  _                                      -> (fallback, page)
+pageLabelAndEntries :: String -> [String] -> (String, [String])
+pageLabelAndEntries fallback page = case page of
+  (m:rest) | Just lbl <- dayMarkerLabel m -> (lbl, rest)
+  _                                       -> (fallback, page)
 
--- | Today: current day's notebook block.  Header shows the day
--- number and (if we can read it off the world tags) the weather;
--- entries follow in paragraph form.  Scrolls from the bottom so the
--- newest entry is always visible at the edge of the page.
-drawToday :: FontContext -> Int -> Int -> Int -> Int -> GameWorld -> IO ()
-drawToday fc cols _rows firstRow lastRow world =
-  let pages = journalPages (worldJournal world)
-      (todayDay, todayEntries) =
-        pageDayAndEntries (max 1 (length pages))
-                          (if null pages then [] else last pages)
+-- | Today: current day's notebook block.  Header shows the
+-- scenario's label for the current day (a date in DeerHunt, "Day N"
+-- for default scenarios) and, if we can read it off the world tags,
+-- the weather as a dim subtitle.  Entries follow in paragraph form.
+-- Scrolls from the bottom so the newest entry is always visible at
+-- the edge of the page.
+drawToday :: FontContext -> ScenarioDisplay -> Int -> Int -> Int -> Int -> GameWorld -> IO ()
+drawToday fc display cols _rows firstRow lastRow world =
+  let pages   = journalPages (worldJournal world)
+      dayNum  = max 1 (length pages)
+      fallback = sdDayLabel display dayNum
+      (todayLabel, todayEntries) =
+        pageLabelAndEntries fallback
+                            (if null pages then [] else last pages)
       weather = fmap (map toLower . weatherName) (getWeather world)
       textW   = notebookTextWidth cols
-      lines_  = dayBlockLines textW todayDay weather todayEntries
+      lines_  = dayBlockLines textW todayLabel weather todayEntries
   in case todayEntries of
        [] -> renderText fc "Nothing written yet today."
                greyText (notebookHeaderCol, fromIntegral firstRow)
        _  -> drawJournalLines fc firstRow lastRow True lines_
 
 -- | Earlier days: every completed day's notebook block stacked in
--- chronological order.  Day number is read from each page's leading
--- marker, falling back to a running counter for the initial day
--- (which is written without a marker).
-drawPast :: FontContext -> Int -> Int -> Int -> GameWorld -> IO ()
-drawPast fc cols firstRow lastRow world =
+-- chronological order.  Label is read from each page's leading
+-- marker, falling back to the scenario's own day formatter for the
+-- initial day (written without a marker).
+drawPast :: FontContext -> ScenarioDisplay -> Int -> Int -> Int -> GameWorld -> IO ()
+drawPast fc display cols firstRow lastRow world =
   let pages = journalPages (worldJournal world)
       past  = if null pages then [] else init pages
       textW = notebookTextWidth cols
       blocks = zipWith
         (\i p ->
-          let (d, es) = pageDayAndEntries (i + 1) p
-          in dayBlockLines textW d Nothing es)
+          let fallback = sdDayLabel display (i + 1)
+              (lbl, es) = pageLabelAndEntries fallback p
+          in dayBlockLines textW lbl Nothing es)
         [0 :: Int ..]
         past
       lines_ = concat blocks
@@ -952,7 +980,7 @@ drawCatalog :: FontContext -> Int -> Int -> Int -> ScenarioDisplay -> GameWorld 
 drawCatalog fc cols firstRow lastRow display world =
   let entries = sdCatalog display world
       textW   = notebookTextWidth cols
-      lines_  = concat (intersperse [Nothing] (map (entryLines textW) entries))
+      lines_  = intercalate [Nothing] (map (entryLines textW) entries)
   in case entries of
        [] -> renderText fc "Nothing kept in this ledger yet."
                greyText (notebookHeaderCol, fromIntegral firstRow)

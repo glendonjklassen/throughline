@@ -52,7 +52,9 @@ deerHuntDisplay = ScenarioDisplay
   , sdZoneTintFor     = deerHuntZoneTint
   , sdSensoryFor      = deerHuntSensory
   , sdCatalog         = discoveryCatalog
+  , sdDayLabel        = formatHuntDate
   }
+
 
 -- | Pick a fleeting sensory fragment for a neighbor label during the
 -- incremental reveal.  Usually draws from the terrain's pool, but
