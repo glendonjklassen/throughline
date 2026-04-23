@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards   #-}
 -- | SDL2 text-grid renderer. Full-width layout: top status bar, scrolling
 -- message history in the middle, action HUD at the bottom.
 module SDL.Renderer
@@ -22,6 +23,8 @@ module SDL.Renderer
   , sweepFeatherCh
   , renderJournalOverlay
   , JournalTab(..)
+  , Layout(..)
+  , computeLayout
   ) where
 
 import           Control.Monad (unless, void, when)
@@ -182,6 +185,85 @@ topBarRows = 3
 
 
 -- ---------------------------------------------------------------------------
+-- Layout math — vertical zones for the main gameplay screen
+-- ---------------------------------------------------------------------------
+
+-- | Where each zone of the gameplay screen starts / how many rows it
+-- gets.  Top-down order: thin top bar, then the selection HUD (the
+-- biggest chunk — prompt, general actions, spatial map), then a
+-- separator, then the text history filling the rest at the bottom.
+--
+-- History is the "2nd largest" zone per design; the HUD is largest
+-- because the spatial map wants room to breathe and a packed map
+-- reads as a cramped screen.
+data Layout = Layout
+  { loHudStart    :: !Int  -- ^ row of HUD separator
+  , loSpatialTop  :: !Int  -- ^ first row of the spatial-HUD box
+  , loHistSep     :: !Int  -- ^ row of separator between HUD and history
+  , loHistTop     :: !Int  -- ^ first row of history text
+  , loHistRows    :: !Int  -- ^ visible history rows
+  }
+
+-- | Compute the vertical layout.  The HUD's height is data-driven
+-- (prompt + general rows + gap + spatial box), sized exactly to its
+-- contents; history takes what's left at the bottom.  We bias a bit
+-- of extra vertical room toward the HUD when the screen is tall so
+-- the map feels central, but we never starve history below 6 rows.
+computeLayout
+  :: Int   -- ^ total rows
+  -> Int   -- ^ top-bar height
+  -> Int   -- ^ learning-mode rows (under top bar)
+  -> Int   -- ^ general-action rows
+  -> Bool  -- ^ has spatial HUD?
+  -> Int   -- ^ spatial HUD height
+  -> Layout
+computeLayout rows topH learnH genRowCount hasSpatial spatialH =
+  let hudStart    = topH + learnH
+      hudContentH = 1 + genRowCount + (if hasSpatial then 1 + spatialH else 0)
+      -- The HUD always fits its content.  No variable padding; this
+      -- keeps the map anchored just below the top bar instead of
+      -- drifting on taller viewports.
+      histSep     = hudStart + 1 + hudContentH
+      histTop     = histSep + 1
+      histRows    = max 0 (rows - histTop)
+      spatialTop  = hudStart + 2 + genRowCount + (if hasSpatial then 1 else 0)
+  in Layout
+      { loHudStart    = hudStart
+      , loSpatialTop  = spatialTop
+      , loHistSep     = histSep
+      , loHistTop     = histTop
+      , loHistRows    = histRows
+      }
+
+-- | Draw the top bar: centred location name, right-aligned time,
+-- compass rose on the next row, separator on the third.  Same three
+-- rows for every frame type (full render, back-buffer render,
+-- typewriter tick).
+drawTopBar
+  :: FontContext
+  -> Int
+  -> CharId
+  -> GameWorld
+  -> (GameWorld -> Maybe String)
+  -> IO ()
+drawTopBar fc cols you world statusLine = do
+  let locName     = fromMaybe "" (playerLocationName you world)
+      timeStr     = fromMaybe "" (engineTimeStatus world)
+      timeCol     = max (marginLeft + 1)
+                      (fromIntegral cols - fromIntegral (length timeStr) - marginLeft)
+      compassDirs = [ lbl | (_, lbl, _) <- exitBearings you world ]
+      locCol      = max marginLeft (fromIntegral (cols - length locName) `div` 2)
+  renderText fc locName defaultText (locCol, 0)
+  case timeStr of
+    "" -> pure ()
+    _  -> renderText fc timeStr dimText (timeCol, 0)
+  drawCompassRose fc cols 1 compassDirs
+  drawHLine fc cols 2
+  case statusLine world of
+    Just s  -> renderText fc s dimText (marginLeft, 1)
+    Nothing -> pure ()
+
+-- ---------------------------------------------------------------------------
 -- World rendering — new layout
 -- ---------------------------------------------------------------------------
 
@@ -209,101 +291,55 @@ renderWorldSDL ctx _layout statusLine sparkleFn zoneTintFn frame you world actio
       rows    = gridRows ctx
       fc      = sdlFont ctx
       contentW = cols - fromIntegral marginLeft * 2 - 8  -- usable text width
-
-  -- -----------------------------------------------------------------------
-  -- Top bar (rows 0-2)
-  -- -----------------------------------------------------------------------
-  let locName      = fromMaybe "" (playerLocationName you world)
-      timeStr      = fromMaybe "" (engineTimeStatus world)
-      timeCol      = max (marginLeft + 1)
-                       (fromIntegral cols - fromIntegral (length timeStr) - marginLeft)
-      compassDirs  = [ lbl | (_, lbl, _) <- exitBearings you world ]
-
-  -- Center location name
-  let locCol = max marginLeft (fromIntegral (cols - length locName) `div` 2)
-  renderText fc locName defaultText (locCol, 0)
-  -- Time right-aligned
-  case timeStr of
-    "" -> pure ()
-    _  -> renderText fc timeStr dimText (timeCol, 0)
-  -- Centered compass rose
-  drawCompassRose fc cols 1 compassDirs
-  drawHLine fc cols 2
-
-  -- -----------------------------------------------------------------------
-  -- Bottom HUD — spatial layout when available, flat grid otherwise
-  -- -----------------------------------------------------------------------
-  let hud = layoutHUD you world actions cols
-      hasSpatial = not (null (shSpatialCells hud))
-      -- General (non-movement) action labels in columns
+      hud          = layoutHUD you world actions cols
+      hasSpatial   = not (null (shSpatialCells hud))
       genLabels    = shGeneralLabels hud
-      maxGenLen    = if null genLabels then 0
-                     else maximum (map length genLabels)
+      maxGenLen    = if null genLabels then 0 else maximum (map length genLabels)
       genColW      = maxGenLen + 3
       genNumCols   = max 1 ((cols - 4) `div` max 1 genColW)
       genRows      = chunksOf genNumCols genLabels
       genRowCount  = length genRows
-      -- HUD sizing
       spatialH     = if hasSpatial then shBoxHeight hud else 0
-      -- separator + prompt + general rows + gap + spatial area + bottom pad
-      hudRows      = 1 + 1 + genRowCount
-                       + (if hasSpatial then 1 + spatialH else 0)
-                       + 1
-      hudStartRow  = fromIntegral (rows - hudRows)
+      learnLines   = if debugMode == Learning
+                        then learningModeLines traces you world
+                        else []
+      learnRowCount = length learnLines
+      Layout{..} = computeLayout rows topBarRows learnRowCount genRowCount
+                                 hasSpatial spatialH
 
-  -- Draw HUD separator
-  drawHLine fc cols hudStartRow
-  -- Prompt
-  renderText fc "What do you do?" defaultText (marginLeft, hudStartRow + 1)
-  -- General actions (linear, at top of HUD)
+  -- Top bar (rows 0-2)
+  drawTopBar fc cols you world statusLine
+
+  -- Learning mode (optional, just below top bar)
+  mapM_ (\(idx, line) ->
+    renderText fc (stripAnsi line) dimText (marginLeft, fromIntegral (topBarRows + idx))
+    ) (zip [0 :: Int ..] learnLines)
+
+  -- Selection HUD (middle, largest) — prompt, general actions, spatial map
+  drawHLine fc cols (fromIntegral loHudStart)
+  renderText fc "What do you do?" defaultText (marginLeft, fromIntegral (loHudStart + 1))
   mapM_ (\(rowIdx, rowActions) -> do
-    let y = hudStartRow + 2 + fromIntegral rowIdx
+    let y = fromIntegral (loHudStart + 2 + rowIdx)
     mapM_ (\(colIdx, label) -> do
       let x = marginLeft + 1 + fromIntegral colIdx * fromIntegral genColW
       renderText fc label greyText (x, y)
       ) (zip [0 :: Int ..] rowActions)
     ) (zip [0 :: Int ..] genRows)
-
-  -- Spatial area (movement actions positioned by direction, centered on screen)
-  let spatialTopRow = hudStartRow + 2 + fromIntegral genRowCount
-                        + (if hasSpatial then 1 else 0)
-      spatialLeft   = fromIntegral ((cols - shBoxWidth hud) `div` 2)
+  let spatialLeft = fromIntegral ((cols - shBoxWidth hud) `div` 2)
   when hasSpatial $
     drawSpatialHUD fc sparkleFn zoneTintFn frame
-                   you world hud spatialLeft spatialTopRow
+                   you world hud spatialLeft (fromIntegral loSpatialTop)
 
-  -- -----------------------------------------------------------------------
-  -- Learning mode (optional, between top bar and history)
-  -- -----------------------------------------------------------------------
-  let learnLines = if debugMode == Learning
-                     then learningModeLines traces you world
-                     else []
-      learnRowCount = length learnLines
-      historyTop    = topBarRows + learnRowCount
-
-  mapM_ (\(idx, line) ->
-    renderText fc (stripAnsi line) dimText (marginLeft, fromIntegral (topBarRows + idx))
-    ) (zip [0 :: Int ..] learnLines)
-
-  -- -----------------------------------------------------------------------
-  -- Message history (fills the middle)
-  -- -----------------------------------------------------------------------
-  let historyRows  = fromIntegral hudStartRow - historyTop - 1
-      -- Build display lines from messages (oldest first)
-      allOrdered   = reverse allMsgs
-      labelW       = maximum (0 : map (length . neTimeLabel) allOrdered)
-      dispLines    = concatMap (fmtEntry contentW labelW) allOrdered
-      visible      = takeLast historyRows dispLines
-      faded        = ageFadeVisible visible
-
+  -- History (bottom, 2nd largest)
+  drawHLine fc cols (fromIntegral loHistSep)
+  let allOrdered = reverse allMsgs
+      labelW     = maximum (0 : map (length . neTimeLabel) allOrdered)
+      dispLines  = concatMap (fmtEntry contentW labelW) allOrdered
+      visible    = takeLast loHistRows dispLines
+      faded      = ageFadeVisible visible
   mapM_ (\(idx, (color, line)) ->
-    renderText fc (take (cols - 2) line) color (marginLeft, fromIntegral (historyTop + idx))
+    renderText fc (take (cols - 2) line) color (marginLeft, fromIntegral (loHistTop + idx))
     ) (zip [0 :: Int ..] faded)
-
-  -- Scenario status line (if any) — render in the top bar area
-  case statusLine world of
-    Just s  -> renderText fc s dimText (marginLeft, 1)
-    Nothing -> pure ()
 
   presentSDL ctx
 
@@ -332,78 +368,51 @@ renderWorldFrame ctx _layout statusLine sparkleFn zoneTintFn frame you world act
       rows    = gridRows ctx
       fc      = sdlFont ctx
       contentW = cols - fromIntegral marginLeft * 2 - 8
-
-  -- Top bar (centered)
-  let locName      = fromMaybe "" (playerLocationName you world)
-      timeStr      = fromMaybe "" (engineTimeStatus world)
-      timeCol      = max (marginLeft + 1)
-                       (fromIntegral cols - fromIntegral (length timeStr) - marginLeft)
-      compassDirs  = [ lbl | (_, lbl, _) <- exitBearings you world ]
-  let locCol = max marginLeft (fromIntegral (cols - length locName) `div` 2)
-  renderText fc locName defaultText (locCol, 0)
-  case timeStr of
-    "" -> pure ()
-    _  -> renderText fc timeStr dimText (timeCol, 0)
-  drawCompassRose fc cols 1 compassDirs
-  drawHLine fc cols 2
-
-  -- Bottom HUD
-  let hud = layoutHUD you world actions cols
-      hasSpatial = not (null (shSpatialCells hud))
+      hud          = layoutHUD you world actions cols
+      hasSpatial   = not (null (shSpatialCells hud))
       genLabels    = shGeneralLabels hud
-      maxGenLen    = if null genLabels then 0
-                     else maximum (map length genLabels)
+      maxGenLen    = if null genLabels then 0 else maximum (map length genLabels)
       genColW      = maxGenLen + 3
       genNumCols   = max 1 ((cols - 4) `div` max 1 genColW)
       genRows      = chunksOf genNumCols genLabels
       genRowCount  = length genRows
       spatialH     = if hasSpatial then shBoxHeight hud else 0
-      hudRows      = 1 + 1 + genRowCount
-                       + (if hasSpatial then 1 + spatialH else 0)
-                       + 1
-      hudStartRow  = fromIntegral (rows - hudRows)
+      learnLines   = if debugMode == Learning
+                        then learningModeLines traces you world
+                        else []
+      learnRowCount = length learnLines
+      Layout{..} = computeLayout rows topBarRows learnRowCount genRowCount
+                                 hasSpatial spatialH
 
-  drawHLine fc cols hudStartRow
-  renderText fc "What do you do?" defaultText (marginLeft, hudStartRow + 1)
+  drawTopBar fc cols you world statusLine
+
+  mapM_ (\(idx, line) ->
+    renderText fc (stripAnsi line) dimText (marginLeft, fromIntegral (topBarRows + idx))
+    ) (zip [0 :: Int ..] learnLines)
+
+  drawHLine fc cols (fromIntegral loHudStart)
+  renderText fc "What do you do?" defaultText (marginLeft, fromIntegral (loHudStart + 1))
   mapM_ (\(rowIdx, rowActions) -> do
-    let y = hudStartRow + 2 + fromIntegral rowIdx
+    let y = fromIntegral (loHudStart + 2 + rowIdx)
     mapM_ (\(colIdx, label) -> do
       let x = marginLeft + 1 + fromIntegral colIdx * fromIntegral genColW
       renderText fc label greyText (x, y)
       ) (zip [0 :: Int ..] rowActions)
     ) (zip [0 :: Int ..] genRows)
-
-  let spatialTopRow = hudStartRow + 2 + fromIntegral genRowCount
-                        + (if hasSpatial then 1 else 0)
-      spatialLeft   = fromIntegral ((cols - shBoxWidth hud) `div` 2)
+  let spatialLeft = fromIntegral ((cols - shBoxWidth hud) `div` 2)
   when hasSpatial $
     drawSpatialHUD fc sparkleFn zoneTintFn frame
-                   you world hud spatialLeft spatialTopRow
+                   you world hud spatialLeft (fromIntegral loSpatialTop)
 
-  -- Learning mode
-  let learnLines = if debugMode == Learning
-                     then learningModeLines traces you world
-                     else []
-      learnRowCount = length learnLines
-      historyTop    = topBarRows + learnRowCount
-  mapM_ (\(idx, line) ->
-    renderText fc (stripAnsi line) dimText (marginLeft, fromIntegral (topBarRows + idx))
-    ) (zip [0 :: Int ..] learnLines)
-
-  -- Message history
-  let historyRows  = fromIntegral hudStartRow - historyTop - 1
-      allOrdered   = reverse allMsgs
-      labelW       = maximum (0 : map (length . neTimeLabel) allOrdered)
-      dispLines    = concatMap (fmtEntry contentW labelW) allOrdered
-      visible      = takeLast historyRows dispLines
-      faded        = ageFadeVisible visible
+  drawHLine fc cols (fromIntegral loHistSep)
+  let allOrdered = reverse allMsgs
+      labelW     = maximum (0 : map (length . neTimeLabel) allOrdered)
+      dispLines  = concatMap (fmtEntry contentW labelW) allOrdered
+      visible    = takeLast loHistRows dispLines
+      faded      = ageFadeVisible visible
   mapM_ (\(idx, (color, line)) ->
-    renderText fc (take (cols - 2) line) color (marginLeft, fromIntegral (historyTop + idx))
+    renderText fc (take (cols - 2) line) color (marginLeft, fromIntegral (loHistTop + idx))
     ) (zip [0 :: Int ..] faded)
-
-  case statusLine world of
-    Just s  -> renderText fc s dimText (marginLeft, 1)
-    Nothing -> pure ()
 
 -- ---------------------------------------------------------------------------
 -- History age-fade

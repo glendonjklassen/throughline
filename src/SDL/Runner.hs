@@ -25,7 +25,8 @@ import           MonadStack
 
 import           SDL.Animation
 import           SDL.ClickMap          (hitTest)
-import           SDL.Settings          (Settings(..), loadSettings)
+import           SDL.Settings          (Settings(..), loadSettings,
+                                        viewportRecommendedFontScale, viewportSize)
 import           SDL.SharedFolder      (SharedBroadcastResult(..), broadcastLog)
 import           SDL.FontContext
 import           SDL.InputHandler
@@ -44,6 +45,18 @@ import           SDL.Layout            (ScenarioDisplay(..), LayoutConfig(..))
 fontPath :: FilePath
 fontPath = "assets/JetBrainsMono-Regular.ttf"
 
+-- | Build an SDLContext honoring the player's current settings —
+-- viewport preset, font-scale, palette mode.  Used for every runner
+-- surface (game loop, end screen, error/warn, merge prompt) so
+-- settings apply to gameplay rendering, not just launcher menus.
+initSDLFromSettings :: String -> IO SDLContext
+initSDLFromSettings title = do
+  settings <- loadSettings
+  let vp    = sViewport settings
+      scale = viewportRecommendedFontScale vp * sFontScale settings
+      mode  = if sHighContrast settings then HighContrast else Autumn
+  initSDLWith fontPath title (viewportSize vp) scale mode
+
 -- | Construct an SDL2-based RuntimeUI from a ScenarioDisplay.  The
 -- scenario name is threaded through so the journal's
 -- "text your friends" action knows which scenario is being
@@ -53,7 +66,7 @@ sdlUI scenName display = RuntimeUI
   { uiSetup     = pure ()
   , uiTeardown  = pure ()
   , uiGameLoop  = \env world -> do
-      ctx <- initSDL fontPath
+      ctx <- initSDLFromSettings scenName
       -- Gameplay is keyboard-first; hide the system cursor so it
       -- doesn't float over the prose.  Clicks still register —
       -- SDL dispatches mouse-button events whether or not the
@@ -64,7 +77,7 @@ sdlUI scenName display = RuntimeUI
       freeSDL ctx
       pure result
   , uiOnEnd     = \finalW -> do
-      ctx <- initSDL fontPath
+      ctx <- initSDLFromSettings scenName
       clearSDL ctx
       let fc = sdlFont ctx
       let endLines = sdEndScreen display finalW
@@ -76,21 +89,21 @@ sdlUI scenName display = RuntimeUI
       _ <- awaitAnyKeySDL
       freeSDL ctx
   , uiOnError   = \msg -> do
-      ctx <- initSDL fontPath
+      ctx <- initSDLFromSettings scenName
       clearSDL ctx
       renderText (sdlFont ctx) ("Fatal: " <> msg) errorColor (2, 2)
       presentSDL ctx
       _ <- awaitKeySDL
       freeSDL ctx
   , uiOnWarn    = \msg -> do
-      ctx <- initSDL fontPath
+      ctx <- initSDLFromSettings scenName
       clearSDL ctx
       renderText (sdlFont ctx) msg warningColor (2, 2)
       presentSDL ctx
       _ <- awaitKeySDL
       freeSDL ctx
   , uiPromptMerge = \name count -> do
-      ctx <- initSDL fontPath
+      ctx <- initSDLFromSettings scenName
       clearSDL ctx
       let fc = sdlFont ctx
       renderText fc ("Foreign log from " <> name <> ": " <> show count <> " new action(s).") greyText (2, 2)
@@ -237,8 +250,9 @@ resolveInput ctx hudLayout _acts = go
           Nothing -> go
 
 -- | Assemble the HUD's click regions in pixel space.  Mirrors the
--- renderer's layout math (genColW, genRowCount, spatialLeft,
--- spatialTopRow) so clicks land where the labels do.
+-- renderer's layout math so clicks land where the labels do.  The HUD
+-- now sits directly below the top bar, so click rows are
+-- computed from 'computeLayout' rather than bottom-aligned.
 buildHUDClicks :: SDLContext -> SpatialHUD -> [(Int, Int, Int, Int, Char)]
 buildHUDClicks ctx hud =
   let fc   = sdlFont ctx
@@ -254,12 +268,14 @@ buildHUDClicks ctx hud =
       genRowCount  = (length genLabels + genNumCols - 1) `div` max 1 genNumCols
       hasSpatial   = not (null (shSpatialCells hud))
       spatialH     = if hasSpatial then shBoxHeight hud else 0
-      hudRowsTotal = 1 + 1 + genRowCount
-                       + (if hasSpatial then 1 + spatialH else 0) + 1
-      hudStartRow  = rws - hudRowsTotal
-      spatialTopRow = hudStartRow + 2 + genRowCount
-                       + (if hasSpatial then 1 else 0)
-      spatialLeft   = (cols - shBoxWidth hud) `div` 2
+      -- The renderer's click-layout cannot see the player's current
+      -- learning-mode / trace state cheaply, so assume it's off here:
+      -- learning mode is a dev tool, and if it's on the layout shifts
+      -- down uniformly (clicks land a few rows above the labels — not
+      -- ideal, but keyboard still works).
+      Layout{loHudStart = hudStartRow, loSpatialTop = spatialTopRow} =
+        computeLayout rws topBarRows 0 genRowCount hasSpatial spatialH
+      spatialLeft = (cols - shBoxWidth hud) `div` 2
       gridHits = hudClickMap ml genColW genRowCount hudStartRow
                              spatialLeft spatialTopRow hud
   in [ (col * cw, row * chH, w * cw, chH, c)
@@ -663,7 +679,6 @@ typewriteFullFrame
 typewriteFullFrame _   _      _          _         _          _     _   _     _           _      _        _        _  _      []    = pure ()
 typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn frame you world actions logRef debugRef traceRef fc labelW newLines = do
   let cols     = gridCols ctx
-      -- Compute where the history area starts (mirrors renderWorldFrame)
       rows     = gridRows ctx
       contentW = cols - fromIntegral marginLeft * 2 - 8
   debugMode <- readIORef debugRef
@@ -680,11 +695,8 @@ typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn frame you world ac
       genNumCols   = max 1 ((cols - 4) `div` max 1 genColW)
       genRowCount  = length (chunksOf genNumCols genLabels)
       spatialH     = if hasSpatial then shBoxHeight hud else 0
-      hudRows'     = 1 + 1 + genRowCount
-                       + (if hasSpatial then 1 + spatialH else 0) + 1
-      hudStartRow  = rows - hudRows'
-      histTop      = topBarRows + learnRowCount
-      histAvail    = hudStartRow - histTop - 1
+      Layout{loHistTop = histTop, loHistRows = histAvail} =
+        computeLayout rows topBarRows learnRowCount genRowCount hasSpatial spatialH
       -- How many old history lines are visible
       allOrdered   = reverse allMsgs
       oldLabelW    = maximum (0 : map (length . neTimeLabel) allOrdered)

@@ -15,7 +15,11 @@
       "Bash(hlint src/ app/ test/)",
       "Bash(git checkout *)",
       "Bash(grep -rn \"ScenarioDisplay$\\\\|ScenarioDisplay {\" app/ --include=\"*.hs\")",
-      "Bash(grep -n \"import qualified.*Spec\\\\|\\\\.spec$\\\\|TimeSpec\" /mnt/c/Users/GlendonKlassen/code/throughline-engine/test/Spec.hs)"
+      "Bash(grep -n \"import qualified.*Spec\\\\|\\\\.spec$\\\\|TimeSpec\" /mnt/c/Users/GlendonKlassen/code/throughline-engine/test/Spec.hs)",
+      "Bash(grep -n \"other-modules:\\\\|\\\\.Spec\\\\s*$\\\\|Spec$\" throughline.cabal)",
+      "Bash(git mv *)",
+      "Read(//home/glendonklassen/.stack/**)",
+      "Read(//home/glendonklassen/**)"
     ],
     "additionalDirectories": [
       "/tmp"
