@@ -66,6 +66,9 @@ gridCols = fromIntegral . sdlGridCols
 gridRows :: SDLContext -> Int
 gridRows = fromIntegral . sdlGridRows
 
+-- | Shipping default viewport size — Steam Deck native.  Retained so
+-- any caller of 'initSDL' that doesn't plumb settings through keeps
+-- the previous behaviour.
 windowWidth, windowHeight :: CInt
 windowWidth  = 1280
 windowHeight = 800
@@ -73,27 +76,37 @@ windowHeight = 800
 fontSize :: Int
 fontSize = 16
 
--- | Init with default settings (Autumn palette, 1.0 font scale,
--- windowed) and a generic window title.  Callers with a 'Settings'
--- value and a bundle-specific title should use 'initSDLWith'.
+-- | Init with default settings (Autumn palette, Deck viewport, 1.0
+-- font scale, windowed) and a generic window title.  Callers with a
+-- 'Settings' value and a bundle-specific title should use
+-- 'initSDLWith'.
 initSDL :: FilePath -> IO SDLContext
-initSDL fontPath = initSDLWith fontPath "Throughline" 1.0 Autumn
+initSDL fontPath = initSDLWith fontPath "Throughline"
+                                (fromIntegral windowWidth, fromIntegral windowHeight)
+                                1.0 Autumn
 
--- | Init with explicit window title, font-scale and palette mode.
--- Font scale is clamped to a sensible range so a bogus settings file
--- can't render text unreadably tiny or clip text off the window.
-initSDLWith :: FilePath -> String -> Double -> PaletteMode -> IO SDLContext
-initSDLWith fontPath title scale mode = do
+-- | Init with explicit window title, viewport size, font-scale and
+-- palette mode.  Font scale is clamped to a sensible range so a
+-- bogus settings file can't render text unreadably tiny or clip
+-- text off the window.  The window size is clamped in the same
+-- spirit — a preset that somehow names a 0×0 size falls back to Deck.
+initSDLWith :: FilePath -> String -> (Int, Int) -> Double -> PaletteMode
+            -> IO SDLContext
+initSDLWith fontPath title (wPx0, hPx0) scale mode = do
+  let wPx = fromIntegral (max 640  wPx0)
+      hPx = fromIntegral (max 400  hPx0)
   SDL.initializeAll
   window <- SDL.createWindow (T.pack title)
-    SDL.defaultWindow { SDL.windowInitialSize = SDL.V2 windowWidth windowHeight }
+    SDL.defaultWindow { SDL.windowInitialSize = SDL.V2 wPx hPx }
   renderer <- SDL.createRenderer window (-1)
     SDL.defaultRenderer { SDL.rendererType = SDL.AcceleratedVSyncRenderer }
-  let clamped = max 0.75 (min 2.0 scale)
+  -- Cap the scale at 4.0 rather than 2.0 — 4K at the default font
+  -- needs ~2.7× just to read like Deck does.
+  let clamped = max 0.5 (min 4.0 scale)
       ptSize  = max 8 (round (fromIntegral fontSize * clamped))
   fc <- initFontWith renderer fontPath ptSize mode
-  let cols = windowWidth  `div` cellWidth fc
-      rows = windowHeight `div` cellHeight fc
+  let cols = wPx `div` cellWidth fc
+      rows = hPx `div` cellHeight fc
   pure SDLContext
     { sdlWindow   = window
     , sdlRenderer = renderer
@@ -782,7 +795,7 @@ renderJournalOverlay ctx display world tab = do
     TabToday   -> drawToday   fc cols rows firstRow lastRow world
     TabPast    -> drawPast    fc cols     firstRow lastRow world
     TabCatalog -> drawCatalog fc cols     firstRow lastRow display world
-  renderText fc "1 today  2 past days  3 catalog   any other key: close" greyText
+  renderText fc "1 today  2 past  3 catalog   s share   any other: close" greyText
     (marginLeft, fromIntegral lastRow)
   presentSDL ctx
 

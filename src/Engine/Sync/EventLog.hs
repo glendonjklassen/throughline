@@ -2,6 +2,7 @@
 module Engine.Sync.EventLog
   ( LogStore(..)
   , fileLogStore
+  , augmentForeignLogs
   , nullLogStore
   , memoryLogStore
   , appendLogEntry
@@ -69,6 +70,23 @@ fileLogStore sessionsDir scenName playerId mIdent =
     , lsSaveSnap    = saveSnapshot snapPath
     , lsReset       = removeIfExists logPath >> removeIfExists snapPath
     }
+
+-- | Wrap a 'LogStore' so its 'lsForeignLogs' also returns entries
+-- from a secondary scanner.  Used by the shared-folder feature: the
+-- local sessions dir still provides the canonical foreign logs, and
+-- on top of that we fold in logs the player's friends dropped into
+-- a shared folder like Dropbox.  The two sources are concatenated;
+-- the sync layer's causal ordering handles the rest.
+augmentForeignLogs
+  :: IO [(PlayerId, [LogEntry], Maybe Snapshot)]
+  -> LogStore
+  -> LogStore
+augmentForeignLogs extra base = base
+  { lsForeignLogs = do
+      baseLogs  <- lsForeignLogs base
+      extraLogs <- extra
+      pure (baseLogs ++ extraLogs)
+  }
 
 -- | LogStore that discards writes. For replay and test contexts where
 -- no persistence is needed.

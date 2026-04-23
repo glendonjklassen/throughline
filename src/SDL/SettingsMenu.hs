@@ -28,8 +28,9 @@ import           SDL.FontContext    (renderText)
 import           SDL.InputHandler   (InputEvent(..), awaitInputSDL)
 import           SDL.Palette        (defaultText, dimText, greyText, warningColor)
 import           SDL.Renderer       (SDLContext(..), clearSDL, presentSDL)
-import           SDL.Settings       (DisplayMode(..), Settings(..), loadSettings,
-                                     saveSettings)
+import           SDL.Settings       (DisplayMode(..), Settings(..), ViewportPreset,
+                                     allViewportPresets, loadSettings,
+                                     saveSettings, viewportLabel)
 
 -- | Internal event the dispatch loop reacts to.  Clicks and keys both
 -- resolve to one of these; the loop then handles each symmetrically.
@@ -114,43 +115,92 @@ settingsMenu ctx = do
 rowLabels :: [String]
 rowLabels =
   [ "Display mode"
+  , "Viewport"
   , "Font scale"
   , "High contrast"
   , "Reveal speed"
   , "Master volume"
   , "Music volume"
   , "SFX volume"
+  , "Shared folder"
   ]
 
 valueOf :: Int -> Settings -> String
 valueOf 0 s = case sDisplayMode s of
   Windowed   -> "windowed"
   Fullscreen -> "fullscreen"
-valueOf 1 s = pct (sFontScale s)
-valueOf 2 s = if sHighContrast s then "on" else "off"
-valueOf 3 s = pct (sRevealSpeed s)
-valueOf 4 s = pct (sMasterVolume s)
-valueOf 5 s = pct (sMusicVolume s)
-valueOf 6 s = pct (sSfxVolume s)
+valueOf 1 s = viewportLabel (sViewport s)
+valueOf 2 s = pct (sFontScale s)
+valueOf 3 s = if sHighContrast s then "on" else "off"
+valueOf 4 s = pct (sRevealSpeed s)
+valueOf 5 s = pct (sMasterVolume s)
+valueOf 6 s = pct (sMusicVolume s)
+valueOf 7 s = pct (sSfxVolume s)
+valueOf 8 s = case sSharedFolder s of
+  Nothing -> "none"
+  Just p  -> shortenPath p
 valueOf _ _ = ""
 
+-- | Truncate a path to the last ~40 chars so it fits in the value
+-- column.  Settings-menu cells are narrow; showing the tail of a
+-- path is more informative than its head (usually the mount prefix).
+shortenPath :: FilePath -> String
+shortenPath p
+  | length p <= 40 = p
+  | otherwise      = "…" <> drop (length p - 39) p
+
 -- | Apply a +1 or -1 adjustment to the row's backing field.  Float
--- rows step by 0.05; the display-mode and high-contrast toggles ignore
--- magnitude.  Values are clamped to sane ranges so the menu can't
--- produce a settings file that renders the game unusable.
+-- rows step by 0.05; the display-mode and high-contrast toggles
+-- ignore magnitude; the viewport cycles through the preset list.
+-- Values are clamped to sane ranges so the menu can't produce a
+-- settings file that renders the game unusable.
 adjustRow :: Int -> Int -> Settings -> Settings
 adjustRow 0 _ s = s { sDisplayMode = toggleDisplay (sDisplayMode s) }
-adjustRow 1 d s = s { sFontScale    = clamp 0.75 2.0  (sFontScale s    + step d) }
-adjustRow 2 _ s = s { sHighContrast = not (sHighContrast s) }
-adjustRow 3 d s = s { sRevealSpeed  = clamp 0.25 3.0  (sRevealSpeed s  + step d) }
-adjustRow 4 d s = s { sMasterVolume = clamp 0.0  1.0  (sMasterVolume s + step d) }
-adjustRow 5 d s = s { sMusicVolume  = clamp 0.0  1.0  (sMusicVolume s  + step d) }
-adjustRow 6 d s = s { sSfxVolume    = clamp 0.0  1.0  (sSfxVolume s    + step d) }
+adjustRow 1 d s = s { sViewport    = cycleViewport d (sViewport s) }
+adjustRow 2 d s = s { sFontScale    = clamp 0.6 1.6 (sFontScale s + step d) }
+adjustRow 3 _ s = s { sHighContrast = not (sHighContrast s) }
+adjustRow 4 d s = s { sRevealSpeed  = clamp 0.25 3.0 (sRevealSpeed s + step d) }
+adjustRow 5 d s = s { sMasterVolume = clamp 0.0  1.0 (sMasterVolume s + step d) }
+adjustRow 6 d s = s { sMusicVolume  = clamp 0.0  1.0 (sMusicVolume s + step d) }
+adjustRow 7 d s = s { sSfxVolume    = clamp 0.0  1.0 (sSfxVolume s + step d) }
+adjustRow 8 d s = s { sSharedFolder = cycleSharedFolder d (sSharedFolder s) }
 adjustRow _ _ s = s
+
+-- | Cycle through a small preset list of common cloud-folder paths.
+-- A player who wants something custom can edit 'settings.json'
+-- directly; this keyboard-friendly cycler covers the common cases
+-- (Dropbox, Google Drive, OneDrive, iCloud) without an in-game
+-- text editor.
+cycleSharedFolder :: Int -> Maybe FilePath -> Maybe FilePath
+cycleSharedFolder dir cur =
+  let presets =
+        [ Nothing
+        , Just "~/Dropbox/throughline"
+        , Just "~/Google Drive/throughline"
+        , Just "~/OneDrive/throughline"
+        , Just "~/Library/Mobile Documents/com~apple~CloudDocs/throughline"
+        , Just "~/Sync/throughline"
+        ]
+      idx   = length (takeWhile (/= cur) presets)
+      idx'  = if idx >= length presets then 0 else idx
+      total = length presets
+      next  = ((idx' + dir) `mod` total + total) `mod` total
+  in presets !! next
 
 toggleDisplay :: DisplayMode -> DisplayMode
 toggleDisplay Windowed   = Fullscreen
 toggleDisplay Fullscreen = Windowed
+
+-- | Cycle through the preset list by 'dir' (-1 or +1), wrapping at
+-- either end.  Makes h/l feel like a dial instead of bumping into a
+-- boundary at the first or last preset.
+cycleViewport :: Int -> ViewportPreset -> ViewportPreset
+cycleViewport dir cur =
+  let presets = allViewportPresets
+      idx     = length (takeWhile (/= cur) presets)
+      total   = length presets
+      next    = ((idx + dir) `mod` total + total) `mod` total
+  in presets !! next
 
 step :: Int -> Double
 step d = fromIntegral d * 0.05

@@ -25,6 +25,8 @@ import           MonadStack
 
 import           SDL.Animation
 import           SDL.ClickMap          (hitTest)
+import           SDL.Settings          (Settings(..), loadSettings)
+import           SDL.SharedFolder      (SharedBroadcastResult(..), broadcastLog)
 import           SDL.FontContext
 import           SDL.InputHandler
 import           SDL.Palette
@@ -42,9 +44,12 @@ import           SDL.Layout            (ScenarioDisplay(..), LayoutConfig(..))
 fontPath :: FilePath
 fontPath = "assets/JetBrainsMono-Regular.ttf"
 
--- | Construct an SDL2-based RuntimeUI from a ScenarioDisplay.
-sdlUI :: ScenarioDisplay -> RuntimeUI
-sdlUI display = RuntimeUI
+-- | Construct an SDL2-based RuntimeUI from a ScenarioDisplay.  The
+-- scenario name is threaded through so the journal's
+-- "text your friends" action knows which scenario is being
+-- broadcast (the shared folder is per-player, multi-scenario).
+sdlUI :: String -> ScenarioDisplay -> RuntimeUI
+sdlUI scenName display = RuntimeUI
   { uiSetup     = pure ()
   , uiTeardown  = pure ()
   , uiGameLoop  = \env world -> do
@@ -54,7 +59,7 @@ sdlUI display = RuntimeUI
       -- SDL dispatches mouse-button events whether or not the
       -- cursor is visible.
       SDL.cursorVisible SDL.$= False
-      result <- runApp env world (sdlGameLoop ctx display)
+      result <- runApp env world (sdlGameLoop ctx scenName display)
       SDL.cursorVisible SDL.$= True
       freeSDL ctx
       pure result
@@ -100,8 +105,8 @@ sdlUI display = RuntimeUI
 -- Game loop
 -- ---------------------------------------------------------------------------
 
-sdlGameLoop :: SDLContext -> ScenarioDisplay -> App ()
-sdlGameLoop ctx display = do
+sdlGameLoop :: SDLContext -> String -> ScenarioDisplay -> App ()
+sdlGameLoop ctx scenName display = do
   msgCountRef <- liftIO $ newIORef (0 :: Int)
   -- Stash last-rendered actions so the step hook can keep the HUD stable
   actionsRef  <- liftIO $ newIORef ([] :: [AnyAction])
@@ -111,18 +116,19 @@ sdlGameLoop ctx display = do
   -- animation — the HUD stays fully revealed.
   lastLocRef  <- liftIO $ newIORef (Nothing :: Maybe Location)
   coreLoop (sdlStepHook ctx display msgCountRef actionsRef)
-           (sdlActionSource ctx display msgCountRef actionsRef lastLocRef)
+           (sdlActionSource ctx scenName display msgCountRef actionsRef lastLocRef)
 
 -- | Action source: render the world, animate the spatial-HUD reveal,
 -- then await a keypress and map it to an action.  If the player hits
 -- a key during the reveal, we skip to the fully-revealed HUD and
 -- process that key as the selection input.
-sdlActionSource :: SDLContext -> ScenarioDisplay
+sdlActionSource :: SDLContext -> String -> ScenarioDisplay
                 -> IORef Int -> IORef [AnyAction] -> IORef (Maybe Location)
                 -> ActionSource
-sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
+sdlActionSource ctx scenName display countRef actionsRef lastLocRef actions = do
   world    <- get
   you      <- asks envPlayerCharId
+  playerId <- asks envPlayerId
   logRef   <- asks envMessageLog
   debugRef <- asks envDebug
   traceRef <- asks envAxiomTrace
@@ -167,7 +173,7 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
   liftIO $ render finalReveal
   liftIO $ render finalReveal
   liftIO $ writeIORef lastLocRef currentLoc
-  liftIO (awaitKeyLoop actions debugRef skipChar world render hud)
+  liftIO (awaitKeyLoop playerId actions debugRef skipChar world render hud)
   where
     -- Split actions into the two pools the input handler expects:
     -- non-movement actions land on the home row, movement actions
@@ -181,9 +187,10 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
     isSetLocation SetLocationAdjacentPrefer {}= True
     isSetLocation _                           = False
 
-    awaitKeyLoop :: [AnyAction] -> IORef DebugMode -> Maybe Char -> GameWorld
-                 -> (RevealFrame -> IO ()) -> SpatialHUD -> IO (Maybe AnyAction)
-    awaitKeyLoop acts debugRef' pending worldNow render' hudLayout = do
+    awaitKeyLoop :: PlayerId -> [AnyAction] -> IORef DebugMode -> Maybe Char
+                 -> GameWorld -> (RevealFrame -> IO ()) -> SpatialHUD
+                 -> IO (Maybe AnyAction)
+    awaitKeyLoop pid acts debugRef' pending worldNow render' hudLayout = do
       mc <- case pending of
         Just c  -> pure (Just c)
         Nothing -> resolveInput ctx hudLayout acts
@@ -197,21 +204,21 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
               render' finalReveal
               if confirmed
                 then pure Nothing
-                else awaitKeyLoop acts debugRef' Nothing worldNow render' hudLayout
+                else awaitKeyLoop pid acts debugRef' Nothing worldNow render' hudLayout
 #ifndef RELEASE_BUILD
           | c == debugKeyChar -> do
               modifyIORef' debugRef' cycleDebug
-              awaitKeyLoop acts debugRef' Nothing worldNow render' hudLayout
+              awaitKeyLoop pid acts debugRef' Nothing worldNow render' hudLayout
 #endif
           | c == '1' -> do
-              journalOverlayLoop ctx display worldNow TabToday
+              journalOverlayLoop ctx scenName pid display worldNow TabToday
               drainSDLEvents
               render' finalReveal
               render' finalReveal
-              awaitKeyLoop acts debugRef' Nothing worldNow render' hudLayout
+              awaitKeyLoop pid acts debugRef' Nothing worldNow render' hudLayout
           | Just a <- safeOptionIndexIn generalOptionKeys  c generals  -> pure (Just a)
           | Just a <- safeOptionIndexIn movementOptionKeys c movements -> pure (Just a)
-          | otherwise -> awaitKeyLoop acts debugRef' Nothing worldNow render' hudLayout
+          | otherwise -> awaitKeyLoop pid acts debugRef' Nothing worldNow render' hudLayout
 
 -- | Resolve a single input event — key, click, or touch — to a char
 -- the dispatch body understands.  Clicks are hit-tested against the
@@ -306,19 +313,22 @@ confirmRowRect fc row ch =
 -- region that behaves exactly as pressing its digit would.  A click
 -- outside the footer (i.e. on the body or anywhere else) dismisses
 -- the overlay, same as pressing any non-tab key.
-journalOverlayLoop :: SDLContext -> ScenarioDisplay -> GameWorld -> JournalTab -> IO ()
-journalOverlayLoop ctx display world tab = do
+journalOverlayLoop
+  :: SDLContext -> String -> PlayerId -> ScenarioDisplay
+  -> GameWorld -> JournalTab -> IO ()
+journalOverlayLoop ctx scenName playerId display world tab = do
   renderJournalOverlay ctx display world tab
   let fc = sdlFont ctx
       rows = gridRows ctx
       footerRow = rows - 2
-      -- Layout of the footer text "1 today  2 past days  3 catalog …"
+      -- Layout of the footer text "1 today  2 past  3 catalog   s share …"
       -- Column positions are stable because marginLeft and the label
       -- strings are fixed.
       todayRect   = journalRect fc footerRow 0  7 '1'
-      pastRect    = journalRect fc footerRow 9  14 '2'
-      catalogRect = journalRect fc footerRow 25 11 '3'
-      cm = [todayRect, pastRect, catalogRect]
+      pastRect    = journalRect fc footerRow 9  8 '2'
+      catalogRect = journalRect fc footerRow 19 11 '3'
+      shareRect   = journalRect fc footerRow 33 9 's'
+      cm = [todayRect, pastRect, catalogRect, shareRect]
   me <- awaitInputSDL
   case me of
     Nothing -> pure ()
@@ -329,13 +339,71 @@ journalOverlayLoop ctx display world tab = do
   where
     dispatch c
       | c == currentTabKey tab = pure ()
-      | c == '1'               = journalOverlayLoop ctx display world TabToday
-      | c == '2'               = journalOverlayLoop ctx display world TabPast
-      | c == '3'               = journalOverlayLoop ctx display world TabCatalog
+      | c == '1'               = journalOverlayLoop ctx scenName playerId display world TabToday
+      | c == '2'               = journalOverlayLoop ctx scenName playerId display world TabPast
+      | c == '3'               = journalOverlayLoop ctx scenName playerId display world TabCatalog
+      | c == 's' || c == 'S'   = do
+          shareWithFriends ctx scenName playerId
+          journalOverlayLoop ctx scenName playerId display world tab
       | otherwise              = pure ()
     currentTabKey TabToday   = '1'
     currentTabKey TabPast    = '2'
     currentTabKey TabCatalog = '3'
+
+-- | Handle the "text your friends" journal action.  Reads the
+-- configured shared folder from settings, broadcasts the current
+-- log to it, and shows a short status screen so the player knows
+-- whether the message got through.
+shareWithFriends :: SDLContext -> String -> PlayerId -> IO ()
+shareWithFriends ctx scenName playerId = do
+  settings <- loadSettings
+  clearSDL ctx
+  let fc = sdlFont ctx
+  case sSharedFolder settings of
+    Nothing -> do
+      renderText fc "No shared folder configured."     warningColor (3, 2)
+      renderText fc ""                                 dimText      (3, 3)
+      renderText fc "Pick a folder in Settings first"  dimText      (3, 4)
+      renderText fc "— a Dropbox / Drive / Syncthing"  dimText      (3, 5)
+      renderText fc "path that you and your friends"   dimText      (3, 6)
+      renderText fc "all point at.  Their hunts will"  dimText      (3, 7)
+      renderText fc "merge into yours automatically."  dimText      (3, 8)
+      renderText fc ""                                 dimText      (3, 9)
+      renderText fc "press any key or click to return" greyText     (3, 11)
+      presentSDL ctx
+      _ <- awaitInputSDL
+      pure ()
+    Just dir -> do
+      result <- broadcastLog dir scenName playerId
+      renderShareResult fc result
+      presentSDL ctx
+      _ <- awaitInputSDL
+      pure ()
+  where
+    renderShareResult fc result = case result of
+      Broadcast path -> do
+        renderText fc "Sent."                              defaultText  (3, 2)
+        renderText fc ""                                   dimText      (3, 3)
+        renderText fc "Your log was copied to:"            dimText      (3, 4)
+        renderText fc path                                 dimText      (3, 5)
+        renderText fc ""                                   dimText      (3, 6)
+        renderText fc "Your friends' hunts will merge"     dimText      (3, 7)
+        renderText fc "into yours next time their logs"    dimText      (3, 8)
+        renderText fc "are visible in that folder."        dimText      (3, 9)
+        renderText fc ""                                   dimText      (3, 10)
+        renderText fc "press any key or click to return"   greyText     (3, 12)
+      BroadcastNoLog -> do
+        renderText fc "Nothing to send yet."               dimText      (3, 2)
+        renderText fc ""                                   dimText      (3, 3)
+        renderText fc "Take a few actions first."          dimText      (3, 4)
+        renderText fc ""                                   dimText      (3, 5)
+        renderText fc "press any key or click to return"   greyText     (3, 7)
+      BroadcastFailed err -> do
+        renderText fc "Share failed."                      warningColor (3, 2)
+        renderText fc ""                                   dimText      (3, 3)
+        renderText fc (take 70 err)                        dimText      (3, 4)
+        renderText fc ""                                   dimText      (3, 5)
+        renderText fc "press any key or click to return"   greyText     (3, 7)
 
 -- | Build a single clickable rectangle for a tab label on the
 -- journal footer row.  Offset from 'marginLeft' matches the column

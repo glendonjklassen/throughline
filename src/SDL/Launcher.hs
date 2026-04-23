@@ -33,7 +33,10 @@ import           SDL.Renderer           (SDLContext(..), clearSDL, freeSDL, init
 import           SDL.Runner             (sdlUI)
 import           SDL.SaveSlots          (SaveStatus(..), resetScenarioSave,
                                          scenarioSaveStatus)
-import           SDL.Settings           (Settings(..), loadSettings)
+import           SDL.Settings           (Settings(..), loadSettings,
+                                         viewportRecommendedFontScale,
+                                         viewportSize)
+import           SDL.SharedFolder       (scanSharedLogs)
 import           SDL.SettingsMenu       (settingsMenu)
 
 -- | What the launcher needs to know about one scenario.  'label' and
@@ -74,7 +77,13 @@ launcherMain entries = do
       title = case entries of
         [single] -> entryLabel single <> " — throughline"
         _        -> "throughline"
-  ctx    <- initSDLWith fontAsset title (sFontScale settings) mode
+      vp    = sViewport settings
+      -- The user scale multiplies on top of the viewport's
+      -- recommended default, so the player picks "a bit bigger" or
+      -- "a bit smaller" relative to what reads cleanly on their
+      -- screen, not raw pixel sizes.
+      scale = viewportRecommendedFontScale vp * sFontScale settings
+  ctx    <- initSDLWith fontAsset title (viewportSize vp) scale mode
   ident  <- loadOrCreate =<< defaultIdentityPath
   let pid = playerIdOf ident
   choice <- case entries of
@@ -83,7 +92,19 @@ launcherMain entries = do
   freeSDL ctx
   case choice of
     Nothing    -> pure ()
-    Just entry -> runScenario (sdlUI (entryDisplay entry)) (entryMake entry)
+    Just entry ->
+      -- The shared-folder scanner fires once at scenario start (and
+      -- again if a live-merge pass re-reads).  If the player hasn't
+      -- configured a shared folder, the action returns an empty
+      -- list and the merge behaves identically to the solo path.
+      let sharedScan n = case sSharedFolder settings of
+            Nothing  -> pure []
+            Just dir -> scanSharedLogs dir n pid
+          -- scenarioName doesn't depend on seed/you — probe with
+          -- dummies to get the string for the runner.
+          scenName = scenarioName (entryMake entry 0 dummyChar)
+      in runScenarioWith (sdlUI scenName (entryDisplay entry)) sharedScan
+                         (entryMake entry)
 
 -- ---------------------------------------------------------------------------
 -- Single-scenario bundle: title screen with Continue / New hunt
@@ -339,7 +360,7 @@ renderCrashScreen reportPath message = do
   -- Spin up a fresh context with default settings — the user's own
   -- settings might have been implicated in the crash, so we don't
   -- re-read them here.
-  r <- try (initSDLWith fontAsset "throughline — crash" 1.0 Autumn)
+  r <- try (initSDLWith fontAsset "throughline — crash" (1280, 800) 1.0 Autumn)
          :: IO (Either SomeException SDLContext)
   case r of
     Left _    -> pure ()

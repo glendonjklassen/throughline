@@ -4,6 +4,7 @@
 module Engine.Runtime
   ( RuntimeUI(..)
   , runScenario
+  , runScenarioWith
   , offerMerge
   , sessionsRootDir
   ) where
@@ -20,7 +21,8 @@ import           Engine.Core.Axioms     (systemMergeAxioms)
 import           Engine.Core.Conditions (checkCondition)
 import           Engine.Core.Effects    (executeEffectOnce, mergeWorlds)
 import           Engine.Sync.Causality  (buildMergeDiff, runMergeAxioms, runMergeRules)
-import           Engine.Sync.EventLog   (fileLogStore, mergeLogs, nullLogStore, replayFrom)
+import           Engine.Sync.EventLog   (augmentForeignLogs, fileLogStore,
+                                         mergeLogs, nullLogStore, replayFrom)
 import           Engine.Sync.Identity   (Identity(..), defaultIdentityPath,
                                          loadOrCreate, playerCharId, playerIdOf)
 import           GameTypes
@@ -38,7 +40,19 @@ data RuntimeUI = RuntimeUI
   }
 
 runScenario :: RuntimeUI -> (Int -> CharId -> Scenario) -> IO ()
-runScenario ui mkScenario = do
+runScenario ui mkScenario = runScenarioWith ui (const (pure [])) mkScenario
+
+-- | Like 'runScenario', but also folds an extra foreign-logs source
+-- into the merge pipeline.  Used by the shared-folder feature: the
+-- supplied action receives the scenario name and returns whatever
+-- logs exist in the player's shared folder for that scenario.
+-- 'runScenario' supplies a no-op to preserve the original behavior.
+runScenarioWith
+  :: RuntimeUI
+  -> (String -> IO [(PlayerId, [LogEntry], Maybe Snapshot)])
+  -> (Int -> CharId -> Scenario)
+  -> IO ()
+runScenarioWith ui extraForeign mkScenario = do
   args <- getArgs
   let newSession  = "--new-session" `elem` args || "-ns" `elem` args
       sessionDir  = parseSessionDir args
@@ -52,7 +66,8 @@ runScenario ui mkScenario = do
   debugRef    <- newIORef (scenarioDebugDefault scenario)
   traceRef    <- newIORef []
   frontierRef <- newIORef Map.empty
-  let store = fileLogStore sessionDir (scenarioName scenario) playerId (Just ident)
+  let rawStore = fileLogStore sessionDir (scenarioName scenario) playerId (Just ident)
+      store    = augmentForeignLogs (extraForeign (scenarioName scenario)) rawStore
   when newSession $ lsReset store
   mSnap <- lsLoadSnap store
   let (baseWorld, logOffset) = maybe (scenarioInitial scenario, 0)
