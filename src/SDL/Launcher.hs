@@ -165,7 +165,7 @@ pickSingle :: SDLContext -> PlayerId -> ScenarioEntry -> SaveStatus
 pickSingle ctx pid entry status = loop
   where
     loop cm = do
-      me <- awaitInputSDL
+      me <- awaitInputSDL (sdlWindow ctx)
       case me of
         Nothing                  -> pure Nothing
         Just (KeyPress c)        -> dispatch cm c
@@ -222,7 +222,7 @@ multiScenarioMenu ctx pid entries = do
   pickMulti statuses cm
   where
     pickMulti statuses cm = do
-      me <- awaitInputSDL
+      me <- awaitInputSDL (sdlWindow ctx)
       case me of
         Nothing              -> pure Nothing
         Just (KeyPress c)    -> dispatch statuses cm c
@@ -338,7 +338,7 @@ confirmDiscard ctx label = do
   loop cm
   where
     loop cm = do
-      me <- awaitInputSDL
+      me <- awaitInputSDL (sdlWindow ctx)
       case me of
         Nothing              -> pure False
         Just (KeyPress c)    -> decide c
@@ -379,7 +379,7 @@ renderCrashScreen reportPath message = do
       renderText fc ""                                        dimText      (3, 11)
       renderText fc "Press any key or click to close."        greyText     (3, 12)
       presentSDL ctx
-      _ <- awaitInputSDL
+      _ <- awaitInputSDL (sdlWindow ctx)
       freeSDL ctx
   where
     excerpt s = take 80 (takeWhile (/= '\n') s)

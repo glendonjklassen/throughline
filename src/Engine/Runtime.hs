@@ -59,17 +59,28 @@ runScenarioWith ui extraForeign mkScenario = do
   msgRef     <- newIORef []
   idPath     <- defaultIdentityPath
   ident      <- loadOrCreate idPath
-  seed       <- epochSeed args
+  freshSeed  <- epochSeed args
   let playerId = playerIdOf ident
       you      = playerCharId ident
+      -- Build once with the fresh seed so we know the scenario name
+      -- (needed to locate the save file).  We'll rebuild below using
+      -- the saved world's seed if a snapshot exists, so the generated
+      -- map matches the saved state.
+      scenarioName0 = scenarioName (mkScenario freshSeed you)
+  let rawStore = fileLogStore sessionDir scenarioName0 playerId (Just ident)
+      store    = augmentForeignLogs (extraForeign scenarioName0) rawStore
+  when newSession $ lsReset store
+  mSnap <- lsLoadSnap store
+  -- Scenario map generation is seeded, so a mismatched seed on load
+  -- would produce a different map than the one in the snapshot, and
+  -- movement actions would reference locations that don't exist in
+  -- the loaded world.  Prefer the snapshot's seed whenever we have
+  -- one; fall back to the fresh seed for a brand-new hunt.
+  let seed     = maybe freshSeed (worldSeed . snapWorld) mSnap
       scenario = mkScenario seed you
   debugRef    <- newIORef (scenarioDebugDefault scenario)
   traceRef    <- newIORef []
   frontierRef <- newIORef Map.empty
-  let rawStore = fileLogStore sessionDir (scenarioName scenario) playerId (Just ident)
-      store    = augmentForeignLogs (extraForeign (scenarioName scenario)) rawStore
-  when newSession $ lsReset store
-  mSnap <- lsLoadSnap store
   let (baseWorld, logOffset) = maybe (scenarioInitial scenario, 0)
                                      (\s -> (snapWorld s, snapOffset s)) mSnap
   ownLog <- lsLoadOwn store

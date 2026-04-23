@@ -33,7 +33,7 @@ import           SDL.InputHandler
 import           SDL.Palette
 import           SDL.Renderer
 import           SDL.SpatialHUD        (SpatialHUD(..), HUDCell(..), hudClickMap,
-                                        layoutHUD)
+                                        layoutHUD, hudGenRowCount)
 import           SDL.Text              (stripAnsi, wrapWords)
 import           SDL.Debug             (learningModeLines)
 #ifndef RELEASE_BUILD
@@ -165,7 +165,10 @@ sdlActionSource ctx scenName display countRef actionsRef lastLocRef actions = do
   -- Precompute the sorted cell list and per-cell sensory fragments so the
   -- animation loop doesn't re-derive them every frame.
   let totalCols = gridCols ctx
-      hud       = layoutHUD you world actions totalCols
+      totalRows = gridRows ctx
+      (grc, hasSp) = hudGenRowCount you world actions totalCols
+      hudLayout = computeLayout totalRows topBarRows 0 grc hasSp
+      hud       = layoutHUD you world actions totalCols (loSpatialBoxH hudLayout)
       sortedCells = sortOn hudDist (shSpatialCells hud)
       tick        = lcTick (worldClock world)
       salt0       = tick + hashLoc currentLoc
@@ -241,7 +244,7 @@ resolveInput :: SDLContext -> SpatialHUD -> [AnyAction] -> IO (Maybe Char)
 resolveInput ctx hudLayout _acts = go
   where
     go = do
-      me <- awaitInputSDL
+      me <- awaitInputSDL (sdlWindow ctx)
       case me of
         Nothing              -> pure Nothing
         Just (KeyPress c)    -> pure (Just c)
@@ -267,19 +270,21 @@ buildHUDClicks ctx hud =
       genNumCols   = max 1 ((cols - 4) `div` max 1 genColW)
       genRowCount  = (length genLabels + genNumCols - 1) `div` max 1 genNumCols
       hasSpatial   = not (null (shSpatialCells hud))
-      spatialH     = if hasSpatial then shBoxHeight hud else 0
       -- The renderer's click-layout cannot see the player's current
       -- learning-mode / trace state cheaply, so assume it's off here:
       -- learning mode is a dev tool, and if it's on the layout shifts
       -- down uniformly (clicks land a few rows above the labels — not
       -- ideal, but keyboard still works).
-      Layout{loHudStart = hudStartRow, loSpatialTop = spatialTopRow} =
-        computeLayout rws topBarRows 0 genRowCount hasSpatial spatialH
+      Layout{ loHudStart     = hudStartRow
+            , loSpatialTop   = spatialTopRow
+            , loGenRowStride = genStride
+            } =
+        computeLayout rws topBarRows 0 genRowCount hasSpatial
       spatialLeft = (cols - shBoxWidth hud) `div` 2
-      gridHits = hudClickMap ml genColW genRowCount hudStartRow
+      gridHits = hudClickMap ml genColW genNumCols genStride hudStartRow
                              spatialLeft spatialTopRow hud
-  in [ (col * cw, row * chH, w * cw, chH, c)
-     | (col, row, w, c) <- gridHits
+  in [ (col * cw, row * chH, w * cw, h * chH, c)
+     | (col, row, w, h, c) <- gridHits
      ]
 
 -- | Ask the player to confirm a mid-hunt quit.  Every action autosaves
@@ -304,7 +309,7 @@ confirmQuit ctx = do
   loop cm
   where
     loop cm = do
-      me <- awaitInputSDL
+      me <- awaitInputSDL (sdlWindow ctx)
       case me of
         Nothing              -> pure False
         Just (KeyPress c)    -> pure (c == 'y' || c == 'Y')
@@ -345,7 +350,7 @@ journalOverlayLoop ctx scenName playerId display world tab = do
       catalogRect = journalRect fc footerRow 19 11 '3'
       shareRect   = journalRect fc footerRow 33 9 's'
       cm = [todayRect, pastRect, catalogRect, shareRect]
-  me <- awaitInputSDL
+  me <- awaitInputSDL (sdlWindow ctx)
   case me of
     Nothing -> pure ()
     Just (KeyPress c)    -> dispatch c
@@ -387,13 +392,13 @@ shareWithFriends ctx scenName playerId = do
       renderText fc ""                                 dimText      (3, 9)
       renderText fc "press any key or click to return" greyText     (3, 11)
       presentSDL ctx
-      _ <- awaitInputSDL
+      _ <- awaitInputSDL (sdlWindow ctx)
       pure ()
     Just dir -> do
       result <- broadcastLog dir scenName playerId
       renderShareResult fc result
       presentSDL ctx
-      _ <- awaitInputSDL
+      _ <- awaitInputSDL (sdlWindow ctx)
       pure ()
   where
     renderShareResult fc result = case result of
@@ -520,10 +525,16 @@ animateReveal render cellsWithSense = do
           pure Nothing
         else do
           render (frameAt elapsed)
-          mc <- waitOrKeyChar 33
-          case mc of
-            Just c  -> pure (Just c)
-            Nothing -> loop start frameAt total
+          ri <- waitOrRevealInput 33
+          case ri of
+            RevealKey c  -> pure (Just c)
+            RevealSkip   -> do
+              -- Pointer tap during reveal: finish the animation but
+              -- don't dispatch a selection.  The player's next input
+              -- gets hit-tested against the fully-revealed HUD.
+              render finalReveal
+              pure Nothing
+            RevealTimeout -> loop start frameAt total
 
 -- | Alpha for a label given elapsed ms and the label's slot start ms.
 -- Before its slot opens: 0.  During fade-in window: ramps 0→1.  After
@@ -687,16 +698,9 @@ typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn frame you world ac
   let learnRowCount = if debugMode == Learning
                         then length (learningModeLines traces you world)
                         else 0
-      hud          = layoutHUD you world actions cols
-      hasSpatial   = not (null (shSpatialCells hud))
-      genLabels    = shGeneralLabels hud
-      maxGenLen    = if null genLabels then 0 else maximum (map length genLabels)
-      genColW      = maxGenLen + 3
-      genNumCols   = max 1 ((cols - 4) `div` max 1 genColW)
-      genRowCount  = length (chunksOf genNumCols genLabels)
-      spatialH     = if hasSpatial then shBoxHeight hud else 0
+      (genRowCount, hasSpatial) = hudGenRowCount you world actions cols
       Layout{loHistTop = histTop, loHistRows = histAvail} =
-        computeLayout rows topBarRows learnRowCount genRowCount hasSpatial spatialH
+        computeLayout rows topBarRows learnRowCount genRowCount hasSpatial
       -- How many old history lines are visible
       allOrdered   = reverse allMsgs
       oldLabelW    = maximum (0 : map (length . neTimeLabel) allOrdered)

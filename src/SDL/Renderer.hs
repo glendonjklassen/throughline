@@ -43,8 +43,8 @@ import           SDL.Primitives (drawCellUnderline)
 import           SDL.Sprites    (drawSprite, spritesForClass)
 import           SDL.SpatialHUD (SpatialHUD(..), HUDCell(..),
                                  TrailMark(..), SpritePlacement(..),
-                                 layoutHUD, terrainSpriteScatter,
-                                 trailMarks)
+                                 layoutHUD, hudGenRowCount,
+                                 terrainSpriteScatter, trailMarks)
 import           Engine.Core.World (playerLocationName, engineTimeStatus, exitBearings)
 import           Engine.Core.NarrativeMessage
 import           SDL.Layout (LayoutConfig(..), ScenarioDisplay(..))
@@ -193,46 +193,61 @@ topBarRows = 3
 -- biggest chunk — prompt, general actions, spatial map), then a
 -- separator, then the text history filling the rest at the bottom.
 --
--- History is the "2nd largest" zone per design; the HUD is largest
--- because the spatial map wants room to breathe and a packed map
--- reads as a cramped screen.
+-- The spatial HUD absorbs whatever rows remain between the general
+-- actions and the history separator, so the sprite scatter fills the
+-- gap that would otherwise read as dead space.
 data Layout = Layout
-  { loHudStart    :: !Int  -- ^ row of HUD separator
-  , loSpatialTop  :: !Int  -- ^ first row of the spatial-HUD box
-  , loHistSep     :: !Int  -- ^ row of separator between HUD and history
-  , loHistTop     :: !Int  -- ^ first row of history text
-  , loHistRows    :: !Int  -- ^ visible history rows
+  { loHudStart     :: !Int  -- ^ row of HUD separator
+  , loSpatialTop   :: !Int  -- ^ first row of the spatial-HUD box
+  , loSpatialBoxH  :: !Int  -- ^ height of the spatial-HUD box in rows
+  , loGenRowStride :: !Int  -- ^ rows allocated per general-action row (touch spacing)
+  , loHistSep      :: !Int  -- ^ row of separator between HUD and history
+  , loHistTop      :: !Int  -- ^ first row of history text
+  , loHistRows     :: !Int  -- ^ visible history rows
   }
 
--- | Compute the vertical layout.  The HUD's height is data-driven
--- (prompt + general rows + gap + spatial box), sized exactly to its
--- contents; history takes what's left at the bottom.  We bias a bit
--- of extra vertical room toward the HUD when the screen is tall so
--- the map feels central, but we never starve history below 6 rows.
+-- | Rows of blank space below each general-action row so tap targets
+-- aren't cramped against the next row.  A stride of 2 means each
+-- logical general row actually occupies 2 screen rows (text row +
+-- padding), giving ~32-40 px of vertical hit area for touch.
+generalRowStride :: Int
+generalRowStride = 2
+
+-- | Fixed budget for the history zone at the bottom of the screen.
+historyRowBudget :: Int
+historyRowBudget = 5
+
+-- | Compute the vertical layout.  Top-down: top bar, optional
+-- learning-mode lines, HUD divider, prompt, general actions (one row
+-- of labels per 'generalRowStride' screen rows), gap, spatial HUD
+-- filling the remaining space, history separator, and a fixed
+-- history zone at the bottom.  The spatial HUD stretches to fill
+-- whatever's left between the general actions and the history
+-- separator — on tall viewports that's a lot of room for sprites
+-- and neighbour labels, on short viewports it collapses gracefully.
 computeLayout
   :: Int   -- ^ total rows
   -> Int   -- ^ top-bar height
   -> Int   -- ^ learning-mode rows (under top bar)
   -> Int   -- ^ general-action rows
   -> Bool  -- ^ has spatial HUD?
-  -> Int   -- ^ spatial HUD height
   -> Layout
-computeLayout rows topH learnH genRowCount hasSpatial spatialH =
-  let hudStart    = topH + learnH
-      hudContentH = 1 + genRowCount + (if hasSpatial then 1 + spatialH else 0)
-      -- The HUD always fits its content.  No variable padding; this
-      -- keeps the map anchored just below the top bar instead of
-      -- drifting on taller viewports.
-      histSep     = hudStart + 1 + hudContentH
-      histTop     = histSep + 1
-      histRows    = max 0 (rows - histTop)
-      spatialTop  = hudStart + 2 + genRowCount + (if hasSpatial then 1 else 0)
+computeLayout rows topH learnH genRowCount hasSpatial =
+  let hudStart   = topH + learnH
+      histRows   = min historyRowBudget (max 0 (rows - hudStart - 4))
+      histTop    = rows - histRows
+      histSep    = histTop - 1
+      genAreaH   = genRowCount * generalRowStride
+      spatialTop = hudStart + 2 + genAreaH + (if hasSpatial then 1 else 0)
+      boxH       = if hasSpatial then max 0 (histSep - spatialTop) else 0
   in Layout
-      { loHudStart    = hudStart
-      , loSpatialTop  = spatialTop
-      , loHistSep     = histSep
-      , loHistTop     = histTop
-      , loHistRows    = histRows
+      { loHudStart     = hudStart
+      , loSpatialTop   = spatialTop
+      , loSpatialBoxH  = boxH
+      , loGenRowStride = generalRowStride
+      , loHistSep      = histSep
+      , loHistTop      = histTop
+      , loHistRows     = histRows
       }
 
 -- | Draw the top bar: centred location name, right-aligned time,
@@ -291,21 +306,19 @@ renderWorldSDL ctx _layout statusLine sparkleFn zoneTintFn frame you world actio
       rows    = gridRows ctx
       fc      = sdlFont ctx
       contentW = cols - fromIntegral marginLeft * 2 - 8  -- usable text width
-      hud          = layoutHUD you world actions cols
-      hasSpatial   = not (null (shSpatialCells hud))
-      genLabels    = shGeneralLabels hud
-      maxGenLen    = if null genLabels then 0 else maximum (map length genLabels)
-      genColW      = maxGenLen + 3
-      genNumCols   = max 1 ((cols - 4) `div` max 1 genColW)
-      genRows      = chunksOf genNumCols genLabels
-      genRowCount  = length genRows
-      spatialH     = if hasSpatial then shBoxHeight hud else 0
-      learnLines   = if debugMode == Learning
+      (genRowCount, hasSpatial) = hudGenRowCount you world actions cols
+      learnLines    = if debugMode == Learning
                         then learningModeLines traces you world
                         else []
       learnRowCount = length learnLines
-      Layout{..} = computeLayout rows topBarRows learnRowCount genRowCount
-                                 hasSpatial spatialH
+      Layout{..}    = computeLayout rows topBarRows learnRowCount
+                                     genRowCount hasSpatial
+      hud           = layoutHUD you world actions cols loSpatialBoxH
+      genLabels     = shGeneralLabels hud
+      maxGenLen     = if null genLabels then 0 else maximum (map length genLabels)
+      genColW       = maxGenLen + 3
+      genNumCols    = max 1 ((cols - 4) `div` max 1 genColW)
+      genRows       = chunksOf genNumCols genLabels
 
   -- Top bar (rows 0-2)
   drawTopBar fc cols you world statusLine
@@ -319,7 +332,7 @@ renderWorldSDL ctx _layout statusLine sparkleFn zoneTintFn frame you world actio
   drawHLine fc cols (fromIntegral loHudStart)
   renderText fc "What do you do?" defaultText (marginLeft, fromIntegral (loHudStart + 1))
   mapM_ (\(rowIdx, rowActions) -> do
-    let y = fromIntegral (loHudStart + 2 + rowIdx)
+    let y = fromIntegral (loHudStart + 2 + rowIdx * loGenRowStride)
     mapM_ (\(colIdx, label) -> do
       let x = marginLeft + 1 + fromIntegral colIdx * fromIntegral genColW
       renderText fc label greyText (x, y)
@@ -368,21 +381,19 @@ renderWorldFrame ctx _layout statusLine sparkleFn zoneTintFn frame you world act
       rows    = gridRows ctx
       fc      = sdlFont ctx
       contentW = cols - fromIntegral marginLeft * 2 - 8
-      hud          = layoutHUD you world actions cols
-      hasSpatial   = not (null (shSpatialCells hud))
-      genLabels    = shGeneralLabels hud
-      maxGenLen    = if null genLabels then 0 else maximum (map length genLabels)
-      genColW      = maxGenLen + 3
-      genNumCols   = max 1 ((cols - 4) `div` max 1 genColW)
-      genRows      = chunksOf genNumCols genLabels
-      genRowCount  = length genRows
-      spatialH     = if hasSpatial then shBoxHeight hud else 0
-      learnLines   = if debugMode == Learning
+      (genRowCount, hasSpatial) = hudGenRowCount you world actions cols
+      learnLines    = if debugMode == Learning
                         then learningModeLines traces you world
                         else []
       learnRowCount = length learnLines
-      Layout{..} = computeLayout rows topBarRows learnRowCount genRowCount
-                                 hasSpatial spatialH
+      Layout{..}    = computeLayout rows topBarRows learnRowCount
+                                     genRowCount hasSpatial
+      hud           = layoutHUD you world actions cols loSpatialBoxH
+      genLabels     = shGeneralLabels hud
+      maxGenLen     = if null genLabels then 0 else maximum (map length genLabels)
+      genColW       = maxGenLen + 3
+      genNumCols    = max 1 ((cols - 4) `div` max 1 genColW)
+      genRows       = chunksOf genNumCols genLabels
 
   drawTopBar fc cols you world statusLine
 
@@ -393,7 +404,7 @@ renderWorldFrame ctx _layout statusLine sparkleFn zoneTintFn frame you world act
   drawHLine fc cols (fromIntegral loHudStart)
   renderText fc "What do you do?" defaultText (marginLeft, fromIntegral (loHudStart + 1))
   mapM_ (\(rowIdx, rowActions) -> do
-    let y = fromIntegral (loHudStart + 2 + rowIdx)
+    let y = fromIntegral (loHudStart + 2 + rowIdx * loGenRowStride)
     mapM_ (\(colIdx, label) -> do
       let x = marginLeft + 1 + fromIntegral colIdx * fromIntegral genColW
       renderText fc label greyText (x, y)

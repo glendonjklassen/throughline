@@ -55,7 +55,7 @@ settingsMenu ctx = do
     loop baseline stateRef = do
       (s, sel) <- readIORef stateRef
       cm <- renderMenu ctx s sel
-      me <- awaitInputSDL
+      me <- awaitInputSDL (sdlWindow ctx)
       case me of
         Nothing              -> pure baseline
         Just (KeyPress c)    -> handleCmd baseline stateRef (keyToCmd c sel)

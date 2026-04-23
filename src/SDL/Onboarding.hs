@@ -43,7 +43,7 @@ defaultHowToPlay =
 howToPlayLoop :: SDLContext -> String -> [String] -> IO ()
 howToPlayLoop ctx title pages = do
   renderHowToPlay ctx title pages
-  _ <- awaitInputSDL
+  _ <- awaitInputSDL (sdlWindow ctx)
   pure ()
 
 renderHowToPlay :: SDLContext -> String -> [String] -> IO ()

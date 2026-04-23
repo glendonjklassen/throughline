@@ -8,7 +8,8 @@ module SDL.InputHandler
   , pollQuit
   , pollAnyKey
   , waitOrKey
-  , waitOrKeyChar
+  , RevealInput(..)
+  , waitOrRevealInput
   , optionKeys
   , optionKeyFor
   , safeOptionIndex
@@ -21,8 +22,8 @@ module SDL.InputHandler
   ) where
 
 import           Control.Applicative ((<|>))
-import           Data.Int            (Int32)
 import           Data.List           (elemIndex)
+import           Foreign.C.Types     (CInt)
 import qualified SDL
 import qualified SDL.Input.Keyboard.Codes as KC
 
@@ -56,8 +57,13 @@ data InputEvent
 -- events are silently skipped; only discrete \"I picked something\"
 -- events resolve the wait.  Clicks and touches return pixel
 -- coordinates relative to the window's top-left.
-awaitInputSDL :: IO (Maybe InputEvent)
-awaitInputSDL = do
+--
+-- The 'SDL.Window' argument is used to convert SDL's normalized touch
+-- coordinates into pixel coordinates that match the renderer's click
+-- targets.  Mouse coords are already in window pixels, so the window
+-- isn't consulted on that path.
+awaitInputSDL :: SDL.Window -> IO (Maybe InputEvent)
+awaitInputSDL window = do
   event <- SDL.waitEvent
   case SDL.eventPayload event of
     SDL.QuitEvent -> pure Nothing
@@ -65,28 +71,23 @@ awaitInputSDL = do
       | SDL.keyboardEventKeyMotion kd == SDL.Pressed ->
           case keycodeToChar (SDL.keysymKeycode (SDL.keyboardEventKeysym kd)) of
             Just c  -> pure (Just (KeyPress c))
-            Nothing -> awaitInputSDL
+            Nothing -> awaitInputSDL window
     SDL.MouseButtonEvent mb
       | SDL.mouseButtonEventMotion mb == SDL.Pressed -> do
           let SDL.P (SDL.V2 x y) = SDL.mouseButtonEventPos mb
           pure (Just (ClickAt (fromIntegral x) (fromIntegral y)))
     SDL.TouchFingerEvent tf
       | SDL.touchFingerEventMotion tf == SDL.Pressed -> do
-          -- SDL reports touches in normalized [0, 1] coords.  We
-          -- scale against the canonical window dimensions; since
-          -- the renderer also works at that size, the mapping is
-          -- consistent with mouse clicks even on Deck / tablet.
+          -- SDL reports touches in normalized [0, 1] coords.  Scale
+          -- against the *actual* window size so the mapping matches
+          -- the click rects the renderer built for this frame —
+          -- otherwise a Surface / tablet at a non-Deck viewport lands
+          -- taps in the wrong place.
           let SDL.P (SDL.V2 nx ny) = SDL.touchFingerEventPos tf
-          pure (Just (ClickAt (round (nx * fromIntegral canonicalWindowW))
-                              (round (ny * fromIntegral canonicalWindowH))))
-    _ -> awaitInputSDL
-
--- | Window dimensions the renderer assumes; kept local so callers of
--- the input handler don't have to import 'SDL.Renderer'.  If the
--- renderer's canonical size changes, update both.
-canonicalWindowW, canonicalWindowH :: Int32
-canonicalWindowW = 1280
-canonicalWindowH = 800
+          SDL.V2 w h <- SDL.get (SDL.windowSize window)
+          pure (Just (ClickAt (round (nx * fromIntegral (w :: CInt)))
+                              (round (ny * fromIntegral (h :: CInt)))))
+    _ -> awaitInputSDL window
 
 -- | Block until any keypress or window close. Returns True on keypress, False on quit.
 awaitAnyKeySDL :: IO Bool
@@ -122,6 +123,9 @@ keycodeToChar kc = lookup kc letterCodes <|> lookup kc digitCodes
       , (KC.Keycode7, '7'), (KC.Keycode8, '8'), (KC.Keycode9, '9')
       , (KC.KeycodeEscape, quitKeyChar)
       , (KC.KeycodeF3,     debugKeyChar)
+      , (KC.KeycodeReturn,  '\n')
+      , (KC.KeycodeReturn2, '\n')
+      , (KC.KeycodeKPEnter, '\n')
       ]
 
 -- | Check if a quit event is pending (non-blocking).
@@ -145,33 +149,57 @@ pollAnyKey = any isKey <$> SDL.pollEvents
         SDL.keyboardEventKeyMotion kd == SDL.Pressed
       _ -> False
 
--- | Wait up to @ms@ milliseconds for a keypress.  Returns True if a key
--- was pressed, False if the timeout expired.  Only consumes one event at a
--- time so window-management events are not silently drained.
+-- | Wait up to @ms@ milliseconds for any skip-worthy input — a key
+-- press, a mouse button-down, or a finger-down.  Returns True if one
+-- was consumed, False on timeout.  Used by the typewriter to treat
+-- either a keypress or a tap as "finish the text already."  Only
+-- consumes one event so window-management events aren't silently
+-- drained.
 waitOrKey :: Int -> IO Bool
 waitOrKey ms = do
   mEvent <- SDL.waitEventTimeout (fromIntegral ms)
   case mEvent of
-    Nothing -> pure False  -- timeout, no event
+    Nothing -> pure False
     Just event -> case SDL.eventPayload event of
       SDL.KeyboardEvent kd
         | SDL.keyboardEventKeyMotion kd == SDL.Pressed -> pure True
-      _ -> pure False  -- non-key event, leave the rest in the queue
+      SDL.MouseButtonEvent mb
+        | SDL.mouseButtonEventMotion mb == SDL.Pressed -> pure True
+      SDL.TouchFingerEvent tf
+        | SDL.touchFingerEventMotion tf == SDL.Pressed -> pure True
+      _ -> pure False
 
--- | Wait up to @ms@ milliseconds for a mapped keypress.  Returns
--- @Just c@ if a character we care about was pressed, @Nothing@ on
--- timeout or a non-key / unmapped event.  Used by the HUD reveal
--- animation to accept an early input as a "skip + select" gesture.
-waitOrKeyChar :: Int -> IO (Maybe Char)
-waitOrKeyChar ms = do
+-- | Input observed during the HUD reveal animation.  Keys dispatch
+-- through as skip+select in one gesture; pointer events skip without
+-- a selection (the player needs to tap again on the fully-revealed
+-- HUD).  Keeps tap UX aligned with the typewriter — first tap
+-- finishes the animation, second tap selects.
+data RevealInput
+  = RevealTimeout     -- ^ nothing happened within the window
+  | RevealSkip        -- ^ pointer event: end animation, no selection
+  | RevealKey !Char   -- ^ mapped key: end animation and dispatch this char
+  deriving (Show, Eq)
+
+-- | Wait up to @ms@ milliseconds for skip-worthy input during the HUD
+-- reveal animation.  Keys produce 'RevealKey' (skip + select), pointer
+-- events produce 'RevealSkip' (skip only), unmapped keys and ignored
+-- events map to 'RevealTimeout' so the animation keeps running.
+waitOrRevealInput :: Int -> IO RevealInput
+waitOrRevealInput ms = do
   mEvent <- SDL.waitEventTimeout (fromIntegral ms)
   case mEvent of
-    Nothing    -> pure Nothing
+    Nothing    -> pure RevealTimeout
     Just event -> case SDL.eventPayload event of
       SDL.KeyboardEvent kd
         | SDL.keyboardEventKeyMotion kd == SDL.Pressed ->
-            pure (keycodeToChar (SDL.keysymKeycode (SDL.keyboardEventKeysym kd)))
-      _ -> pure Nothing
+            case keycodeToChar (SDL.keysymKeycode (SDL.keyboardEventKeysym kd)) of
+              Just c  -> pure (RevealKey c)
+              Nothing -> pure RevealTimeout
+      SDL.MouseButtonEvent mb
+        | SDL.mouseButtonEventMotion mb == SDL.Pressed -> pure RevealSkip
+      SDL.TouchFingerEvent tf
+        | SDL.touchFingerEventMotion tf == SDL.Pressed -> pure RevealSkip
+      _ -> pure RevealTimeout
 
 -- ---------------------------------------------------------------------------
 -- Option-key scheme
