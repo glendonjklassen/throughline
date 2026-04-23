@@ -43,7 +43,7 @@ import           SDL.FontContext
 import           SDL.Palette
 import           SDL.Text (stripAnsi, wrapWords)
 import           SDL.Primitives (drawCellUnderline)
-import           SDL.Sprites    (drawSprite, spritesForClass)
+import           SDL.Sprites    (drawSparkleParticles, drawSprite, spritesForClass)
 import           SDL.SpatialHUD (SpatialHUD(..), HUDCell(..),
                                  TrailMark(..), SpritePlacement(..),
                                  layoutHUD, hudGenRowCount,
@@ -613,12 +613,26 @@ drawSpatialHUD fc totalCols sparkleFn zoneTintFn frame you world hud spatialLeft
             (baseX + fromIntegral i * cw, py)
         ) (zip [0 :: Int ..] fragment)
     ) (rfActiveSenses frame)
-  -- Sparkles.  Only rendered for cells that have been revealed.
-  mapM_ (\(cell, level, glyph) -> do
-    let row = spatialTopRow + fromIntegral (hudRow cell)
-        col = spatialLeft   + fromIntegral (hudCol cell)
-        gCol = max 0 (col - fromIntegral (length glyph) - 1)
-    renderText fc glyph (sparkleColor level) (gCol, row)
+  -- Sparkles.  Only rendered for cells that have been revealed.  A
+  -- pixel-particle cluster sits just to the left of the label — it
+  -- renders reliably on every font (the old Unicode-sparkle glyph
+  -- showed as tofu when JetBrainsMono was missing U+2726) and scales
+  -- its spread + density with level so a level-3 hint reads as a
+  -- bright spray, not just a brighter dot.
+  mapM_ (\(cell, level, _glyph) -> do
+    let row        = spatialTopRow + fromIntegral (hudRow cell)
+        col        = spatialLeft   + fromIntegral (hudCol cell)
+        -- Land the cluster one cell to the left of the label so the
+        -- label itself never overlaps the particles.
+        centreCol  = max 0 (col - 1)
+        px         = centreCol * cellWidth fc + cellWidth fc `div` 2
+        py         = row       * cellHeight fc + cellHeight fc `div` 2
+        -- Seed the cluster position-stably so the same cell always
+        -- sparkles the same way — but different cells get a visibly
+        -- different arrangement.
+        seed       = hudRow cell * 31 + hudCol cell * 7
+        alphaMod   = rfCellAlpha frame cell
+    drawSparkleParticles fc (px, py) level seed alphaMod (sparkleColor level)
     ) (cellSparkles sparkleFn visibleCells)
   -- Trail marks: breadcrumbs at neighbor cells the player recently
   -- departed.  Age fades the alpha so the freshest step reads strongest

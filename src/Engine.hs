@@ -10,10 +10,12 @@ module Engine
   , module Engine.Core.World
   , module Engine.CRDT.ORSet
   , module Engine.CRDT.PNCounter
+  , module Engine.CRDT.TombstoneGC
   , module Engine.Headless
   , module Engine.Sync.Causality
   , module Engine.Sync.EventLog
   , module Engine.Sync.Identity
+  , module Engine.Sync.Progress
   , module Engine.Sync.Snapshot
   , module Engine.Runtime
   ) where
@@ -29,9 +31,11 @@ import Engine.Core.NarrativeMessage
 import Engine.Core.World
 import Engine.CRDT.ORSet
 import Engine.CRDT.PNCounter
+import Engine.CRDT.TombstoneGC
 import Engine.Headless
 import Engine.Sync.Causality
 import Engine.Sync.EventLog
 import Engine.Sync.Identity
+import Engine.Sync.Progress
 import Engine.Sync.Snapshot
 import Engine.Runtime

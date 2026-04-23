@@ -21,6 +21,7 @@ dinerMaya seed _you = Scenario
   , scenarioTerminal     = HasWorldTag mayaDawn
   , scenarioDebugDefault = Off
   , scenarioPlayerCharId = maya
+  , scenarioTombstoneGC  = Nothing
   }
 
 dinerMayaDisplay :: ScenarioDisplay

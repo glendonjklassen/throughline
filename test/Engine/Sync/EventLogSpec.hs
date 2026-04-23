@@ -52,6 +52,7 @@ testScenario = Scenario
   , scenarioTerminal     = Any []
   , scenarioDebugDefault = Off
   , scenarioPlayerCharId = player
+  , scenarioTombstoneGC  = Nothing
   }
 
 actTagA :: Action 'Repeatable
@@ -74,6 +75,7 @@ mergeScenario = Scenario
   , scenarioTerminal     = Any []
   , scenarioDebugDefault = Off
   , scenarioPlayerCharId = player
+  , scenarioTombstoneGC  = Nothing
   }
 
 -- ---------------------------------------------------------------------------

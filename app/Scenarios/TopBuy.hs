@@ -23,6 +23,7 @@ topBuy seed you = Scenario
   , scenarioTerminal     = Any [HasWorldTag playerCleared, HasWorldTag playerSuspended]
   , scenarioDebugDefault = Off
   , scenarioPlayerCharId = you
+  , scenarioTombstoneGC  = Nothing
   }
 
 topBuyDisplay :: ScenarioDisplay

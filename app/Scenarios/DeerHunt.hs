@@ -3,7 +3,8 @@ module Scenarios.DeerHunt (deerHunt, deerHuntDisplay) where
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 
-import           Engine.CRDT.ORSet      (orMember)
+import           Engine.CRDT.ORSet      (orMember, orToList)
+import           Engine.CRDT.TombstoneGC (olderThanDays)
 import           Engine.Core.Conditions (checkCondition)
 import           SDL.Layout
 import           SDL.Palette  (Color, zoneTintDefault)
@@ -17,6 +18,11 @@ import           Scenarios.DeerHunt.Discoveries (discoveryCatalog)
 import           Scenarios.DeerHunt.Generation  (TerrainClass(..))
 import           Scenarios.DeerHunt.Narration   (sensoryFragment)
 import           Scenarios.DeerHunt.Probability (experience)
+import           Scenarios.DeerHunt.Signature   (SignatureArchetype(..),
+                                                 archetypeHint,
+                                                 parseSignatureLocTag,
+                                                 parseSignatureArchetypeTag,
+                                                 signatureFoundTag)
 import           Scenarios.DeerHunt.World       (PositionHint(..), huntWorld)
 
 -- | Build a full DeerHunt scenario from a seed.  The 'HuntWorld' is
@@ -36,6 +42,10 @@ deerHunt seed you =
        , scenarioTerminal     = Any [HasWorldTag seasonOver, HasWorldTag hunterShot]
        , scenarioDebugDefault = Off
        , scenarioPlayerCharId = you
+       , scenarioTombstoneGC  = Just (olderThanDays 365)
+         -- A year out, it's lore — not something the merge needs to
+         -- keep re-adjudicating.  Matches Deer Hunt's "not this
+         -- year" narrative cadence.
        }
 
 -- | The scenario's display hooks.  Unlike 'deerHunt' these can't close
@@ -61,7 +71,9 @@ deerHuntDisplay = ScenarioDisplay
 -- when the world state suggests the deer is nearby (freshSign in
 -- the zone) the fragment has a chance to land on a "hint" line —
 -- a stick crack, a shape at the edge of vision — so the ambient
--- beat quietly doubles as information.
+-- beat quietly doubles as information.  The signature find gets
+-- an analogous archetype-flavored hint when the neighbor label is
+-- the signature's cell (and hasn't been discovered yet).
 deerHuntSensory :: GameWorld -> Location -> Int -> Maybe String
 deerHuntSensory world loc salt =
   case Map.lookup loc (lgRegions (worldLocationGraph world)) of
@@ -69,7 +81,7 @@ deerHuntSensory world loc salt =
       let cls  = regionClassHint name
           hint = positionHintFor world loc
           base = sensoryFragment cls hint salt
-      in Just (situationalOverride world salt base)
+      in Just (situationalOverride world loc salt base)
     Nothing -> Nothing
 
 -- | Choose a context-sensitive override for a base sensory line.
@@ -77,18 +89,44 @@ deerHuntSensory world loc salt =
 -- hint line drawn from an appropriate pool.  Kept intentionally
 -- low-frequency: a player who never sees a hint still reads a
 -- coherent ambient fragment every turn.
-situationalOverride :: GameWorld -> Int -> String -> String
-situationalOverride world salt base
+situationalOverride :: GameWorld -> Location -> Int -> String -> String
+situationalOverride world loc salt base
+  | nearSignature && roll < 0.4 = pickFrom (archetypeHintsFor world)
   | inZone && roll < 0.35 = pickFrom huntHintFragments
   | spotted && roll < 0.6 = pickFrom sightingFragments
   | otherwise             = base
   where
-    inZone        = orMember freshSign (worldTags world)
-    spotted       = orMember deerSpotted (worldTags world)
+    tags          = worldTags world
+    inZone        = orMember freshSign tags
+    spotted       = orMember deerSpotted tags
+    alreadyFound  = orMember signatureFoundTag tags
+    -- The signature hint only fires if this label is the signature's
+    -- cell *and* the player hasn't already discovered it.  Checking
+    -- "this label is that cell" rather than "player is adjacent" is
+    -- correct because the sensory fragment renders on the neighbour
+    -- label — so "the cell you're about to step into" carries the
+    -- hint, not the one you're standing on.
+    nearSignature = not alreadyFound && signatureLoc == Just loc
+    signatureLoc  = firstJust (map parseSignatureLocTag (orToList tags))
     roll          = let r = abs salt `mod` 1000 in fromIntegral r / 1000 :: Double
     pickFrom xs
       | null xs   = base
       | otherwise = xs !! (abs salt `mod` length xs)
+
+-- | Collect the archetype-flavored hint pool for the current hunt.
+-- Falls back to an empty list if no archetype tag is present (a
+-- malformed init) — the caller's @null xs@ guard turns that into a
+-- plain base line, so there's no narrative surprise.
+archetypeHintsFor :: GameWorld -> [String]
+archetypeHintsFor world = case firstJust (map parseSignatureArchetypeTag (orToList (worldTags world))) of
+  Just arch -> archetypeHint arch
+  Nothing   -> []
+
+-- | Find the first 'Just' in a list of 'Maybe's.
+firstJust :: [Maybe a] -> Maybe a
+firstJust []             = Nothing
+firstJust (Just x  : _)  = Just x
+firstJust (Nothing : xs) = firstJust xs
 
 -- | Ambient lines that plausibly hint at nearby deer without naming
 -- them.  Used when freshSign is present in the player's zone.
@@ -209,17 +247,6 @@ neighborsFromGraph world loc =
 
 endScreen :: GameWorld -> [String]
 endScreen w
-  | checkCondition w (HasWorldTag deerKilled) =
-      [ ""
-      , bold "  Clean kill."
-      , ""
-      , grey "  The buck went down fast. You walk up to it in the stubble"
-      , grey "  and stand there for a minute before doing anything."
-      , grey "  Steam rising off the body in the cold air."
-      , ""
-      , dim  "  Meat in the freezer. That's a good fall."
-      , ""
-      ]
   | checkCondition w (HasWorldTag hunterShot) =
       [ ""
       , bold "  You shot a man."
@@ -231,6 +258,42 @@ endScreen w
       , dim  "  doesn't feel like something that's happening to you."
       , ""
       ]
+  -- The three positive paths: you got the deer, you got the thing,
+  -- you got both.  They're ordered "both > deer > treasure" so the
+  -- richer variant always wins the guard match.
+  | killed && found =
+      [ ""
+      , bold "  The best day of the season."
+      , ""
+      , grey "  Meat in the freezer and a story you didn't go out looking for."
+      , grey "  " <> signatureLineFor w
+      , ""
+      , dim  "  You'll be telling this one for a while."
+      , ""
+      ]
+  | killed =
+      [ ""
+      , bold "  Clean kill."
+      , ""
+      , grey "  The buck went down fast. You walk up to it in the stubble"
+      , grey "  and stand there for a minute before doing anything."
+      , grey "  Steam rising off the body in the cold air."
+      , ""
+      , dim  "  Meat in the freezer. That's a good fall."
+      , ""
+      ]
+  | found =
+      [ ""
+      , bold "  No deer this year."
+      , ""
+      , grey "  You came back with something else."
+      , grey "  " <> signatureLineFor w
+      , ""
+      , dim  "  Some seasons are like that. You take what the woods give you."
+      , ""
+      ]
+  -- Neither.  Existing misses still differentiate by how the deer
+  -- slipped the hunter — shot and lost vs. never seen.
   | checkCondition w (HasWorldTag deerGone) =
       [ ""
       , bold "  Missed."
@@ -248,3 +311,21 @@ endScreen w
       , grey "  The hunt is over."
       , ""
       ]
+  where
+    killed = checkCondition w (HasWorldTag deerKilled)
+    found  = checkCondition w (HasWorldTag signatureFoundTag)
+
+-- | A one-line archetype-flavored sentence for the end-screen when
+-- the player brought home a signature.  Pulls the archetype out of
+-- the init tag so the line reads specific ("the skull with the
+-- clean hole") rather than generic.  Falls through to a safe
+-- default if the tag is missing for any reason.
+signatureLineFor :: GameWorld -> String
+signatureLineFor w =
+  case firstJust (map parseSignatureArchetypeTag (orToList (worldTags w))) of
+    Just arch -> case arch of
+      SigAntler  -> "An antler. Not one you'll forget the shape of."
+      SigCairn   -> "A cairn nobody but you will visit this winter."
+      SigCarving -> "A name carved into a tree sixty Novembers ago."
+      SigSkull   -> "A skull with a story you didn't get to hear."
+    Nothing -> "Something from the woods, brought home."

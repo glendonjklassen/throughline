@@ -96,6 +96,7 @@ module GameTypes
     -- * Scenarios
   , DebugMode(..)
   , Scenario(..)
+  , TombstoneGCRule
     -- * Smart constructors
   , scenarioTag
   , actionTaken

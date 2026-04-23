@@ -114,6 +114,7 @@ testScenario = Scenario
   , scenarioTerminal     = Any []
   , scenarioDebugDefault = Off
   , scenarioPlayerCharId = player
+  , scenarioTombstoneGC  = Nothing
   }
 
 -- | Player A's action in the merge scenario. Adds "tag-a" unconditionally.
@@ -141,6 +142,7 @@ mergeScenario = Scenario
   , scenarioTerminal     = Any []
   , scenarioDebugDefault = Off
   , scenarioPlayerCharId = player
+  , scenarioTombstoneGC  = Nothing
   }
 
 -- | Marker tag added by the axiom in axiomScenario. If this tag appears
@@ -164,6 +166,7 @@ axiomScenario = Scenario
   , scenarioTerminal     = Any []
   , scenarioDebugDefault = Off
   , scenarioPlayerCharId = player
+  , scenarioTombstoneGC  = Nothing
   }
   where
     respondToOne = Axiom (ScenarioAxiom "respond-to-one") 0 $
@@ -184,6 +187,7 @@ statScenario = Scenario
   , scenarioTerminal     = Any []
   , scenarioDebugDefault = Off
   , scenarioPlayerCharId = player
+  , scenarioTombstoneGC  = Nothing
   }
 
 -- | Action used in the foreign-diff-ordering test. Adds "alpha-effect".
@@ -214,6 +218,7 @@ worldAScenario = Scenario
   , scenarioTerminal     = Any []
   , scenarioDebugDefault = Off
   , scenarioPlayerCharId = player
+  , scenarioTombstoneGC  = Nothing
   }
 
 -- ---------------------------------------------------------------------------

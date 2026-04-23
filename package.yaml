@@ -1,5 +1,5 @@
 name:                throughline
-version:             0.11.0
+version:             0.12.0
 homepage:            "https://github.com/glendonjklassen/throughline"
 license:             MIT
 author:              "Glendon Klassen"
@@ -94,10 +94,12 @@ executables:
       - Scenarios.DeerHunt.Discoveries
       - Scenarios.DeerHunt.Generation
       - Scenarios.DeerHunt.Help
+      - Scenarios.DeerHunt.Lore
       - Scenarios.DeerHunt.Narration
       - Scenarios.DeerHunt.Probability
       - Scenarios.DeerHunt.Rack
       - Scenarios.DeerHunt.Section
+      - Scenarios.DeerHunt.Signature
       - Scenarios.DeerHunt.Terrain
       - Scenarios.DeerHunt.World
     ghc-options:
@@ -152,16 +154,19 @@ tests:
     - Scenarios.DeerHunt.Constants
     - Scenarios.DeerHunt.Discoveries
     - Scenarios.DeerHunt.Generation
+    - Scenarios.DeerHunt.Lore
     - Scenarios.DeerHunt.Narration
     - Scenarios.DeerHunt.Probability
     - Scenarios.DeerHunt.Rack
     - Scenarios.DeerHunt.Section
+    - Scenarios.DeerHunt.Signature
     - Scenarios.DeerHunt.Terrain
     - Scenarios.DeerHunt.World
     - Scenarios.DeerHuntSpec
     - Scenarios.DeerHuntPlaythrough
     - Scenarios.DeerHuntSyncSpec
     - Scenarios.DeerHuntGenerationSpec
+    - Scenarios.DeerHuntSignatureSpec
     - Scenarios.DeerHuntTestFixtures
     - Scenarios.DinerSpec
     - Scenarios.DinerSyncSpec
@@ -180,6 +185,7 @@ tests:
     - Engine.CRDT.ORSetPropSpec
     - Engine.CRDT.PNCounterSpec
     - Engine.CRDT.PNCounterPropSpec
+    - Engine.CRDT.TombstoneGCSpec
     - Engine.Core.AxiomsSpec
     - Engine.Core.SystemAxiomsSpec
     - Engine.Core.ConditionsSpec
@@ -190,6 +196,7 @@ tests:
     - Engine.Sync.ConvergenceSpec
     - Engine.Sync.EventLogSpec
     - Engine.Sync.IdentitySpec
+    - Engine.Sync.ProgressSpec
     - SDL.AchievementsSpec
     - SDL.AudioBackendSpec
     - SDL.ClickMapSpec
@@ -246,5 +253,6 @@ benchmarks:
     - Scenarios.DeerHunt.Probability
     - Scenarios.DeerHunt.Rack
     - Scenarios.DeerHunt.Section
+    - Scenarios.DeerHunt.Signature
     - Scenarios.DeerHunt.Terrain
     - Scenarios.DeerHunt.World

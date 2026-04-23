@@ -17,4 +17,5 @@ customer seed you = Scenario
   , scenarioTerminal     = Any []
   , scenarioDebugDefault = Off
   , scenarioPlayerCharId = you
+  , scenarioTombstoneGC  = Nothing
   }

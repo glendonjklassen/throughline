@@ -22,6 +22,7 @@ diner seed _you = Scenario
   , scenarioTerminal     = HasWorldTag visitorDawn
   , scenarioDebugDefault = Off
   , scenarioPlayerCharId = visitor
+  , scenarioTombstoneGC  = Nothing
   }
 
 dinerDisplay :: ScenarioDisplay

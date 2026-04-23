@@ -93,7 +93,14 @@ launcherMain entries = do
   freeSDL ctx
   case choice of
     Nothing    -> pure ()
-    Just entry ->
+    Just entry -> do
+      -- Bump the player's hunt counter for this identity.  The record
+      -- is the scaffolding for Tier-2 lifetime finds — stature reads
+      -- off 'progressHuntCount', rotation bumps 'progressEpoch'.
+      -- Failures here must not prevent a hunt from starting, so any
+      -- I/O error is swallowed.
+      progressPath <- defaultProgressPath
+      _ <- try (recordHunt pid progressPath) :: IO (Either SomeException Progress)
       -- The shared-folder scanner fires once at scenario start (and
       -- again if a live-merge pass re-reads).  If the player hasn't
       -- configured a shared folder, the action returns an empty
@@ -104,8 +111,8 @@ launcherMain entries = do
           -- scenarioName doesn't depend on seed/you — probe with
           -- dummies to get the string for the runner.
           scenName = scenarioName (entryMake entry 0 dummyChar)
-      in runScenarioWith (sdlUI scenName (entryDisplay entry)) sharedScan
-                         (entryMake entry)
+      runScenarioWith (sdlUI scenName (entryDisplay entry)) sharedScan
+                      (entryMake entry)
 
 -- ---------------------------------------------------------------------------
 -- Single-scenario bundle: title screen with Continue / New hunt

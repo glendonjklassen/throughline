@@ -14,6 +14,9 @@ import           Engine.CRDT.ORSet
 import           Engine.Core.World      (setCharacterStat)
 import           GameTypes
 import           Scenarios.DeerHunt.Generation (GeneratedMap(..), TerrainClass(..))
+import           Scenarios.DeerHunt.Signature  (SignatureFind(..),
+                                                signatureLocTag,
+                                                signatureArchetypeTag)
 import           Scenarios.DeerHunt.World      (HuntWorld(..), hwClass, hwLocsOfClass, hwStart, hwDeerStart)
 
 -- ---------------------------------------------------------------------------
@@ -611,7 +614,9 @@ initialWorld hw you = GameWorld
         , timeTag 7
         , windAngleTag 270.0     -- initial wind from the west
         , windStrengthTag 0.2    -- light morning breeze
+        , signatureArchetypeTag (sigArchetype (hwSignature hw))
         ]
+        ++ [ signatureLocTag loc | Just loc <- [hwSignatureLoc hw] ]
         ++ initialSignTags hw  -- seeded sign-hotspot "treasure"
       )
   , worldLocationGraph = gmGraph (hwMap hw)
