@@ -330,10 +330,17 @@ spec = do
 -- Helpers
 -- ---------------------------------------------------------------------------
 
+-- | Terminal states for the loop.  Beyond the deer / hunter outcomes,
+-- 'seasonOver' and 'dayOver' both drop 'huntNotOver' and leave the
+-- loop with no action to take — the test uses 'withoutRollover',
+-- which strips the axiom that would clear 'dayOver', so we treat it
+-- as terminal here.
 huntEnded :: GameWorld -> Bool
 huntEnded w = checkCondition w (HasWorldTag deerKilled)
            || checkCondition w (HasWorldTag deerGone)
            || checkCondition w (HasWorldTag hunterShot)
+           || checkCondition w (HasWorldTag seasonOver)
+           || checkCondition w (HasWorldTag dayOver)
 
 huntLoop :: Env -> GameWorld -> Int -> IO GameWorld
 huntLoop _   _ 0 = error "huntLoop: timed out without reaching terminal condition"

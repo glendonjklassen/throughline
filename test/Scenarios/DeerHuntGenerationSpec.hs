@@ -101,14 +101,17 @@ spec = describe "DeerHunt procedural generation" $ do
     -- A location with only one exit reads as a dead-end: the player
     -- arrives, sees one way forward, and the HUD has no sense of
     -- "landscape."  Two neighbours is the minimum for continuity.
-    it "gives every location at least two neighbours" $ do
+    -- Upper bound: the spatial HUD uses the ten-letter qwerty row
+    -- for movement options, so we must never generate more than
+    -- that from a single location.
+    it "gives every location between 2 and 10 neighbours" $ do
       let locs  = gmLocations gm
           eds   = lgEdges (gmGraph gm)
           deg l = length [ ()
                          | (a, b) <- Set.toList eds
                          , a == l || b == l
                          ]
-      mapM_ (\l -> deg l `shouldSatisfy` (>= 2)) locs
+      mapM_ (\l -> deg l `shouldSatisfy` (\d -> d >= 2 && d <= 10)) locs
 
     -- Shared-neighbour continuity: when the player walks from A to B,
     -- B's neighbours should include some of A's neighbours (or A's

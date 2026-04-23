@@ -489,22 +489,37 @@ buildEdges
   :: [(Location, ZoneId, (Double, Double))]
   -> Set (Location, Location)
 buildEdges nodes =
-  Set.fromList (map normalize (concatMap neighboursFor nodes))
+  let seeded = concatMap neighboursFor nodes
+      -- Each node's sector-fill pass can add up to 'maxDegreeSelf'
+      -- edges outgoing, but edges are symmetric — a popular node
+      -- that many others pick as their nearest can accumulate far
+      -- more incoming edges than we want on the HUD.  Prune the
+      -- overflow: whenever a node has more than 'maxDegreeTotal'
+      -- edges, drop its longest ones until it fits.  The HUD only
+      -- has ten movement-key slots, so this cap has teeth.
+      raw = Set.fromList (map normalize seeded)
+  in capDegree maxDegreeTotal posMap raw
   where
+    posMap = Map.fromList [ (l, p) | (l, _, p) <- nodes ]
+
     -- Tunables.  'sectorCount' = 6 covers the compass rose densely
     -- enough that "there's always something to the NE" holds, while
     -- leaving the graph sparse enough not to flood the HUD.
     -- 'minDegree' is a minimum, not a maximum: sector filling stops
     -- once every sector has one entry, but the early candidates may
     -- have filled several before that.
-    sectorCount, minDegree, maxDegree :: Int
-    sectorCount = 6
-    minDegree   = 4
-    maxDegree   = 6
+    sectorCount, minDegree, maxDegreeSelf, maxDegreeTotal :: Int
+    sectorCount    = 6
+    minDegree      = 4
+    maxDegreeSelf  = 6
+    -- Hard cap on total degree after symmetric pruning — must stay
+    -- at or below 'movementOptionKeys' length (10) so every move
+    -- has a unique qwerty-row key.
+    maxDegreeTotal = 8
     -- Hard distance ceiling as a fraction of the unit-square diagonal.
     -- Without this, a node on the edge of the map can end up
     -- connected to its opposite edge just to fill its last sector.
-    maxDist     = 0.55
+    maxDist        = 0.55
 
     neighboursFor (la, _, pa) =
       let candidates = sortByDist pa
@@ -514,7 +529,7 @@ buildEdges nodes =
 
     -- Walk candidates in distance order.  Keep a candidate if its
     -- sector hasn't been filled yet OR we're still under 'minDegree';
-    -- stop once we hit 'maxDegree' or run out.
+    -- stop once we hit 'maxDegreeSelf' or run out.
     pickBySector :: (Double, Double)
                  -> [(Location, (Double, Double))]
                  -> [(Location, (Double, Double))]
@@ -522,7 +537,7 @@ buildEdges nodes =
       where
         go _sectorsFilled _count [] = []
         go sectorsFilled count ((lb, pb) : rest)
-          | count >= maxDegree = []
+          | count >= maxDegreeSelf = []
           | dist2 origin pb > maxDist * maxDist = []
           | sectorIx `Set.notMember` sectorsFilled
               || count < minDegree
@@ -530,19 +545,68 @@ buildEdges nodes =
           | otherwise = go sectorsFilled count rest
           where
             (dx, dy) = (fst pb - fst origin, snd pb - snd origin)
-            angle    = atan2 dy dx   -- [-pi, pi]
-            -- Map angle to a sector in [0, sectorCount).
+            angle    = atan2 dy dx
             sectorIx = floor (((angle + pi) / (2 * pi)) * fromIntegral sectorCount)
                        `mod` sectorCount :: Int
 
-    sortByDist :: (Double, Double)
-               -> [(Location, (Double, Double))]
-               -> [(Location, (Double, Double))]
-    sortByDist p = sortOn (\(_, q) -> dist2 p q)
+-- | Cap every node's edge count by repeatedly dropping the longest
+-- edge incident on any over-connected node.  Keeps the map's
+-- geometric shape (near edges preserved; far-and-popular ones
+-- clipped) and guarantees the HUD never overflows its key pool.
+capDegree
+  :: Int
+  -> Map Location (Double, Double)
+  -> Set (Location, Location)
+  -> Set (Location, Location)
+capDegree cap posMap = loop
+  where
+    loop edges =
+      let degs = degreeMap edges
+          overs = [ l | (l, d) <- Map.toList degs, d > cap ]
+      in case overs of
+           []    -> edges
+           (l:_) ->
+             let myEdges = [ (a, b) | (a, b) <- Set.toList edges
+                                    , a == l || b == l ]
+                 -- Sort by distance descending so we drop the
+                 -- longest edge first.  If coords are missing we
+                 -- treat the edge as already farthest.
+                 withLen = [ (edgeLen e, e) | e <- myEdges ]
+                 sorted  = sortByFst withLen
+                 victim  = case reverse sorted of
+                   ((_, e):_) -> Just e
+                   []         -> Nothing
+             in case victim of
+                  Just e  -> loop (Set.delete e edges)
+                  Nothing -> edges
 
-    dist2 (x1, y1) (x2, y2) = (x1 - x2) ** 2 + (y1 - y2) ** 2
+    degreeMap :: Set (Location, Location) -> Map Location Int
+    degreeMap eds = foldr bump Map.empty (Set.toList eds)
+      where
+        bump (a, b) m =
+          Map.insertWith (+) a 1 $
+          Map.insertWith (+) b 1 m
 
-    normalize (a, b) = if a <= b then (a, b) else (b, a)
+    edgeLen (a, b) = case (Map.lookup a posMap, Map.lookup b posMap) of
+      (Just pa, Just pb) -> dist2 pa pb
+      _                  -> 1 / 0
+
+    sortByFst :: Ord k => [(k, v)] -> [(k, v)]
+    sortByFst = sortOn fst
+
+-- | Sort a list of (location, coord) pairs by squared distance from
+-- a reference point.  Squared because sqrt is monotone on positives
+-- and we just need an ordering.
+sortByDist :: (Double, Double)
+           -> [(Location, (Double, Double))]
+           -> [(Location, (Double, Double))]
+sortByDist p = sortOn (\(_, q) -> dist2 p q)
+
+dist2 :: (Double, Double) -> (Double, Double) -> Double
+dist2 (x1, y1) (x2, y2) = (x1 - x2) ** 2 + (y1 - y2) ** 2
+
+normalize :: Ord a => (a, a) -> (a, a)
+normalize (a, b) = if a <= b then (a, b) else (b, a)
 
 -- ---------------------------------------------------------------------------
 -- Step 7 — Assemble the generated map

@@ -282,18 +282,19 @@ resolveOverlaps cx cy bw bh cells = go [] cells
       let cell' = nudge placed cell
       in go (placed ++ [cell']) rest
 
-    -- Check if two cells overlap.  We treat rows within 2 of each
-    -- other as colliding: the label itself gets a ±¼-cell pixel nudge
-    -- (one-row leakage), and an active sensory fragment renders on
-    -- the row directly below each cell (second-row leakage).  Without
-    -- this the sensory text for cell A would regularly land on top
-    -- of cell B's label one row down.  Column padding is also more
-    -- generous (4 cells) so pixel nudges left/right can't bring
-    -- neighbouring labels into contact.
+    -- Check if two cells overlap.  Rows within 1 of each other are
+    -- a collision: the label gets a ±¼-cell pixel nudge (one-row
+    -- leakage), and labels on the same row obviously clash.  Two
+    -- rows apart is fine even though one cell's sensory-fragment
+    -- text renders at row+1 — it lives to the right of the other
+    -- cell's starting column in practice, and the column padding
+    -- below catches any horizontal overlap that would bridge the
+    -- two.  Keeping this at <= 1 is important for maps with many
+    -- neighbours: 5–6 cells don't fit if we require 3-row spacing.
     overlaps :: HUDCell -> HUDCell -> Bool
     overlaps a b =
-      let rowsClose = abs (hudRow a - hudRow b) <= 2
-          pad      = 4
+      let rowsClose = abs (hudRow a - hudRow b) <= 1
+          pad      = 3
           aEnd = hudCol a + length (hudLabel a) + pad
           bEnd = hudCol b + length (hudLabel b) + pad
           colsOverlap = not (aEnd <= hudCol b || bEnd <= hudCol a)
