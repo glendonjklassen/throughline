@@ -46,6 +46,7 @@ module GameTypes
               , ModifyRelation, Say, Think, Narrate, NarratePool, SetLocation
               , OnExpire, CycleMany, Cycle, Dialogue
               , SetLocationRandom, SetLocationAdjacent, SetLocationAdjacentPrefer
+              , JournalEntry, AdvanceDay
               , DoNothing
               )
   , Effect(..)
@@ -260,15 +261,21 @@ instance Bounded StatType where
   maxBound = Perceived maxBound
 
 instance Enum StatType where
-  fromEnum (Capacity c)      = fromEnum c           -- 0-6
-  fromEnum Trust              = 7
-  fromEnum (Perceived c)     = 8 + fromEnum c       -- 8-14
+  fromEnum (Capacity c)   = fromEnum c                              -- 0..capMax
+  fromEnum Trust          = capMax + 1                              -- capMax+1
+  fromEnum (Perceived c)  = capMax + 2 + fromEnum c                 -- capMax+2..2*capMax+2
 
   toEnum n
-    | n >= 0,  n <= 6  = Capacity (toEnum n)
-    | n == 7           = Trust
-    | n >= 8,  n <= 14 = Perceived (toEnum (n - 8))
-    | otherwise        = error ("StatType.toEnum: out of range " ++ show n)
+    | n >= 0,       n <= capMax          = Capacity  (toEnum n)
+    | n == capMax + 1                    = Trust
+    | n >= capMax + 2, n <= 2*capMax + 2 = Perceived (toEnum (n - capMax - 2))
+    | otherwise = error ("StatType.toEnum: out of range " ++ show n)
+
+-- | Highest 'fromEnum' value of a 'CapacityStat'.  Drives the index
+-- ranges in the 'Enum StatType' instance above so new capacity stats
+-- slot in without having to hand-update bounds.
+capMax :: Int
+capMax = fromEnum (maxBound :: CapacityStat)
 
 -- ---------------------------------------------------------------------------
 -- Relationship helpers

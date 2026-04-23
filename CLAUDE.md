@@ -2,6 +2,8 @@
 
 ## Ongoing Work
 
+> **Status (2026-04-21):** The iteration loop described below was semi-successful and is no longer actively run — lately I've been vibe coding on my own rather than looping. The docs are retained for posterity and in case the loop is resumed.
+
 The work in this section is to be addressed by Claude during its iteration loop.
 
 ### Augmentations
@@ -120,9 +122,9 @@ SDL2 system libraries are required before `stack build`:
 
 Run tests with `stack test`.
 
-### Protocol: write the test before the implementation
+### Protocol: tests are the arbiter of correctness
 
-When a change is complex enough that assertions could be tainted by your implementation — i.e. a change where it'd be tempting to nudge the test to match whatever you just coded — write the test first, watch it fail, *then* implement. Committing source and test together in one commit is fine; the rule is about write-order, not commit granularity.
+When writing code, don't update tests until you know why they're failing, and only update tests expected to fail. Those unexpected to fail need further consideration — the source change may be wrong, not the test.
 
 ### When logic gets complex, test first
 

@@ -118,6 +118,7 @@ pinnedDeerHunt you =
       pinned = filter (\a -> axiomId a `notElem`
                   [ ScenarioAxiom "deerMovement"
                   , ScenarioAxiom "spook"
+                  , ScenarioAxiom "dayRollover"
                   ]) (scenarioAxioms base)
       w0 = scenarioInitial base
       w0pinned = w0 { worldLocations = Map.insert deer fieldEnd (worldLocations w0) }
@@ -169,6 +170,8 @@ findHitTick you offset =
                      , worldSeed = 0
                      , worldLocationHistory = Map.empty
                      , worldLocationVisits  = Map.empty
+                     , worldJournal         = []
+                     , worldDayNumber       = 1
                      }
            , doesShotHit w you
            ] of
@@ -268,10 +271,12 @@ spec = describe "DeerHunt multiplayer merge" $ do
         Left err -> expectationFailure ("merge failed: " <> show err)
         Right w  -> checkCondition w (HasWorldTag deerKilled) `shouldBe` True
 
-    it "terminal condition fires on merged world" $ do
+    it "deerKilled survives the merge (day-rollover stripped so the tag persists)" $ do
+      -- In the full scenario, a kill triggers day rollover which clears
+      -- deerKilled.  These tests use 'pinnedKillHunt' (rollover disabled)
+      -- specifically to exercise CRDT propagation of the tag itself.
       w <- killSnapshotMerge killScript bystander
-      let terminal = scenarioTerminal (deerHunt fixtureSeed youB)
-      checkCondition w terminal `shouldBe` True
+      checkCondition w (HasWorldTag deerKilled) `shouldBe` True
 
   describe "co-located kill — both hunters near the deer" $ do
 

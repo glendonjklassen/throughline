@@ -2,15 +2,18 @@ module Scenarios.DeerHunt.Axioms (allAxioms, dawnRule, hunterArrivalMergeAxiom) 
 
 import           Data.Maybe        (fromMaybe)
 import qualified Data.Map.Strict as Map
-import           Engine.Author.CommonAxioms  (weatherNarrationAxiom)
+import           Engine.Author.CommonAxioms  (timeOfDayNarrationAxiom, weatherNarrationAxiom)
 import           Engine.Author.DSL
+import           Engine.Core.Time            (TimePhase(..))
 import           Engine.Author.Random        (rollCheck, rollChoice, rollD)
 import           Engine.CRDT.ORSet           (orToList)
 import           GameTypes
 import           Scenarios.DeerHunt.Constants
+import           Scenarios.DeerHunt.Discoveries (arrivalDiscoveryAxiom, findDiscoveryAxiom)
+import           Scenarios.DeerHunt.Rack        (currentRack, describeRack)
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
 import           Scenarios.DeerHunt.Probability
-import           Scenarios.DeerHunt.World      (HuntWorld(..), hwClass, hwLocsOfClass, hwNearestTruck)
+import           Scenarios.DeerHunt.World      (HuntWorld(..), hwClass, hwLocsOfClass, hwNearestTruck, hwStart)
 
 -- ---------------------------------------------------------------------------
 -- Shared predicate
@@ -43,7 +46,148 @@ allAxioms hw you =
   , nightfallAxiom hw you
   , tensionAxiom you
   , weatherNarrationAxiom weatherDesc
+  , timeOfDayNarrationAxiom deerHuntPhaseProse
+  , dayRolloverAxiom hw you
+  , arrivalDiscoveryAxiom hw you
+  , findDiscoveryAxiom hw you
+  , handFeelAxiom
+  , rareEventAxiom
   ]
+
+-- ---------------------------------------------------------------------------
+-- Rare events
+-- ---------------------------------------------------------------------------
+
+-- | Small catalog of once-in-a-while atmospheric beats — a coyote
+-- along the treeline, a distant shot, geese overhead.  These are
+-- ephemeral (unlike the location-bound rare finds), firing whenever
+-- their per-tick roll lands.  Each event is its own small story worth
+-- a journal line.
+data RareEvent = RareEvent
+  { reNarrate  :: String
+  , reJournal  :: String
+  }
+
+rareEventPool :: [RareEvent]
+rareEventPool =
+  [ RareEvent
+      "A coyote slides along the treeline, not looking at you, and is gone."
+      "Saw a coyote track the treeline. Didn't see me."
+  , RareEvent
+      "A shot rolls across the section from somewhere east. Not yours."
+      "Heard a shot east of me. Someone else out here today."
+  , RareEvent
+      "A vee of geese heads south. You hear them before you see them."
+      "Geese going south, high up."
+  , RareEvent
+      "A flurry kicks up out of nowhere and is done in thirty seconds."
+      "Quick snow flurry mid-morning. Felt late-fall."
+  , RareEvent
+      "Skunk on the wind. Somewhere not close enough to worry about."
+      "Skunk on the air."
+  , RareEvent
+      "A small plane crosses the sky high up. You watch until it's past."
+      "Small plane overhead."
+  , RareEvent
+      "A red-tail slides off a fencepost and out over the stubble."
+      "Hawk hunting the stubble edge."
+  , RareEvent
+      "Somewhere to the north, a single owl call. Big one."
+      "Heard a horned owl north of me."
+  ]
+
+-- | Rare-event axiom.  A low per-tick chance picks one event from
+-- the pool; if it fires, prose plus a journal line are emitted.
+-- Events can repeat across days — they're atmosphere, not
+-- collectibles.  Silent at the truck and during rollover.
+rareEventAxiom :: Axiom
+rareEventAxiom = Axiom
+  { axiomId       = ScenarioAxiom "rareEvent"
+  , axiomPriority = 6
+  , axiomEvaluate = \world _actions _diff ->
+      if not (eligible world) || null rareEventPool
+        then []
+        else
+          let tick = lcTick (worldClock world)
+              hit  = (tick * 2654435761 + 991) `mod` 1000 < rareEventChanceX10
+              ev   = rareEventPool !! ((tick `div` 3) `mod` length rareEventPool)
+          in if hit
+               then [ immediate (Narrate  (reNarrate ev))
+                    , immediate (JournalEntry (reJournal ev))
+                    ]
+               else []
+  }
+  where
+    eligible world =
+      not (hasTag world backAtTruck)
+      && not (hasTag world dayOver)
+      && not (hasTag world seasonOver)
+
+-- | Rare-event fire chance, expressed in tenths of a percent.  25 =
+-- 2.5% per tick.  Tunable.
+rareEventChanceX10 :: Int
+rareEventChanceX10 = 25
+
+-- ---------------------------------------------------------------------------
+-- Hand-feel beats
+-- ---------------------------------------------------------------------------
+
+-- | One-line body-state anchors sprinkled into the hunt.  Fires at a
+-- low per-tick rate so the hunter feels embodied — mittens, thermos,
+-- knees after a sit — without turning the log into a running stream
+-- of small observations.  Silent during the morning/dusk montage,
+-- the truck, and the post-hunt wrap.
+handFeelAxiom :: Axiom
+handFeelAxiom = Axiom
+  { axiomId       = ScenarioAxiom "handFeel"
+  , axiomPriority = 6
+  , axiomEvaluate = \world _actions _diff ->
+      if not (eligible world)
+        then []
+        else
+          let tick = lcTick (worldClock world)
+              roll = (tick * 2654435761 + 17) `mod` 100
+              idx  = (tick `div` 7) `mod` length handFeelPool
+          in [immediate (Narrate (handFeelPool !! idx)) | roll < handFeelChancePct]
+  }
+  where
+    -- Skip when the hunter is at the truck or the day/season is
+    -- winding down — body-state prose on those ticks would clash
+    -- with the montage.
+    eligible world =
+      not (hasTag world backAtTruck)
+      && not (hasTag world dayOver)
+      && not (hasTag world seasonOver)
+
+handFeelChancePct :: Int
+handFeelChancePct = 6   -- ~1 in 17 ticks; tunable
+
+handFeelPool :: [String]
+handFeelPool =
+  [ "Your hands are cold inside the mittens."
+  , "You pull the thermos out. Coffee still warm, just."
+  , "Your knees remind you about the long sit earlier."
+  , "You rub your thumb along the stock out of habit."
+  , "Breath condensing on your eyelashes."
+  , "Your boots have settled into the ground a little."
+  , "You flex your trigger finger. It's stiff."
+  , "You shift the rifle sling off the sore shoulder."
+  , "The cold has found a seam in your coat."
+  , "You sniff. The air has that frost-on-metal smell."
+  ]
+
+-- | Prose lines for DeerHunt's time-of-day transitions.  Returning
+-- 'Nothing' for a phase suppresses that beat — we skip the three-
+-- ways-to-say-midday moments to keep the voice spare.
+deerHuntPhaseProse :: TimePhase -> Maybe String
+deerHuntPhaseProse Dawn       = Just "First light. Grass blue. Your breath hangs in the air."
+deerHuntPhaseProse Morning    = Just "Sun's up. Frost starting to give on the south sides."
+deerHuntPhaseProse Midday     = Just "High sun. The section goes flat, colorless for a while."
+deerHuntPhaseProse Afternoon  = Just "Afternoon. Shadows get long and brown again."
+deerHuntPhaseProse GoldenHour = Just "The light goes amber. Everything stands out."
+deerHuntPhaseProse Dusk       = Just "Dusk. Legal light running out. You start listening harder."
+deerHuntPhaseProse Night      = Just "Full dark. Stars visible already."
+deerHuntPhaseProse _          = Nothing
 
 -- ---------------------------------------------------------------------------
 -- Wind drift
@@ -209,7 +353,7 @@ spookAxiom hw you = Axiom
 -- in the same terrain class of the section.  Clears DeerSpooked after
 -- one tick so the deer can be found again.
 deerPresenceAxiom :: HuntWorld -> CharId -> Axiom
-deerPresenceAxiom hw you = Axiom
+deerPresenceAxiom _hw you = Axiom
   { axiomId       = ScenarioAxiom "deerPresence"
   , axiomPriority = 3
   , axiomEvaluate = \world _actions _diff ->
@@ -219,13 +363,24 @@ deerPresenceAxiom hw you = Axiom
           sameNode  = case (playerLoc, deerLoc) of
             (Just pl, Just dl) -> pl == dl
             _                  -> False
-          sameClass = case (playerLoc, deerLoc) of
-            (Just pl, Just dl) -> hwClass hw pl == hwClass hw dl
-            _                  -> False
+          -- Close = same named zone (e.g. both in "North Field"), not
+          -- just same terrain class.  Class-level matching covered the
+          -- whole section — bush anywhere on the map, field anywhere —
+          -- so freshSign and its tension bump kept firing when the deer
+          -- was on the far side of things.  Zone granularity keeps the
+          -- cue honest: you're actually near him, not just in similar
+          -- terrain.
+          regions   = lgRegions (worldLocationGraph world)
+          close     = case (playerLoc, deerLoc) of
+            (Just pl, Just dl) ->
+              case (Map.lookup pl regions, Map.lookup dl regions) of
+                (Just ra, Just rb) -> ra == rb
+                _                  -> False
+            _ -> False
           clearSpotted = [immediate (RemoveWorldTag deerSpotted) | hasTag world deerSpotted && not sameNode && not over]
-          clearSign    = [immediate (RemoveWorldTag freshSign) | hasTag world freshSign && not sameClass && not over]
+          clearSign    = [immediate (RemoveWorldTag freshSign) | hasTag world freshSign && not close && not over]
           clearSpooked = [immediate (RemoveWorldTag deerSpooked) | hasTag world deerSpooked]
-          addSign      = [immediate (AddWorldTag freshSign) | sameClass && not (hasTag world freshSign) && not over]
+          addSign      = [immediate (AddWorldTag freshSign) | close && not (hasTag world freshSign) && not over]
       in if over then clearSpotted ++ clearSign
          else clearSpotted ++ clearSign ++ clearSpooked ++ addSign
   }
@@ -403,9 +558,11 @@ nightfallAxiom hw you = Axiom
           truck    = hwNearestTruck hw startLoc
       in if evening && not (huntOver world)
          then [ immediate (Narrate "The light is going. Legal shooting is over. You mark your spot mentally and head back to the road.")
+              , immediate (JournalEntry "Ran out of light. Tomorrow.")
               , immediate (SetLocation you truck)
               , immediate (AddWorldTag nightFall)
               , immediate (AddWorldTag backAtTruck)
+              , immediate (AddWorldTag dayOver)
               , immediate (RemoveWorldTag deerSpotted)
               , immediate (RemoveWorldTag freshSign)
               , immediate (RemoveWorldTag movingFast)
@@ -486,3 +643,51 @@ hunterArrivalMergeAxiom you = MergeAxiom
       in [ immediate (Narrate "There's another hunter on the section. You didn't hear them come in.")
          | any arrivedHere (mergeLocations md) ]
   }
+
+-- ---------------------------------------------------------------------------
+-- Day rollover
+-- ---------------------------------------------------------------------------
+
+-- | When 'dayOver' is set (by a kill, a miss, or the player calling it
+-- for the day), wrap the day: narrate the drive-home / morning-back
+-- montage, write the summary into the journal, grant +1 Experience,
+-- advance the day counter, clear per-day tags, move the player to the
+-- truck, and re-place the buck somewhere new.  The section of land
+-- stays the same.  Long-lived location tags (seeded treasure sign)
+-- persist.
+dayRolloverAxiom :: HuntWorld -> CharId -> Axiom
+dayRolloverAxiom hw you = Axiom
+  { axiomId       = ScenarioAxiom "dayRollover"
+  , axiomPriority = 100
+  , axiomEvaluate = \world _actions diff ->
+      if dayOver `notElem` diffWorldTagsAdded diff
+        then []
+        else
+          let killed  = hasTag world deerKilled
+              missed  = hasTag world deerGone
+              rack    = currentRack hw (worldDayNumber world)
+              summary
+                | killed    = "End of the day. Took the buck. " <> describeRack rack <> ". Meat in the freezer."
+                | missed    = "End of the day. Missed my chance. He's off the section."
+                | otherwise = "End of the day. Called it early; the section felt cooked."
+              -- New-day buck placement: anywhere in bush or ridge,
+              -- seeded so it varies across hunts.
+              buckSpots = hwLocsOfClass hw CBush ++ hwLocsOfClass hw CRidge
+              nextDay = worldDayNumber world + 1
+          in concat
+               [ [ immediate (JournalEntry summary)
+                 , immediate (Narrate "The drive home. Kitchen light. The knife, the hose, a cold beer. Bed.")
+                 , immediate (Narrate "5:15 AM. Coffee in the dark. The drive back out.")
+                 ]
+               , map (immediate . RemoveWorldTag) allDayScopedTags
+               , [ immediate (ModifyRelation Truth you (Capacity Experience) 1)
+                 , immediate AdvanceDay
+                 , immediate (JournalEntry ("\x2014 " <> formatHuntDate nextDay <> " \x2014"))
+                 , immediate (SetLocation you (hwStart hw))
+                 , immediate (SetLocationRandom deer saltDayRollover buckSpots)
+                 ]
+               ]
+  }
+  where
+    saltDayRollover :: Int
+    saltDayRollover = 87551

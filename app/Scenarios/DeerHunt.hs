@@ -3,6 +3,7 @@ module Scenarios.DeerHunt (deerHunt, deerHuntDisplay) where
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 
+import           Engine.CRDT.ORSet      (orMember)
 import           Engine.Core.Conditions (checkCondition)
 import           SDL.Layout
 import           SDL.Palette  (Color, zoneTintDefault)
@@ -12,6 +13,7 @@ import           Scenarios.DeerHunt.Actions     (allActions)
 import           Scenarios.DeerHunt.Axioms      (allAxioms, dawnRule,
                                                  hunterArrivalMergeAxiom)
 import           Scenarios.DeerHunt.Constants
+import           Scenarios.DeerHunt.Discoveries (discoveryCatalog)
 import           Scenarios.DeerHunt.Generation  (TerrainClass(..))
 import           Scenarios.DeerHunt.Narration   (sensoryFragment)
 import           Scenarios.DeerHunt.Probability (experience)
@@ -31,7 +33,7 @@ deerHunt seed you =
        , scenarioMergeAxioms  = [hunterArrivalMergeAxiom you]
        , scenarioRules        = [dawnRule you]
        , scenarioMergeRules   = []
-       , scenarioTerminal     = Any [HasWorldTag deerKilled, HasWorldTag hunterShot, HasWorldTag deerGone]
+       , scenarioTerminal     = Any [HasWorldTag seasonOver, HasWorldTag hunterShot]
        , scenarioDebugDefault = Off
        , scenarioPlayerCharId = you
        }
@@ -49,20 +51,66 @@ deerHuntDisplay = ScenarioDisplay
   , sdLocationSparkle = locationSparkle
   , sdZoneTintFor     = deerHuntZoneTint
   , sdSensoryFor      = deerHuntSensory
+  , sdCatalog         = discoveryCatalog
+  , sdDayLabel        = formatHuntDate
   }
 
+
 -- | Pick a fleeting sensory fragment for a neighbor label during the
--- incremental reveal.  Uses the location's terrain class plus an
--- Interior/Edge/Bridge approximation derived from whether any of its
--- graph neighbours cross a class boundary.
+-- incremental reveal.  Usually draws from the terrain's pool, but
+-- when the world state suggests the deer is nearby (freshSign in
+-- the zone) the fragment has a chance to land on a "hint" line —
+-- a stick crack, a shape at the edge of vision — so the ambient
+-- beat quietly doubles as information.
 deerHuntSensory :: GameWorld -> Location -> Int -> Maybe String
 deerHuntSensory world loc salt =
   case Map.lookup loc (lgRegions (worldLocationGraph world)) of
     Just (Region name) ->
       let cls  = regionClassHint name
           hint = positionHintFor world loc
-      in Just (sensoryFragment cls hint salt)
+          base = sensoryFragment cls hint salt
+      in Just (situationalOverride world salt base)
     Nothing -> Nothing
+
+-- | Choose a context-sensitive override for a base sensory line.
+-- A deterministic per-salt roll decides between the base line and a
+-- hint line drawn from an appropriate pool.  Kept intentionally
+-- low-frequency: a player who never sees a hint still reads a
+-- coherent ambient fragment every turn.
+situationalOverride :: GameWorld -> Int -> String -> String
+situationalOverride world salt base
+  | inZone && roll < 0.35 = pickFrom huntHintFragments
+  | spotted && roll < 0.6 = pickFrom sightingFragments
+  | otherwise             = base
+  where
+    inZone        = orMember freshSign (worldTags world)
+    spotted       = orMember deerSpotted (worldTags world)
+    roll          = let r = abs salt `mod` 1000 in fromIntegral r / 1000 :: Double
+    pickFrom xs
+      | null xs   = base
+      | otherwise = xs !! (abs salt `mod` length xs)
+
+-- | Ambient lines that plausibly hint at nearby deer without naming
+-- them.  Used when freshSign is present in the player's zone.
+huntHintFragments :: [String]
+huntHintFragments =
+  [ "a stick crack that wasn't your boot"
+  , "pause — a shape that wasn't there"
+  , "something alive in here with you"
+  , "movement at the edge of vision"
+  , "your hair goes up for no reason"
+  , "the woods hold their breath a second"
+  ]
+
+-- | Fragments for when the deer is actually spotted — more direct,
+-- less "maybe."  Punchier language because the player already knows.
+sightingFragments :: [String]
+sightingFragments =
+  [ "you can see the breath on his nose"
+  , "brown line of a back against the grey"
+  , "he hasn't winded you yet"
+  , "antlers catching what light there is"
+  ]
 
 -- | Approximate 'TerrainClass' from a generated region name's last
 -- word.  The generator always tags regions with their class in the

@@ -5,6 +5,7 @@ import           Test.Hspec
 import qualified Engine.Core.AxiomsSpec
 import qualified Engine.ChainSpec
 import qualified Engine.Core.ConditionsSpec
+import qualified Engine.Core.TimeSpec
 import qualified Engine.Author.CommonAxiomsSpec
 import qualified Engine.Author.DSLSpec
 import qualified Engine.Author.SceneSpec
@@ -19,6 +20,14 @@ import qualified Engine.Sync.ConvergenceSpec
 import qualified Engine.CRDT.ORSetPropSpec
 import qualified Engine.CRDT.PNCounterPropSpec
 import qualified Engine.JSONRoundTripSpec
+import qualified SDL.AchievementsSpec
+import qualified SDL.AudioBackendSpec
+import qualified SDL.ClickMapSpec
+import qualified SDL.CrashHandlerSpec
+import qualified SDL.PaletteSpec
+import qualified SDL.SaveSlotsSpec
+import qualified SDL.SettingsSpec
+import qualified SDL.SteamInputSpec
 import qualified SDL.TextSpec
 import qualified Engine.DiffPropSpec
 import qualified Engine.Core.WorldSpec
@@ -37,6 +46,7 @@ import qualified Scenarios.TopBuySpec
 main :: IO ()
 main = hspec $ do
   Engine.Core.ConditionsSpec.spec
+  Engine.Core.TimeSpec.spec
   Engine.Core.EffectsSpec.spec
   Engine.Author.CommonAxiomsSpec.spec
   Engine.Author.DSLSpec.spec
@@ -54,6 +64,14 @@ main = hspec $ do
   Engine.CRDT.ORSetPropSpec.spec
   Engine.CRDT.PNCounterPropSpec.spec
   Engine.JSONRoundTripSpec.spec
+  SDL.AchievementsSpec.spec
+  SDL.AudioBackendSpec.spec
+  SDL.ClickMapSpec.spec
+  SDL.CrashHandlerSpec.spec
+  SDL.PaletteSpec.spec
+  SDL.SaveSlotsSpec.spec
+  SDL.SettingsSpec.spec
+  SDL.SteamInputSpec.spec
   SDL.TextSpec.spec
   Engine.DiffPropSpec.spec
   Engine.Core.WorldSpec.spec

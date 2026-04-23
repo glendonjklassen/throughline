@@ -1,13 +1,20 @@
+{-# LANGUAGE CPP           #-}
 {-# LANGUAGE TupleSections #-}
 -- | SDL2 game runner: constructs a RuntimeUI that renders to an SDL2 window.
 module SDL.Runner (sdlUI) where
 
+-- The two 'SDL.Debug' imports below look redundant to hlint, but the
+-- second one is CPP-guarded so 'cycleDebug' stays out of release
+-- builds.  Suppress the hint so CI doesn't flag it.
+{- HLINT ignore "Use fewer imports" -}
+
 import           Control.Monad           (unless, when)
 import           Control.Monad.IO.Class (liftIO)
+import           Data.Foldable           (for_)
 import           Control.Monad.Reader   (asks)
 import           Control.Monad.State    (get)
 import           Data.IORef
-import           Data.List       (find, sortOn)
+import           Data.List       (find, partition, sortOn)
 import qualified Data.Map.Strict as Map
 import           Data.Maybe      (fromMaybe)
 import           Data.Word       (Word32)
@@ -23,31 +30,60 @@ import           GameTypes
 import           MonadStack
 
 import           SDL.Animation
+import           SDL.ClickMap          (hitTest)
+import           SDL.Settings          (Settings(..), loadSettings,
+                                        viewportRecommendedFontScale, viewportSize)
+import           SDL.SharedFolder      (SharedBroadcastResult(..), broadcastLog)
 import           SDL.FontContext
 import           SDL.InputHandler
 import           SDL.Palette
 import           SDL.Renderer
-import           SDL.SpatialHUD        (SpatialHUD(..), HUDCell(..), layoutHUD)
+import           SDL.SpatialHUD        (SpatialHUD(..), HUDCell(..), hudClickMap,
+                                        layoutHUD, hudGenRowCount)
 import           SDL.Text              (stripAnsi, wrapWords)
-import           SDL.Debug             (cycleDebug, learningModeLines)
+import           SDL.Debug             (learningModeLines)
+#ifndef RELEASE_BUILD
+import           SDL.Debug             (cycleDebug)
+#endif
 import           SDL.Layout            (ScenarioDisplay(..), LayoutConfig(..))
 
 -- | Font asset path (relative to working directory).
 fontPath :: FilePath
 fontPath = "assets/JetBrainsMono-Regular.ttf"
 
--- | Construct an SDL2-based RuntimeUI from a ScenarioDisplay.
-sdlUI :: ScenarioDisplay -> RuntimeUI
-sdlUI display = RuntimeUI
+-- | Build an SDLContext honoring the player's current settings —
+-- viewport preset, font-scale, palette mode.  Used for every runner
+-- surface (game loop, end screen, error/warn, merge prompt) so
+-- settings apply to gameplay rendering, not just launcher menus.
+initSDLFromSettings :: String -> IO SDLContext
+initSDLFromSettings title = do
+  settings <- loadSettings
+  let vp    = sViewport settings
+      scale = viewportRecommendedFontScale vp * sFontScale settings
+      mode  = if sHighContrast settings then HighContrast else Autumn
+  initSDLWith fontPath title (viewportSize vp) scale mode
+
+-- | Construct an SDL2-based RuntimeUI from a ScenarioDisplay.  The
+-- scenario name is threaded through so the journal's
+-- "text your friends" action knows which scenario is being
+-- broadcast (the shared folder is per-player, multi-scenario).
+sdlUI :: String -> ScenarioDisplay -> RuntimeUI
+sdlUI scenName display = RuntimeUI
   { uiSetup     = pure ()
   , uiTeardown  = pure ()
   , uiGameLoop  = \env world -> do
-      ctx <- initSDL fontPath
-      result <- runApp env world (sdlGameLoop ctx display)
+      ctx <- initSDLFromSettings scenName
+      -- Gameplay is keyboard-first; hide the system cursor so it
+      -- doesn't float over the prose.  Clicks still register —
+      -- SDL dispatches mouse-button events whether or not the
+      -- cursor is visible.
+      SDL.cursorVisible SDL.$= False
+      result <- runApp env world (sdlGameLoop ctx scenName display)
+      SDL.cursorVisible SDL.$= True
       freeSDL ctx
       pure result
   , uiOnEnd     = \finalW -> do
-      ctx <- initSDL fontPath
+      ctx <- initSDLFromSettings scenName
       clearSDL ctx
       let fc = sdlFont ctx
       let endLines = sdEndScreen display finalW
@@ -59,21 +95,21 @@ sdlUI display = RuntimeUI
       _ <- awaitAnyKeySDL
       freeSDL ctx
   , uiOnError   = \msg -> do
-      ctx <- initSDL fontPath
+      ctx <- initSDLFromSettings scenName
       clearSDL ctx
       renderText (sdlFont ctx) ("Fatal: " <> msg) errorColor (2, 2)
       presentSDL ctx
       _ <- awaitKeySDL
       freeSDL ctx
   , uiOnWarn    = \msg -> do
-      ctx <- initSDL fontPath
+      ctx <- initSDLFromSettings scenName
       clearSDL ctx
       renderText (sdlFont ctx) msg warningColor (2, 2)
       presentSDL ctx
       _ <- awaitKeySDL
       freeSDL ctx
   , uiPromptMerge = \name count -> do
-      ctx <- initSDL fontPath
+      ctx <- initSDLFromSettings scenName
       clearSDL ctx
       let fc = sdlFont ctx
       renderText fc ("Foreign log from " <> name <> ": " <> show count <> " new action(s).") greyText (2, 2)
@@ -88,8 +124,8 @@ sdlUI display = RuntimeUI
 -- Game loop
 -- ---------------------------------------------------------------------------
 
-sdlGameLoop :: SDLContext -> ScenarioDisplay -> App ()
-sdlGameLoop ctx display = do
+sdlGameLoop :: SDLContext -> String -> ScenarioDisplay -> App ()
+sdlGameLoop ctx scenName display = do
   msgCountRef <- liftIO $ newIORef (0 :: Int)
   -- Stash last-rendered actions so the step hook can keep the HUD stable
   actionsRef  <- liftIO $ newIORef ([] :: [AnyAction])
@@ -99,18 +135,19 @@ sdlGameLoop ctx display = do
   -- animation — the HUD stays fully revealed.
   lastLocRef  <- liftIO $ newIORef (Nothing :: Maybe Location)
   coreLoop (sdlStepHook ctx display msgCountRef actionsRef)
-           (sdlActionSource ctx display msgCountRef actionsRef lastLocRef)
+           (sdlActionSource ctx scenName display msgCountRef actionsRef lastLocRef)
 
 -- | Action source: render the world, animate the spatial-HUD reveal,
 -- then await a keypress and map it to an action.  If the player hits
 -- a key during the reveal, we skip to the fully-revealed HUD and
 -- process that key as the selection input.
-sdlActionSource :: SDLContext -> ScenarioDisplay
+sdlActionSource :: SDLContext -> String -> ScenarioDisplay
                 -> IORef Int -> IORef [AnyAction] -> IORef (Maybe Location)
                 -> ActionSource
-sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
+sdlActionSource ctx scenName display countRef actionsRef lastLocRef actions = do
   world    <- get
   you      <- asks envPlayerCharId
+  playerId <- asks envPlayerId
   logRef   <- asks envMessageLog
   debugRef <- asks envDebug
   traceRef <- asks envAxiomTrace
@@ -134,7 +171,10 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
   -- Precompute the sorted cell list and per-cell sensory fragments so the
   -- animation loop doesn't re-derive them every frame.
   let totalCols = gridCols ctx
-      hud       = layoutHUD you world actions totalCols
+      totalRows = gridRows ctx
+      (grc, hasSp) = hudGenRowCount you world actions totalCols
+      hudLayout = computeLayout totalRows topBarRows 0 grc hasSp
+      hud       = layoutHUD you world actions totalCols (loSpatialBoxH hudLayout)
       sortedCells = sortOn hudDist (shSpatialCells hud)
       tick        = lcTick (worldClock world)
       salt0       = tick + hashLoc currentLoc
@@ -155,24 +195,286 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
   liftIO $ render finalReveal
   liftIO $ render finalReveal
   liftIO $ writeIORef lastLocRef currentLoc
-  liftIO (awaitKeyLoop actions debugRef skipChar)
+  liftIO (awaitKeyLoop playerId actions debugRef skipChar world render hud)
   where
-    awaitKeyLoop :: [AnyAction] -> IORef DebugMode -> Maybe Char -> IO (Maybe AnyAction)
-    awaitKeyLoop acts debugRef' pending = do
+    -- Split actions into the two pools the input handler expects:
+    -- non-movement actions land on the home row, movement actions
+    -- land on the top letter row.  Order within each pool matches
+    -- the action-list order so keys stay stable across turns.
+    partitionActions = partition (not . isMovement)
+    isMovement a = any (isSetLocation . effectBody) (anyActionEffects a)
+    isSetLocation (SetLocation _ _)           = True
+    isSetLocation SetLocationRandom {}        = True
+    isSetLocation (SetLocationAdjacent _ _)   = True
+    isSetLocation SetLocationAdjacentPrefer {}= True
+    isSetLocation _                           = False
+
+    awaitKeyLoop :: PlayerId -> [AnyAction] -> IORef DebugMode -> Maybe Char
+                 -> GameWorld -> (RevealFrame -> IO ()) -> SpatialHUD
+                 -> IO (Maybe AnyAction)
+    awaitKeyLoop pid acts debugRef' pending worldNow render' hudLayout = do
       mc <- case pending of
         Just c  -> pure (Just c)
-        Nothing -> awaitKeySDL
+        Nothing -> resolveInput ctx hudLayout acts
+      let (generals, movements) = partitionActions acts
       case mc of
-        Nothing   -> pure Nothing
-        Just 'q'  -> pure Nothing
-        Just 'd'  -> do
-          modifyIORef' debugRef' cycleDebug
-          awaitKeyLoop acts debugRef' Nothing
-        Just 'm'  ->
-          awaitKeyLoop acts debugRef' Nothing
-        Just c    -> case safeIndex c acts of
-          Just a  -> pure (Just a)
-          Nothing -> awaitKeyLoop acts debugRef' Nothing
+        Nothing -> pure Nothing
+        Just c
+          | c == quitKeyChar  -> do
+              confirmed <- confirmQuit ctx
+              drainSDLEvents
+              render' finalReveal
+              if confirmed
+                then pure Nothing
+                else awaitKeyLoop pid acts debugRef' Nothing worldNow render' hudLayout
+#ifndef RELEASE_BUILD
+          | c == debugKeyChar -> do
+              modifyIORef' debugRef' cycleDebug
+              awaitKeyLoop pid acts debugRef' Nothing worldNow render' hudLayout
+#endif
+          | c == '1' -> do
+              journalOverlayLoop ctx scenName pid display worldNow TabToday
+              drainSDLEvents
+              render' finalReveal
+              render' finalReveal
+              awaitKeyLoop pid acts debugRef' Nothing worldNow render' hudLayout
+          | Just a <- safeOptionIndexIn generalOptionKeys  c generals  -> pure (Just a)
+          | Just a <- safeOptionIndexIn movementOptionKeys c movements -> pure (Just a)
+          | otherwise -> awaitKeyLoop pid acts debugRef' Nothing worldNow render' hudLayout
+
+-- | Resolve a single input event — key, click, or touch — to a char
+-- the dispatch body understands.  Clicks are hit-tested against the
+-- gameplay HUD's click map; anything outside the map is treated as
+-- "no input, keep waiting".
+resolveInput :: SDLContext -> SpatialHUD -> [AnyAction] -> IO (Maybe Char)
+resolveInput ctx hudLayout _acts = go
+  where
+    go = do
+      me <- awaitInputSDL (sdlWindow ctx)
+      case me of
+        Nothing              -> pure Nothing
+        Just (KeyPress c)    -> pure (Just c)
+        Just (ClickAt px py) -> case hitTest (buildHUDClicks ctx hudLayout) px py of
+          Just c  -> pure (Just c)
+          Nothing -> go
+
+-- | Assemble the HUD's click regions in pixel space.  Mirrors the
+-- renderer's layout math so clicks land where the labels do.  The HUD
+-- now sits directly below the top bar, so click rows are
+-- computed from 'computeLayout' rather than bottom-aligned.
+buildHUDClicks :: SDLContext -> SpatialHUD -> [(Int, Int, Int, Int, Char)]
+buildHUDClicks ctx hud =
+  let fc   = sdlFont ctx
+      cw   = fromIntegral (cellWidth fc)  :: Int
+      chH  = fromIntegral (cellHeight fc) :: Int
+      cols = gridCols ctx
+      rws  = gridRows ctx
+      ml   = fromIntegral marginLeft      :: Int
+      genLabels    = shGeneralLabels hud
+      maxGenLen    = if null genLabels then 0 else maximum (map length genLabels)
+      genColW      = maxGenLen + 3
+      genNumCols   = max 1 ((cols - 4) `div` max 1 genColW)
+      genRowCount  = (length genLabels + genNumCols - 1) `div` max 1 genNumCols
+      hasSpatial   = not (null (shSpatialCells hud))
+      -- The renderer's click-layout cannot see the player's current
+      -- learning-mode / trace state cheaply, so assume it's off here:
+      -- learning mode is a dev tool, and if it's on the layout shifts
+      -- down uniformly (clicks land a few rows above the labels — not
+      -- ideal, but keyboard still works).
+      Layout{ loHudStart     = hudStartRow
+            , loSpatialTop   = spatialTopRow
+            , loGenRowStride = genStride
+            } =
+        computeLayout rws topBarRows 0 genRowCount hasSpatial
+      spatialLeft = (cols - shBoxWidth hud) `div` 2
+      gridHits = hudClickMap ml genColW genNumCols genStride hudStartRow
+                             spatialLeft spatialTopRow hud
+  in [ (col * cw, row * chH, w * cw, h * chH, c)
+     | (col, row, w, h, c) <- gridHits
+     ]
+
+-- | Ask the player to confirm a mid-hunt quit.  Every action autosaves
+-- so leaving truly costs nothing, but a stray Escape keypress shouldn't
+-- send them back to the launcher — confirmation protects against that.
+-- Accepts key presses and clicks on either option row.
+confirmQuit :: SDLContext -> IO Bool
+confirmQuit ctx = do
+  clearSDL ctx
+  let fc = sdlFont ctx
+  renderText fc "Quit hunt?"                              defaultText (3, 2)
+  renderText fc ""                                        dimText     (3, 3)
+  renderText fc "Your progress has been saved."           dimText     (3, 4)
+  renderText fc "You can pick up where you left off."     dimText     (3, 5)
+  renderText fc ""                                        dimText     (3, 6)
+  renderText fc "y) Yes, quit"                            defaultText (4, 8)
+  renderText fc "n) No, keep hunting"                     defaultText (4, 9)
+  presentSDL ctx
+  let yesRect = confirmRowRect fc 8 'y'
+      noRect  = confirmRowRect fc 9 'n'
+      cm = [yesRect, noRect]
+  loop cm
+  where
+    loop cm = do
+      me <- awaitInputSDL (sdlWindow ctx)
+      case me of
+        Nothing              -> pure False
+        Just (KeyPress c)    -> pure (c == 'y' || c == 'Y')
+        Just (ClickAt px py) -> case hitTest cm px py of
+          Just c  -> pure (c == 'y' || c == 'Y')
+          Nothing -> loop cm
+
+-- | Helper for the single-column confirmation dialogs: a full-width
+-- row at 'row' that resolves to 'ch' when clicked.
+confirmRowRect :: FontContext -> Int -> Char -> (Int, Int, Int, Int, Char)
+confirmRowRect fc row ch =
+  let cw = fromIntegral (cellWidth fc)  :: Int
+      hh = fromIntegral (cellHeight fc) :: Int
+  in (0, row * hh, 80 * cw, hh, ch)
+
+-- | Modal shown between ticks when a day rolled over.  Gives the
+-- player a moment to sit with the result — a kill, a miss, or
+-- calling it early — before the new morning's HUD loads.  The
+-- summary lines come straight from the journal entries the scenario
+-- just wrote, so the voice stays the scenario's own.
+dayEndOverlay :: SDLContext -> String -> [String] -> IO ()
+dayEndOverlay ctx dayLabel summary = do
+  clearSDL ctx
+  let fc   = sdlFont ctx
+      cols = gridCols ctx
+      rows = gridRows ctx
+      pageW = max 20 (cols - 2 * fromIntegral marginLeft - 4)
+      wrapped = concatMap (wrapWords pageW) summary
+      headerTxt = "\x2014  end of " <> dayLabel <> "  \x2014"
+      hintTxt   = "any key to continue"
+      -- Vertically center the header + prose block in the top two
+      -- thirds of the screen; hint sits two rows above the bottom.
+      blockH    = 3 + length wrapped  -- header + spacer + lines (approx)
+      headerRow = max 2 ((rows - blockH) `div` 2)
+      firstLine = headerRow + 3
+      hintRow   = rows - 3
+      centerCol s = fromIntegral (max 0 (cols `div` 2 - length s `div` 2))
+  renderText fc headerTxt defaultText (centerCol headerTxt, fromIntegral headerRow)
+  mapM_ (\(i, line) ->
+    renderText fc line defaultText (centerCol line, fromIntegral (firstLine + i))
+    ) (zip [0 :: Int ..] wrapped)
+  renderText fc hintTxt greyText (centerCol hintTxt, fromIntegral hintRow)
+  presentSDL ctx
+  drainSDLEvents
+  _ <- awaitInputSDL (sdlWindow ctx)
+  pure ()
+
+-- | Drive the journal overlay.  Pressing the number of a *different*
+-- tab switches to it; pressing the number of the *current* tab
+-- closes the overlay (so the key that opened the journal also
+-- closes it).  Any other key dismisses.
+--
+-- Clicks and touches work too: each tab word in the footer is a hit
+-- region that behaves exactly as pressing its digit would.  A click
+-- outside the footer (i.e. on the body or anywhere else) dismisses
+-- the overlay, same as pressing any non-tab key.
+journalOverlayLoop
+  :: SDLContext -> String -> PlayerId -> ScenarioDisplay
+  -> GameWorld -> JournalTab -> IO ()
+journalOverlayLoop ctx scenName playerId display world tab = do
+  renderJournalOverlay ctx display world tab
+  let fc = sdlFont ctx
+      rows = gridRows ctx
+      footerRow = rows - 2
+      -- Layout of the footer text "1 today  2 past  3 catalog   s share …"
+      -- Column positions are stable because marginLeft and the label
+      -- strings are fixed.
+      todayRect   = journalRect fc footerRow 0  7 '1'
+      pastRect    = journalRect fc footerRow 9  8 '2'
+      catalogRect = journalRect fc footerRow 19 11 '3'
+      shareRect   = journalRect fc footerRow 33 9 's'
+      cm = [todayRect, pastRect, catalogRect, shareRect]
+  me <- awaitInputSDL (sdlWindow ctx)
+  case me of
+    Nothing -> pure ()
+    Just (KeyPress c)    -> dispatch c
+    Just (ClickAt px py) ->
+      -- Click outside the tab row dismisses the overlay.
+      for_ (hitTest cm px py) dispatch
+  where
+    dispatch c
+      | c == currentTabKey tab = pure ()
+      | c == '1'               = journalOverlayLoop ctx scenName playerId display world TabToday
+      | c == '2'               = journalOverlayLoop ctx scenName playerId display world TabPast
+      | c == '3'               = journalOverlayLoop ctx scenName playerId display world TabCatalog
+      | c == 's' || c == 'S'   = do
+          shareWithFriends ctx scenName playerId
+          journalOverlayLoop ctx scenName playerId display world tab
+      | otherwise              = pure ()
+    currentTabKey TabToday   = '1'
+    currentTabKey TabPast    = '2'
+    currentTabKey TabCatalog = '3'
+
+-- | Handle the "text your friends" journal action.  Reads the
+-- configured shared folder from settings, broadcasts the current
+-- log to it, and shows a short status screen so the player knows
+-- whether the message got through.
+shareWithFriends :: SDLContext -> String -> PlayerId -> IO ()
+shareWithFriends ctx scenName playerId = do
+  settings <- loadSettings
+  clearSDL ctx
+  let fc = sdlFont ctx
+  case sSharedFolder settings of
+    Nothing -> do
+      renderText fc "No shared folder configured."     warningColor (3, 2)
+      renderText fc ""                                 dimText      (3, 3)
+      renderText fc "Pick a folder in Settings first"  dimText      (3, 4)
+      renderText fc "— a Dropbox / Drive / Syncthing"  dimText      (3, 5)
+      renderText fc "path that you and your friends"   dimText      (3, 6)
+      renderText fc "all point at.  Their hunts will"  dimText      (3, 7)
+      renderText fc "merge into yours automatically."  dimText      (3, 8)
+      renderText fc ""                                 dimText      (3, 9)
+      renderText fc "press any key or click to return" greyText     (3, 11)
+      presentSDL ctx
+      _ <- awaitInputSDL (sdlWindow ctx)
+      pure ()
+    Just dir -> do
+      result <- broadcastLog dir scenName playerId
+      renderShareResult fc result
+      presentSDL ctx
+      _ <- awaitInputSDL (sdlWindow ctx)
+      pure ()
+  where
+    renderShareResult fc result = case result of
+      Broadcast path -> do
+        renderText fc "Sent."                              defaultText  (3, 2)
+        renderText fc ""                                   dimText      (3, 3)
+        renderText fc "Your log was copied to:"            dimText      (3, 4)
+        renderText fc path                                 dimText      (3, 5)
+        renderText fc ""                                   dimText      (3, 6)
+        renderText fc "Your friends' hunts will merge"     dimText      (3, 7)
+        renderText fc "into yours next time their logs"    dimText      (3, 8)
+        renderText fc "are visible in that folder."        dimText      (3, 9)
+        renderText fc ""                                   dimText      (3, 10)
+        renderText fc "press any key or click to return"   greyText     (3, 12)
+      BroadcastNoLog -> do
+        renderText fc "Nothing to send yet."               dimText      (3, 2)
+        renderText fc ""                                   dimText      (3, 3)
+        renderText fc "Take a few actions first."          dimText      (3, 4)
+        renderText fc ""                                   dimText      (3, 5)
+        renderText fc "press any key or click to return"   greyText     (3, 7)
+      BroadcastFailed err -> do
+        renderText fc "Share failed."                      warningColor (3, 2)
+        renderText fc ""                                   dimText      (3, 3)
+        renderText fc (take 70 err)                        dimText      (3, 4)
+        renderText fc ""                                   dimText      (3, 5)
+        renderText fc "press any key or click to return"   greyText     (3, 7)
+
+-- | Build a single clickable rectangle for a tab label on the
+-- journal footer row.  Offset from 'marginLeft' matches the column
+-- where the corresponding text starts in the footer string.
+journalRect :: FontContext -> Int -> Int -> Int -> Char -> (Int, Int, Int, Int, Char)
+journalRect fc row offset widthCells c =
+  let cw = fromIntegral (cellWidth fc)  :: Int
+      ch = fromIntegral (cellHeight fc) :: Int
+      margin = fromIntegral marginLeft :: Int
+      x = (margin + offset) * cw
+      y = row * ch
+  in (x, y, widthCells * cw, ch, c)
 
 -- | Hash a location (or its absence) into an Int for seeded sensory
 -- selection.  Co-arrivals at the same tick and location pick the same
@@ -199,6 +501,12 @@ sensorySweepInMs  = 900
 sensoryHoldMs     = 1600
 sensorySweepOutMs = 900
 
+-- | Total on-screen life of a single sensory fragment, from first
+-- lit char to last dimmed char.  Drives sequential fragment pacing
+-- so only one fragment animates at a time.
+sensoryTotalMs :: Double
+sensoryTotalMs = sensorySweepInMs + sensoryHoldMs + sensorySweepOutMs
+
 -- | Animate the spatial-HUD reveal continuously at ~30fps, composing a
 -- 'RevealFrame' per frame from elapsed time.  Each cell gets a per-slot
 -- window of length @revealTotalMs / cellCount@ during which its label
@@ -213,23 +521,35 @@ animateReveal render [] = do
   render finalReveal
   pure Nothing
 animateReveal render cellsWithSense = do
-  let n        = length cellsWithSense
-      -- Labels and sensories share the same cell-to-cell cadence.
-      slotMs   = perCellOffsetMs
-      cellMeta = zip [0 :: Int ..] cellsWithSense
+  let n           = length cellsWithSense
+      -- Labels still stagger at the quick per-cell cadence so the
+      -- selection HUD reveals briskly; sensory fragments run
+      -- sequentially so only one animates at a time.
+      slotMs      = perCellOffsetMs
+      cellMeta    = zip [0 :: Int ..] cellsWithSense
+      -- Sense-order index: zero-based position among cells that
+      -- actually have a non-empty fragment.  Drives sequential
+      -- pacing so blank cells don't eat a slot.
+      senseOrder  = Map.fromList
+                      [ (hudLabel c, si)
+                      | (si, (c, _)) <- zip [0 :: Int ..]
+                          [ (c, f) | (_, (c, f)) <- cellMeta, not (null f) ]
+                      ]
+      numSenses   = Map.size senseOrder
       frameAt  :: Double -> RevealFrame
       frameAt elapsed = RevealFrame
         { rfCellAlpha = \cell ->
             case find (\(_, (c, _)) -> hudLabel c == hudLabel cell) cellMeta of
               Nothing     -> 0.0
               Just (i, _) -> labelAlphaAt elapsed (fromIntegral i * slotMs)
-        , rfActiveSenses = activeSensesAt elapsed cellMeta slotMs
+        , rfActiveSenses = activeSensesAt elapsed senseOrder cellMeta
         }
-      -- Last cell's sensory starts at (n-1)*slotMs + labelFadeIn and
-      -- runs its own sweep-in + hold + sweep-out.  Hold the animation
-      -- open at least that long so the final fragment completes.
-      totalMs = fromIntegral (n - 1) * slotMs + labelFadeInMs
-              + sensorySweepInMs + sensoryHoldMs + sensorySweepOutMs
+      -- Two ends: last label finishes fading in, and the last
+      -- fragment finishes its sweep-out.  Take the later of the two
+      -- so neither tail is clipped.
+      labelFinish = fromIntegral (n - 1) * slotMs + labelFadeInMs
+      senseFinish = labelFadeInMs + fromIntegral numSenses * sensoryTotalMs
+      totalMs     = max labelFinish senseFinish
   startTick <- SDL.ticks
   loop startTick frameAt totalMs
   where
@@ -243,10 +563,16 @@ animateReveal render cellsWithSense = do
           pure Nothing
         else do
           render (frameAt elapsed)
-          mc <- waitOrKeyChar 33
-          case mc of
-            Just c  -> pure (Just c)
-            Nothing -> loop start frameAt total
+          ri <- waitOrRevealInput 33
+          case ri of
+            RevealKey c  -> pure (Just c)
+            RevealSkip   -> do
+              -- Pointer tap during reveal: finish the animation but
+              -- don't dispatch a selection.  The player's next input
+              -- gets hit-tested against the fully-revealed HUD.
+              render finalReveal
+              pure Nothing
+            RevealTimeout -> loop start frameAt total
 
 -- | Alpha for a label given elapsed ms and the label's slot start ms.
 -- Before its slot opens: 0.  During fade-in window: ramps 0→1.  After
@@ -258,22 +584,23 @@ labelAlphaAt elapsed slotStart
       let t = (elapsed - slotStart) / labelFadeInMs
       in max 0.0 (min 1.0 t)
 
--- | Compute the currently active sensory fragments.  Each cell's
--- fragment has its own independent timeline anchored to that cell's
--- slot start: sweep-in (light enters from left), hold (fully lit),
--- sweep-out (shadow enters from left).  Late starters run past the
--- overall reveal window if they need to.  Empty fragments contribute
--- nothing.
+-- | Compute the currently active sensory fragments.  Fragments are
+-- scheduled sequentially — fragment @k@ starts exactly when fragment
+-- @k-1@ finishes its sweep-out — so a player who wants to soak in a
+-- screen can read each one fully before the next begins.  The
+-- sense-order index comes from @senseOrder@; cells with blank
+-- fragments are skipped and don't eat a slot.
 activeSensesAt
   :: Double                          -- ^ elapsed ms
-  -> [(Int, (HUDCell, String))]      -- ^ (slot index, (cell, fragment))
-  -> Double                          -- ^ slot length ms (unused; kept for signature symmetry)
+  -> Map.Map String Int              -- ^ hudLabel -> sense-order index
+  -> [(Int, (HUDCell, String))]      -- ^ (cell slot, (cell, fragment))
   -> [(HUDCell, Double, Bool, String)]
-activeSensesAt elapsed cellMeta _slotMs =
+activeSensesAt elapsed senseOrder cellMeta =
   [ r
-  | (i, (cell, frag)) <- cellMeta
+  | (_, (cell, frag)) <- cellMeta
   , not (null frag)
-  , let sStart   = fromIntegral i * perCellOffsetMs + labelFadeInMs
+  , Just si <- [Map.lookup (hudLabel cell) senseOrder]
+  , let sStart   = labelFadeInMs + fromIntegral si * sensoryTotalMs
         sweepEnd = sStart + sensorySweepInMs
         holdEnd  = sweepEnd + sensoryHoldMs
         totalEnd = holdEnd + sensorySweepOutMs
@@ -335,6 +662,10 @@ sdlStepHook ctx display countRef actionsRef before after _diff = do
   let newCount = length allMsgs
       newMsgs  = reverse (take (newCount - prevCount) allMsgs)
       tension  = getTension after
+      newJournal = drop (length (worldJournal before)) (worldJournal after)
+      crossedDay = any isDayMarker newJournal
+      summary    = dedupe (takeWhile (not . isDayMarker) newJournal)
+      endLabel   = sdDayLabel display (worldDayNumber before)
   if null newMsgs
     then pure ()
     else liftIO $ do
@@ -378,7 +709,27 @@ sdlStepHook ctx display countRef actionsRef before after _diff = do
       -- Drain lingering key events, brief pause, then done
       drainSDLEvents
       SDL.delay 400
-  liftIO $ writeIORef countRef newCount
+      -- Day-end transition: if the tick crossed a day boundary (the
+      -- scenario wrote a "— ... —" marker this tick), pause on a
+      -- recap modal before the new day's HUD loads.  Pulls the
+      -- scenario's pre-marker journal lines as the recap text, and
+      -- uses the ending day's label from 'sdDayLabel'.
+      when crossedDay $ do
+        dayEndOverlay ctx endLabel summary
+        -- New day, clean slate: the on-screen history starts fresh
+        -- so the morning HUD isn't cluttered with yesterday's beats.
+        -- 'worldJournal' is untouched, so the notebook tab still
+        -- remembers every day.
+        writeIORef logRef []
+  liftIO $ writeIORef countRef (if crossedDay then 0 else newCount)
+
+-- | Drop adjacent-duplicate entries.  The day-rollover axiom's
+-- "called it" path repeats the player's own journal entry; we'd
+-- rather show it once on the recap screen.
+dedupe :: [String] -> [String]
+dedupe (x:y:rest) | x == y = dedupe (x:rest)
+dedupe (x:rest)            = x : dedupe rest
+dedupe []                  = []
 
 -- ---------------------------------------------------------------------------
 -- Full-frame typewriter: re-renders the entire screen each tick so both
@@ -401,7 +752,6 @@ typewriteFullFrame
 typewriteFullFrame _   _      _          _         _          _     _   _     _           _      _        _        _  _      []    = pure ()
 typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn frame you world actions logRef debugRef traceRef fc labelW newLines = do
   let cols     = gridCols ctx
-      -- Compute where the history area starts (mirrors renderWorldFrame)
       rows     = gridRows ctx
       contentW = cols - fromIntegral marginLeft * 2 - 8
   debugMode <- readIORef debugRef
@@ -410,27 +760,32 @@ typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn frame you world ac
   let learnRowCount = if debugMode == Learning
                         then length (learningModeLines traces you world)
                         else 0
-      hud          = layoutHUD you world actions cols
-      hasSpatial   = not (null (shSpatialCells hud))
-      genLabels    = shGeneralLabels hud
-      maxGenLen    = if null genLabels then 0 else maximum (map length genLabels)
-      genColW      = maxGenLen + 3
-      genNumCols   = max 1 ((cols - 4) `div` max 1 genColW)
-      genRowCount  = length (chunksOf genNumCols genLabels)
-      spatialH     = if hasSpatial then shBoxHeight hud else 0
-      hudRows'     = 1 + 1 + genRowCount
-                       + (if hasSpatial then 1 + spatialH else 0) + 1
-      hudStartRow  = rows - hudRows'
-      histTop      = topBarRows + learnRowCount
-      histAvail    = hudStartRow - histTop - 1
-      -- How many old history lines are visible
-      allOrdered   = reverse allMsgs
-      oldLabelW    = maximum (0 : map (length . neTimeLabel) allOrdered)
+      (genRowCount, hasSpatial) = hudGenRowCount you world actions cols
+      Layout{loHistTop = histTop, loHistRows = histAvail} =
+        computeLayout rows topBarRows learnRowCount genRowCount hasSpatial
+      -- Reserve the bottom of the history area for the typewritten
+      -- new text; only show as many old lines as fit above it.
+      -- Without this, a burst of new narration (e.g. a kill plus the
+      -- rollover axiom's drive-home beats) would typewrite past the
+      -- last row of history and clip off-screen.
+      newLineCount = length newLines
+      availForOld  = max 0 (histAvail - newLineCount)
+      -- 'allMsgs' is newest-first; keep newest entries until their
+      -- formatted line count exhausts the budget, then stop.
+      oldLabelW    = maximum (0 : map (length . neTimeLabel) allMsgs)
       useLabelW    = max labelW oldLabelW
-      oldDispLines = concatMap (fmtOneEntry contentW useLabelW) allOrdered
-      oldVisCount  = min (length oldDispLines) (max 0 histAvail)
-      -- Row where new typewriter text starts
+      trimNewest _ []     = []
+      trimNewest b (e:es) =
+        let lns = length (fmtOneEntry contentW useLabelW e)
+        in if lns <= b then e : trimNewest (b - lns) es else []
+      trimmedOld   = trimNewest availForOld allMsgs
+      trimmedLines = concatMap (fmtOneEntry contentW useLabelW) (reverse trimmedOld)
+      oldVisCount  = length trimmedLines
       twStartRow   = fromIntegral (histTop + oldVisCount)
+  -- Swap the logRef to the trimmed set so 'renderWorldFrame' renders
+  -- exactly what we leave room for — no overlapping old lines under
+  -- the typewritten text.
+  writeIORef logRef trimmedOld
   -- Flatten new lines into individual characters with their screen row
   let charSteps = buildCharSteps newLines twStartRow
   go charSteps

@@ -142,6 +142,10 @@ executeBody (SetLocationAdjacentPrefer cid salt region) = do
         _  -> do
           let idx = scenarioSeed (lcTick (worldClock w)) salt `mod` length candidates
           modify (moveCharacter cid (candidates !! idx))
+executeBody (JournalEntry line)         =
+  modify (\w -> w { worldJournal = worldJournal w ++ [line] })
+executeBody AdvanceDay                  =
+  modify (\w -> w { worldDayNumber = worldDayNumber w + 1 })
 executeBody DoNothing                   = pure ()
 executeBody (OnExpire _ _)              = error "executeBody: compound body reached; currentBody must be called first"
 executeBody (CycleMany _ _)             = error "executeBody: compound body reached; currentBody must be called first"
@@ -219,6 +223,8 @@ applyWorldDiff diff = do
   mapM_ applyWTagAdded   (diffWorldTagsAdded diff)
   mapM_ applyWTagRemoved (diffWorldTagsRemoved diff)
   mapM_ applyLocDelta    (diffLocations diff)
+  mapM_ applyJournal     (diffJournal diff)
+  applyDayDelta          (diffDayDelta diff)
   where
     applyStatDelta :: StatDelta -> App ()
     applyStatDelta sd =
@@ -236,6 +242,11 @@ applyWorldDiff diff = do
     applyWTagAdded   tag        = executeBody (AddWorldTag tag)
     applyWTagRemoved tag        = executeBody (RemoveWorldTag tag)
     applyLocDelta    ld         = executeBody (SetLocation (locationDeltaChar ld) (locationDeltaTo ld))
+    applyJournal     line       = executeBody (JournalEntry line)
+    applyDayDelta :: Int -> App ()
+    applyDayDelta    d
+      | d > 0     = modify (\w -> w { worldDayNumber = worldDayNumber w + d })
+      | otherwise = pure ()
 
 -- | OR-Set merge for active effects: union by liveId, deduplicating shared entries.
 -- An effect present in both sides (same UUID) is kept once.
@@ -276,6 +287,13 @@ mergeWorlds a b = GameWorld
     -- Visit counts sum; merges double-count if both sides saw the same arrival,
     -- but that's a known consequence of snapshot merges (see the function's
     -- haddock).  The log-replay path is authoritative for contested state.
+  , worldJournal         = worldJournal a
+    -- Journal is the local player's own notebook and doesn't cross-merge.
+    -- A foreign player's journal entries reach us via log replay if we
+    -- subscribe to their log, not by snapshot union.
+  , worldDayNumber       = max (worldDayNumber a) (worldDayNumber b)
+    -- Day count takes the further-along of the two sides — catching up
+    -- rather than resetting when a trailing log is merged in.
   }
   where
     mergeChar ca cb      = ca { charTags = orMerge (charTags ca) (charTags cb) }

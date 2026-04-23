@@ -9,8 +9,10 @@ module SDL.SpatialHUD
   , TerrainSprite(..)
   , TrailMark(..)
   , layoutHUD
+  , hudGenRowCount
   , terrainSprites
   , terrainSpriteScatter
+  , hudClickMap
   , SpritePlacement(..)
   , trailMarks
   ) where
@@ -19,8 +21,9 @@ import           Data.List       (find, sortOn)
 import qualified Data.Map.Strict as Map
 import           Data.Maybe      (catMaybes)
 
-import           SDL.Palette (Color, separatorColor)
-import           SDL.Text    (stripAnsi)
+import           SDL.InputHandler (generalOptionKeys, movementOptionKeys, poolKeyFor)
+import           SDL.Palette      (Color, separatorColor)
+import           SDL.Text         (stripAnsi)
 import           GameTypes
 
 -- ---------------------------------------------------------------------------
@@ -35,6 +38,7 @@ import           GameTypes
 -- today's look.
 data HUDCell = HUDCell
   { hudLabel  :: String          -- ^ e.g. "4) North Road Ditch"
+  , hudKey    :: Char            -- ^ keyboard/click dispatch char for this cell, matching the label's prefix
   , hudCol    :: Int             -- ^ column offset within the spatial box
   , hudRow    :: Int             -- ^ row offset within the spatial box
   , hudTarget :: Maybe Location  -- ^ target location for movement cells, Nothing for other actions
@@ -90,54 +94,94 @@ movementTarget act = go (anyActionEffects act)
 -- Layout
 -- ---------------------------------------------------------------------------
 
--- | Build the spatial HUD layout.  If the world has no location graph with
--- coordinates, or the player has no known location, returns a flat layout
--- (all actions in shGeneralLabels, no spatial cells).
-layoutHUD :: CharId -> GameWorld -> [AnyAction] -> Int -> SpatialHUD
-layoutHUD you world actions totalCols =
-  case Map.lookup you (worldLocations world) of
-    Nothing       -> flatLayout actions
-    Just playerLoc ->
-      let lg = worldLocationGraph world
-      in case Map.lookup playerLoc (lgCoords lg) of
-           Nothing     -> flatLayout actions
-           Just (px, py) -> spatialLayout actions playerLoc (px, py) lg totalCols
+-- | Build the spatial HUD layout.  The caller passes the desired
+-- height of the spatial box in rows (@boxH@); the layout fills that
+-- budget so the sprite scatter and neighbour labels grow with the
+-- available vertical space.  A small value (e.g. 0 or negative) still
+-- renders — labels will cluster tightly — but callers typically size
+-- this by the 'computeLayout' result so the HUD fills the gap between
+-- top bar and history.
+--
+-- If the world has no location graph with coordinates, or the player
+-- has no known location, returns a flat layout (all actions in
+-- shGeneralLabels, no spatial cells).
+layoutHUD :: CharId -> GameWorld -> [AnyAction] -> Int -> Int -> SpatialHUD
+layoutHUD you world actions totalCols boxH =
+  let prevLoc = case Map.lookup you (worldLocationHistory world) of
+        Just (p:_) -> Just p
+        _          -> Nothing
+  in case Map.lookup you (worldLocations world) of
+       Nothing       -> flatLayout actions
+       Just playerLoc ->
+         let lg = worldLocationGraph world
+         in case Map.lookup playerLoc (lgCoords lg) of
+              Nothing     -> flatLayout actions
+              Just (px, py) -> spatialLayout actions prevLoc playerLoc
+                                             (px, py) lg totalCols boxH
 
--- | Fallback: all actions listed linearly.
+-- | Measure the HUD's general-action row count without doing the full
+-- spatial placement.  Callers use this to size the vertical budget of
+-- the spatial box before the real 'layoutHUD' call.  Also reports
+-- whether any movement action has a graph coord (and thus whether a
+-- spatial box will actually be rendered).
+hudGenRowCount :: CharId -> GameWorld -> [AnyAction] -> Int -> (Int, Bool)
+hudGenRowCount you world actions totalCols =
+  let measure = layoutHUD you world actions totalCols 0
+      genLabels = shGeneralLabels measure
+      maxGenLen = if null genLabels then 0 else maximum (map length genLabels)
+      genColW   = maxGenLen + 3
+      genNumCols = max 1 ((totalCols - 4) `div` max 1 genColW)
+      rowCount  = (length genLabels + genNumCols - 1) `div` max 1 genNumCols
+      hasSpatial = not (null (shSpatialCells measure))
+  in (rowCount, hasSpatial)
+
+-- | Prefix for the action with 1-based index @n@ drawn from the given
+-- key pool — "q) ", "a) ", etc.  Matches the key the player actually
+-- presses to pick that action.  Pool is typically 'generalOptionKeys'
+-- or 'movementOptionKeys'.
+optionLabel :: String -> Int -> AnyAction -> String
+optionLabel pool n act = poolKeyFor pool n : ") " <> stripAnsi (anyActionLabel act)
+
+-- | Fallback: all actions listed linearly, drawn from the general pool.
 flatLayout :: [AnyAction] -> SpatialHUD
 flatLayout actions = SpatialHUD
-  { shGeneralLabels = zipWith mkLabel [1 :: Int ..] actions
+  { shGeneralLabels = zipWith (optionLabel generalOptionKeys) [1 :: Int ..] actions
   , shSpatialCells  = []
   , shPlayerMarker  = (0, 0)
   , shBoxWidth      = 0
   , shBoxHeight     = 0
   }
-  where
-    mkLabel n act = show n <> ") " <> stripAnsi (anyActionLabel act)
 
 -- | Spatial layout: split actions into movement/non-movement, position movement
 -- actions by relative direction, scaled by actual graph distance.
-spatialLayout :: [AnyAction] -> Location -> (Double, Double)
-              -> LocationGraph -> Int -> SpatialHUD
-spatialLayout actions _playerLoc (px, py) lg totalCols =
-  let -- Number all actions sequentially
-      numbered = zip [1 :: Int ..] actions
-
-      -- Classify: movement actions with known target coords vs general
-      classify (n, act) = case movementTarget act of
+spatialLayout :: [AnyAction] -> Maybe Location -> Location -> (Double, Double)
+              -> LocationGraph -> Int -> Int -> SpatialHUD
+spatialLayout actions prevLoc _playerLoc (px, py) lg totalCols desiredBoxH =
+  let -- Classify by shape first: movement actions with known target
+      -- coords vs. general (non-movement) actions.  Order within each
+      -- bucket matches the order in @actions@ so keys stay stable
+      -- across turns when the action set is unchanged.
+      classify act = case movementTarget act of
         Just targetLoc
           | Just (tx, ty) <- Map.lookup targetLoc (lgCoords lg)
-          -> Right (n, act, tx - px, ty - py)
-        _ -> Left (n, act)
+          -> Right (act, tx - px, ty - py)
+        _ -> Left act
 
-      (generals, movements) = partitionEither (map classify numbered)
+      (generals, movementsRaw) = partitionEither (map classify actions)
 
-      -- General labels
-      genLabels = map (\(n, act) -> show n <> ") " <> stripAnsi (anyActionLabel act)) generals
+      -- Each pool is numbered independently from 1.  Generals land on
+      -- the home row (asdfghjkl); movements land on the top letter
+      -- row (qwertyuiop) through 'placeMovement'.
+      genLabels = zipWith (optionLabel generalOptionKeys) [1 :: Int ..] generals
+      movements = zipWith (\i (act, dx, dy) -> (i, act, dx, dy))
+                          [1 :: Int ..] movementsRaw
 
-      -- Spatial box dimensions — use most of the screen width
+      -- Spatial box dimensions — use most of the screen width, and
+      -- as much vertical space as the caller gives us.  A tall box
+      -- lets the sprite scatter breathe; a short box (minimum 7)
+      -- still fits labels plus the "You" marker.
       boxW = totalCols - 8
-      boxH = 11                       -- enough vertical spread
+      boxH = max 7 desiredBoxH
 
       -- Center of the box (player position)
       centerCol = boxW `div` 2
@@ -155,8 +199,12 @@ spatialLayout actions _playerLoc (px, py) lg totalCols =
       -- readable spread.
       spreadMovements = angularSpread movements
 
-      -- Map each movement action to a grid cell, scaled relative to max distance
-      cells = map (placeMovement boxW boxH centerCol centerRow maxDist) spreadMovements
+      -- Map each movement action to a grid cell, scaled relative to max distance.
+      -- 'prevLoc' is passed in so the "← " prefix that marks the way
+      -- you came is added BEFORE the clamp — otherwise the prefix
+      -- gets applied after placement and the label runs off the right
+      -- edge.
+      cells = map (placeMovement prevLoc boxW boxH centerCol centerRow maxDist) spreadMovements
 
       -- Resolve overlaps: nudge cells that collide with each other or the center
       resolved = resolveOverlaps centerCol centerRow boxW boxH cells
@@ -212,12 +260,17 @@ angularSpread movements =
 -- | Place a movement action in the spatial grid based on its relative direction.
 -- Distance is scaled relative to the farthest neighbor so closer spots are
 -- visibly nearer and farther spots reach the edges — irregular, like a map.
-placeMovement :: Int -> Int -> Int -> Int -> Double
+placeMovement :: Maybe Location -> Int -> Int -> Int -> Int -> Double
               -> (Int, AnyAction, Double, Double) -> HUDCell
-placeMovement boxW boxH centerCol centerRow maxDist (n, act, dx, dy) =
+placeMovement prevLoc boxW boxH centerCol centerRow maxDist (n, act, dx, dy) =
   let target = movementTarget act
-      label = show n <> ") " <> stripAnsi (anyActionLabel act)
-      labelLen = length label
+      key       = poolKeyFor movementOptionKeys n
+      baseLabel = optionLabel movementOptionKeys n act
+      isReturn  = case prevLoc of
+        Just p  -> target == Just p
+        Nothing -> False
+      label     = if isReturn then "\x2190 " <> baseLabel else baseLabel
+      labelLen  = length label
       -- Reserve space for the label itself
       maxColDisp = (boxW - labelLen) `div` 2 - 1
       maxRowDisp = centerRow - 1
@@ -241,6 +294,7 @@ placeMovement boxW boxH centerCol centerRow maxDist (n, act, dx, dy) =
       row = max 0 (min (boxH - 1) rawRow)
   in HUDCell
        { hudLabel  = label
+       , hudKey    = key
        , hudCol    = col
        , hudRow    = row
        , hudTarget = target
@@ -259,35 +313,37 @@ resolveOverlaps cx cy bw bh cells = go [] cells
       let cell' = nudge placed cell
       in go (placed ++ [cell']) rest
 
-    -- Check if two cells overlap.  Labels on the same row obviously
-    -- collide if their column ranges overlap; labels on adjacent rows
-    -- can also visually collide once the pixel nudge ±cellHeight/4 is
-    -- applied (the text from row N leaks into row N+1's upper
-    -- descenders space).  Treating adjacent rows as collisions keeps
-    -- cells at least two rows apart when their columns would overlap.
+    -- Check if two cells overlap.  Rows within 1 of each other are
+    -- a collision: the label gets a ±¼-cell pixel nudge (one-row
+    -- leakage), and labels on the same row obviously clash.  Two
+    -- rows apart is fine even though one cell's sensory-fragment
+    -- text renders at row+1 — it lives to the right of the other
+    -- cell's starting column in practice, and the column padding
+    -- below catches any horizontal overlap that would bridge the
+    -- two.  Keeping this at <= 1 is important for maps with many
+    -- neighbours: 5–6 cells don't fit if we require 3-row spacing.
     overlaps :: HUDCell -> HUDCell -> Bool
     overlaps a b =
       let rowsClose = abs (hudRow a - hudRow b) <= 1
-          pad      = 2   -- extra columns of breathing room
+          pad      = 3
           aEnd = hudCol a + length (hudLabel a) + pad
           bEnd = hudCol b + length (hudLabel b) + pad
           colsOverlap = not (aEnd <= hudCol b || bEnd <= hudCol a)
       in rowsClose && colsOverlap
 
-    -- Check if a cell overlaps the player marker "You" at center,
-    -- with extra padding on either side so pixel nudges can't push a
-    -- label into the marker cell either.  Also clears the rows just
-    -- above and below so labels on the center row's neighbours don't
-    -- graze the marker either.
+    -- Check if a cell overlaps the player marker "You" at center.
+    -- The marker lives at exactly (cx, cy); we reserve a generous
+    -- horizontal and *vertical* halo around it so a label whose
+    -- pixel nudge drifts up or down can't collide with the marker.
     overlapsCenter :: HUDCell -> Bool
     overlapsCenter cell =
-      let cEnd        = hudCol cell + length (hudLabel cell) + 1
+      let cEnd        = hudCol cell + length (hudLabel cell) + 2
           markerLen   = 3  -- "You"
-          markerPad   = 3  -- breathing room on each side (in cells)
+          markerPad   = 4  -- breathing room on each side (in cells)
           markerStart = cx - markerLen `div` 2 - markerPad
           markerEnd   = cx + markerLen `div` 2 + markerPad
           horizontalHit = not (cEnd <= markerStart || hudCol cell >= markerEnd)
-          rowHit       = abs (hudRow cell - cy) <= 0
+          rowHit       = abs (hudRow cell - cy) <= 1
       in rowHit && horizontalHit
 
     -- Try to nudge a cell to avoid overlapping placed cells and center
@@ -644,3 +700,76 @@ partitionEither = foldr step ([], [])
   where
     step (Left  a) (ls, rs) = (a : ls, rs)
     step (Right b) (ls, rs) = (ls, b : rs)
+
+-- ---------------------------------------------------------------------------
+-- HUD click map
+-- ---------------------------------------------------------------------------
+
+-- | Build hit-test regions for an action HUD so a player can click or
+-- touch an option instead of pressing its letter key.  Each region
+-- resolves to the same 'Char' the keyboard dispatcher would produce
+-- — the runner then runs it through the same code path as a
+-- keypress.
+--
+-- The geometry mirrors the renderer's layout:
+--   * Generals are laid out left-to-right in a grid starting at
+--     column 'marginLeft + 1', each cell 'genColW' wide and one row
+--     tall, starting two rows below the HUD divider.
+--   * Spatial movement cells sit at '(spatialLeft + hudCol,
+--     spatialTopRow + hudRow)' with the label's width.
+-- Both live in *grid* coordinates here; the caller converts to
+-- pixels using 'SDL.ClickMap.gridRect'.  Returns a list of
+-- (col, row, widthCells, char) tuples.
+hudClickMap
+  :: Int                           -- ^ marginLeft
+  -> Int                           -- ^ genColW (width of one general column)
+  -> Int                           -- ^ genNumCols (columns per general row, same as the renderer)
+  -> Int                           -- ^ genRowStride (rows per general row — touch spacing)
+  -> Int                           -- ^ hudStartRow
+  -> Int                           -- ^ spatialLeft
+  -> Int                           -- ^ spatialTopRow
+  -> SpatialHUD
+  -> [(Int, Int, Int, Int, Char)]
+hudClickMap ml genColW genNumCols genRowStride hudStartRow spatialLeft spatialTopRow hud =
+  generalsHits <> movementsHits
+  where
+    -- General options are chunked into rows of 'genNumCols' labels,
+    -- matching the renderer's 'chunksOf genNumCols genLabels'.  Key
+    -- order follows 'generalOptionKeys' — 1-based position in the
+    -- label list maps to the key char via 'poolKeyFor'.  Each row's
+    -- hit rect is 'genRowStride' rows tall so fat-finger taps land
+    -- on the intended option even if they overshoot the text line.
+    generalLabels = shGeneralLabels hud
+    chunk n = go
+      where
+        go [] = []
+        go xs = take n xs : go (drop n xs)
+    stride = max 1 genRowStride
+    rows = chunk (max 1 genNumCols) generalLabels
+    generalsHits =
+      [ ( ml + 1 + colIdx * genColW
+        , hudStartRow + 2 + rowIdx * stride
+        , genColW
+        , stride
+        , poolKeyFor generalOptionKeys (rowIdx * max 1 genNumCols + colIdx + 1)
+        )
+      | (rowIdx, row)   <- zip [0 ..] rows
+      , (colIdx, _lbl)  <- zip [0 ..] row
+      ]
+
+    -- Movement cells: each carries its own column, row, label, and the
+    -- key char its rendered label advertises.  'angularSpread' reorders
+    -- cells for layout, so trusting 'hudKey' is how we keep the click
+    -- dispatch aligned with the visible letter.  Hit width padded by
+    -- one cell on each side to absorb the ±¼-cell pixel nudge the
+    -- renderer applies to labels; height padded by one row below for
+    -- the same reason on the vertical axis.
+    movementsHits =
+      [ ( max 0 (spatialLeft + hudCol c - 1)
+        , spatialTopRow + hudRow c
+        , length (hudLabel c) + 2
+        , 2
+        , hudKey c
+        )
+      | c <- shSpatialCells hud
+      ]

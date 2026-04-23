@@ -186,4 +186,6 @@ initialWorld seed = GameWorld
   , worldSeed          = seed
   , worldLocationHistory = Map.empty
   , worldLocationVisits  = Map.empty
+  , worldJournal         = []
+  , worldDayNumber       = 1
   }

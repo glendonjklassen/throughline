@@ -122,7 +122,8 @@ instance Arbitrary WorldDiff where
     <$> arbitrary <*> arbitrary
     <*> arbitrary <*> arbitrary
     <*> arbitrary <*> arbitrary
-    <*> arbitrary
+    <*> arbitrary <*> arbitrary
+    <*> choose (0, 2)
 
 instance Arbitrary LogEntry where
   arbitrary = do
@@ -137,7 +138,8 @@ instance Arbitrary LogEntry where
           { diffStats     = map (\sd -> sd { statDeltaPlayer     = pid }) (diffStats diff)
           , diffRelations = map (\rd -> rd { relationDeltaPlayer = pid }) (diffRelations diff)
           }
-    LogEntry eid clk pid aid patchedDiff sig <$> arbitrary
+    frontier <- arbitrary
+    pure (LogEntry eid clk pid aid patchedDiff sig frontier 1)
 
 -- Condition, EffectBody, and Effect are mutually recursive via OnExpire.
 -- Use `sized` to bound depth; at size 0 only the leaf constructors fire.

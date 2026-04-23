@@ -103,7 +103,7 @@ mergeLogsBench = bgroup "mergeLogs"
           , entryClock     = LamportClock i pid
           , entryPlayerId  = PlayerId p
           , entryActionId  = ActionId "act"
-          , entryDiff      = WorldDiff [] [] [] [] [] [] []
+          , entryDiff      = WorldDiff [] [] [] [] [] [] [] [] 0
           , entrySignature = Nothing
           }
         common     = [ mkEntry i "shared" | i <- [1..shared] ]

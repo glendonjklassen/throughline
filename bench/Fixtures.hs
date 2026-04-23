@@ -41,6 +41,8 @@ scaledWorld n = GameWorld
   , worldSeed            = 0
   , worldLocationHistory = Map.empty
   , worldLocationVisits  = Map.empty
+  , worldJournal         = []
+  , worldDayNumber       = 1
   }
   where
     charIds = [ Named ("char-" ++ show i) | i <- [1..n] ]

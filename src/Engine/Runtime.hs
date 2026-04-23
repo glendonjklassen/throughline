@@ -4,6 +4,7 @@
 module Engine.Runtime
   ( RuntimeUI(..)
   , runScenario
+  , runScenarioWith
   , offerMerge
   , sessionsRootDir
   ) where
@@ -20,7 +21,8 @@ import           Engine.Core.Axioms     (systemMergeAxioms)
 import           Engine.Core.Conditions (checkCondition)
 import           Engine.Core.Effects    (executeEffectOnce, mergeWorlds)
 import           Engine.Sync.Causality  (buildMergeDiff, runMergeAxioms, runMergeRules)
-import           Engine.Sync.EventLog   (fileLogStore, mergeLogs, nullLogStore, replayFrom)
+import           Engine.Sync.EventLog   (augmentForeignLogs, fileLogStore,
+                                         mergeLogs, nullLogStore, replayFrom)
 import           Engine.Sync.Identity   (Identity(..), defaultIdentityPath,
                                          loadOrCreate, playerCharId, playerIdOf)
 import           GameTypes
@@ -38,23 +40,47 @@ data RuntimeUI = RuntimeUI
   }
 
 runScenario :: RuntimeUI -> (Int -> CharId -> Scenario) -> IO ()
-runScenario ui mkScenario = do
+runScenario ui = runScenarioWith ui (const (pure []))
+
+-- | Like 'runScenario', but also folds an extra foreign-logs source
+-- into the merge pipeline.  Used by the shared-folder feature: the
+-- supplied action receives the scenario name and returns whatever
+-- logs exist in the player's shared folder for that scenario.
+-- 'runScenario' supplies a no-op to preserve the original behavior.
+runScenarioWith
+  :: RuntimeUI
+  -> (String -> IO [(PlayerId, [LogEntry], Maybe Snapshot)])
+  -> (Int -> CharId -> Scenario)
+  -> IO ()
+runScenarioWith ui extraForeign mkScenario = do
   args <- getArgs
   let newSession  = "--new-session" `elem` args || "-ns" `elem` args
       sessionDir  = parseSessionDir args
   msgRef     <- newIORef []
   idPath     <- defaultIdentityPath
   ident      <- loadOrCreate idPath
-  seed       <- epochSeed args
+  freshSeed  <- epochSeed args
   let playerId = playerIdOf ident
       you      = playerCharId ident
+      -- Build once with the fresh seed so we know the scenario name
+      -- (needed to locate the save file).  We'll rebuild below using
+      -- the saved world's seed if a snapshot exists, so the generated
+      -- map matches the saved state.
+      scenarioName0 = scenarioName (mkScenario freshSeed you)
+  let rawStore = fileLogStore sessionDir scenarioName0 playerId (Just ident)
+      store    = augmentForeignLogs (extraForeign scenarioName0) rawStore
+  when newSession $ lsReset store
+  mSnap <- lsLoadSnap store
+  -- Scenario map generation is seeded, so a mismatched seed on load
+  -- would produce a different map than the one in the snapshot, and
+  -- movement actions would reference locations that don't exist in
+  -- the loaded world.  Prefer the snapshot's seed whenever we have
+  -- one; fall back to the fresh seed for a brand-new hunt.
+  let seed     = maybe freshSeed (worldSeed . snapWorld) mSnap
       scenario = mkScenario seed you
   debugRef    <- newIORef (scenarioDebugDefault scenario)
   traceRef    <- newIORef []
   frontierRef <- newIORef Map.empty
-  let store = fileLogStore sessionDir (scenarioName scenario) playerId (Just ident)
-  when newSession $ lsReset store
-  mSnap <- lsLoadSnap store
   let (baseWorld, logOffset) = maybe (scenarioInitial scenario, 0)
                                      (\s -> (snapWorld s, snapOffset s)) mSnap
   ownLog <- lsLoadOwn store

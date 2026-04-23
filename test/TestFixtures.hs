@@ -62,6 +62,8 @@ emptyWorld = GameWorld
   , worldSeed            = 0
   , worldLocationHistory = Map.empty
   , worldLocationVisits  = Map.empty
+  , worldJournal         = []
+  , worldDayNumber       = 1
   }
 
 -- | Two characters with trust 5 in each direction and all ground-truth stats at 5.
@@ -194,4 +196,4 @@ tickUntil cond env = go (200 :: Int)
       | otherwise             = step env (ActionId "wait") w >>= go (n - 1)
 
 emptyDiff :: WorldDiff
-emptyDiff = WorldDiff [] [] [] [] [] [] []
+emptyDiff = WorldDiff [] [] [] [] [] [] [] [] 0

@@ -155,6 +155,8 @@ instance ToJSON WorldDiff where
     , nonEmpty "worldTagsAdded"   (diffWorldTagsAdded d)
     , nonEmpty "worldTagsRemoved" (diffWorldTagsRemoved d)
     , nonEmpty "locations"        (diffLocations d)
+    , nonEmpty "journal"          (diffJournal d)
+    , if diffDayDelta d == 0 then Nothing else Just ("dayDelta" .= diffDayDelta d)
     ]
     where nonEmpty k xs = if null xs then Nothing else Just (k .= xs)
 
@@ -167,6 +169,8 @@ instance FromJSON WorldDiff where
     <*> o .:? "worldTagsAdded"   .!= []
     <*> o .:? "worldTagsRemoved" .!= []
     <*> o .:? "locations"        .!= []
+    <*> o .:? "journal"          .!= []
+    <*> o .:? "dayDelta"         .!= 0
 
 instance ToJSON   PlayerId
 instance FromJSON PlayerId
@@ -182,7 +186,8 @@ instance FromJSON LamportClock
 
 instance ToJSON LogEntry where
   toJSON e = object $ catMaybes
-    [ Just ("id"       .= entryId e)
+    [ Just ("schema"   .= entrySchemaVersion e)
+    , Just ("id"       .= entryId e)
     , Just ("clock"    .= entryClock e)
     , Just ("player"   .= entryPlayerId e)
     , Just ("action"   .= entryActionId e)
@@ -193,6 +198,8 @@ instance ToJSON LogEntry where
 
 instance FromJSON LogEntry where
   parseJSON = withObject "LogEntry" $ \o -> do
+    -- Pre-versioning entries omit "schema"; treat them as v1.
+    schema   <- o .:? "schema" .!= 1
     eid      <- o .:  "id"
     clock    <- o .:  "clock"
     pid      <- o .:  "player"
@@ -204,7 +211,7 @@ instance FromJSON LogEntry where
           { diffStats     = map (\sd -> sd { statDeltaPlayer     = pid }) (diffStats diff)
           , diffRelations = map (\rd -> rd { relationDeltaPlayer = pid }) (diffRelations diff)
           }
-    pure (LogEntry eid clock pid action patchedDiff sig frontier)
+    pure (LogEntry eid clock pid action patchedDiff sig frontier schema)
     where
       decodeSig t = case convertFromBase Base16 (TE.encodeUtf8 t) of
         Left  err -> fail ("Invalid signature encoding: " <> err)

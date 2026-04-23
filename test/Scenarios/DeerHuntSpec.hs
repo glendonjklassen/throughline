@@ -53,6 +53,8 @@ mkShootableWorld you loc tick = GameWorld
   , worldSeed          = 0
   , worldLocationHistory = Map.empty
   , worldLocationVisits  = Map.empty
+  , worldJournal         = []
+  , worldDayNumber       = 1
   }
 
 -- | Same as mkShootableWorld but with another hunter co-located.
@@ -92,7 +94,7 @@ spec = do
     it "solo clean kill: DeerKilled" $ do
       let tick = findTick (`doesShotHit` you) (mkShootableWorld you) shootLoc
           w0 = mkShootableWorld you shootLoc tick
-          scenario = (deerHunt fixtureSeed you) { scenarioInitial = w0 }
+          scenario = withoutRollover ((deerHunt fixtureSeed you) { scenarioInitial = w0 })
       env <- mkScenarioEnv you scenario
       wFinal <- step env (ActionId "takeTheShot") w0
       checkCondition wFinal (HasWorldTag deerKilled) `shouldBe` True
@@ -102,7 +104,7 @@ spec = do
     it "missed shot: DeerGone" $ do
       let tick = findTick (\w -> not (doesShotHit w you)) (mkShootableWorld you) shootLoc
           w0 = mkShootableWorld you shootLoc tick
-          scenario = (deerHunt fixtureSeed you) { scenarioInitial = w0 }
+          scenario = withoutRollover ((deerHunt fixtureSeed you) { scenarioInitial = w0 })
       env <- mkScenarioEnv you scenario
       wFinal <- step env (ActionId "takeTheShot") w0
       checkCondition wFinal (HasWorldTag deerGone)   `shouldBe` True
@@ -113,7 +115,7 @@ spec = do
           mkW = mkShootableWorldWith you other
           tick = findTick (\w -> doesShotHit w you && not (isFriendlyFire w)) mkW shootLoc
           w0 = mkShootableWorldWith you other shootLoc tick
-          scenario = (deerHunt fixtureSeed you) { scenarioInitial = w0 }
+          scenario = withoutRollover ((deerHunt fixtureSeed you) { scenarioInitial = w0 })
       env <- mkScenarioEnv you scenario
       wFinal <- step env (ActionId "takeTheShot") w0
       checkCondition wFinal (HasWorldTag deerKilled) `shouldBe` True
@@ -195,7 +197,7 @@ spec = do
             , dayNumberTag 0, timeTag 10
             ]
           w0 = (mkShootableWorld you shootLoc tick) { worldTags = baseTags }
-          scenario = (deerHunt fixtureSeed you) { scenarioInitial = w0 }
+          scenario = withoutRollover ((deerHunt fixtureSeed you) { scenarioInitial = w0 })
       env <- mkScenarioEnv you scenario
       checkCondition w0 (HasWorldTag deerSpotted) `shouldBe` False
       w1 <- step env (ActionId "look") w0
@@ -208,6 +210,7 @@ spec = do
           pinned   = filter (\a -> axiomId a `notElem`
                       [ ScenarioAxiom "deerMovement"
                       , ScenarioAxiom "spook"
+                      , ScenarioAxiom "dayRollover"
                       ]) (scenarioAxioms base)
           -- Walk a 3-step path from start into a field location.
           (path, endLoc) = walkPath fixtureStart CField 3
@@ -246,7 +249,8 @@ spec = do
 
     it "headless random walk reaches a terminal condition" $ do
       let seeds = [42, 0, 7, 100, 2025]
-      results <- mapM (runHeadlessRandom (deerHunt fixtureSeed) (PlayerId "integration-test") 1000) seeds
+          scenarioFor cid = withoutRollover (deerHunt fixtureSeed cid)
+      results <- mapM (runHeadlessRandom scenarioFor (PlayerId "integration-test") 1000) seeds
       let anyTerminated = any terminatedOk results
       anyTerminated `shouldBe` True
 
@@ -275,7 +279,9 @@ spec = do
               , worldLocationGraph = emptyLocationGraph
               , worldSeed = 0
               , worldLocationHistory = Map.empty
-              , worldLocationVisits  = Map.empty }
+              , worldLocationVisits  = Map.empty
+              , worldJournal         = []
+              , worldDayNumber       = 1 }
             inRange t = let r = rollD (mkW t) saltDeerMove
                         in r >= 0.15 && r < 0.30
             targetTick = case [ t | t <- [0..5000 :: Int], inRange t ] of
@@ -310,7 +316,7 @@ spec = do
         getTension w2 `shouldBe` 6
 
     it "full playthrough: walk from start, find deer, shoot" $ do
-      let scenario = deerHunt fixtureSeed you
+      let scenario = withoutRollover (deerHunt fixtureSeed you)
           w0 = scenarioInitial scenario
           (path, _) = walkPath fixtureStart CField 3
       env <- mkScenarioEnv you scenario
@@ -324,10 +330,17 @@ spec = do
 -- Helpers
 -- ---------------------------------------------------------------------------
 
+-- | Terminal states for the loop.  Beyond the deer / hunter outcomes,
+-- 'seasonOver' and 'dayOver' both drop 'huntNotOver' and leave the
+-- loop with no action to take — the test uses 'withoutRollover',
+-- which strips the axiom that would clear 'dayOver', so we treat it
+-- as terminal here.
 huntEnded :: GameWorld -> Bool
 huntEnded w = checkCondition w (HasWorldTag deerKilled)
            || checkCondition w (HasWorldTag deerGone)
            || checkCondition w (HasWorldTag hunterShot)
+           || checkCondition w (HasWorldTag seasonOver)
+           || checkCondition w (HasWorldTag dayOver)
 
 huntLoop :: Env -> GameWorld -> Int -> IO GameWorld
 huntLoop _   _ 0 = error "huntLoop: timed out without reaching terminal condition"

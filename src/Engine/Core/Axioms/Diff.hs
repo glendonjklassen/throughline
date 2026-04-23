@@ -21,6 +21,8 @@ diffWorlds pid before after = WorldDiff
   , diffWorldTagsAdded   = Set.toList (orToSet (worldTags after)  Set.\\ orToSet (worldTags before))
   , diffWorldTagsRemoved = Set.toList (orToSet (worldTags before) Set.\\ orToSet (worldTags after))
   , diffLocations        = locationDeltas
+  , diffJournal          = drop (length (worldJournal before)) (worldJournal after)
+  , diffDayDelta         = worldDayNumber after - worldDayNumber before
   }
   where
     statDeltas =

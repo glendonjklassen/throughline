@@ -2,11 +2,13 @@
 module Engine.Sync.EventLog
   ( LogStore(..)
   , fileLogStore
+  , augmentForeignLogs
   , nullLogStore
   , memoryLogStore
   , appendLogEntry
   , loadLog
   , logFileName
+  , currentLogSchemaVersion
   , mkLogEntry
   , logAction
   , mergeLogs
@@ -69,6 +71,23 @@ fileLogStore sessionsDir scenName playerId mIdent =
     , lsReset       = removeIfExists logPath >> removeIfExists snapPath
     }
 
+-- | Wrap a 'LogStore' so its 'lsForeignLogs' also returns entries
+-- from a secondary scanner.  Used by the shared-folder feature: the
+-- local sessions dir still provides the canonical foreign logs, and
+-- on top of that we fold in logs the player's friends dropped into
+-- a shared folder like Dropbox.  The two sources are concatenated;
+-- the sync layer's causal ordering handles the rest.
+augmentForeignLogs
+  :: IO [(PlayerId, [LogEntry], Maybe Snapshot)]
+  -> LogStore
+  -> LogStore
+augmentForeignLogs extra base = base
+  { lsForeignLogs = do
+      baseLogs  <- lsForeignLogs base
+      extraLogs <- extra
+      pure (baseLogs ++ extraLogs)
+  }
+
 -- | LogStore that discards writes. For replay and test contexts where
 -- no persistence is needed.
 nullLogStore :: LogStore
@@ -104,6 +123,13 @@ removeIfExists path = do
 logFileName :: FilePath
 logFileName = "events.jsonl"
 
+-- | The schema version that new 'LogEntry' writes are stamped with.
+-- Bump when the on-disk log format changes in a way that needs migration.
+-- 'FromJSON' defaults missing versions to 1, so pre-versioning logs still
+-- load.
+currentLogSchemaVersion :: Int
+currentLogSchemaVersion = 1
+
 appendLogEntry :: FilePath -> LogEntry -> IO ()
 appendLogEntry path entry = do
   createDirectoryIfMissing True (takeDirectory path)
@@ -129,13 +155,14 @@ mkLogEntry pid clock aid diff frontier =
   let tick = lcTick clock
       PlayerId p = pid
   in LogEntry
-    { entryId        = show tick <> "-" <> p
-    , entryClock     = clock { lcPlayerId = pid }
-    , entryPlayerId  = pid
-    , entryActionId  = aid
-    , entryDiff      = diff
-    , entrySignature = Nothing
-    , entryFrontier  = frontier
+    { entryId            = show tick <> "-" <> p
+    , entryClock         = clock { lcPlayerId = pid }
+    , entryPlayerId      = pid
+    , entryActionId      = aid
+    , entryDiff          = diff
+    , entrySignature     = Nothing
+    , entryFrontier      = frontier
+    , entrySchemaVersion = currentLogSchemaVersion
     }
 
 -- ---------------------------------------------------------------------------

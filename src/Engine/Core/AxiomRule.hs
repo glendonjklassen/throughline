@@ -89,6 +89,8 @@ substituteSelfBody cid (Dialogue dls)           = Dialogue (fmap (\(s,ls,txt) ->
 substituteSelfBody cid (SetLocationRandom c s ls)        = SetLocationRandom (sub cid c) s ls
 substituteSelfBody cid (SetLocationAdjacent c s)         = SetLocationAdjacent (sub cid c) s
 substituteSelfBody cid (SetLocationAdjacentPrefer c s r) = SetLocationAdjacentPrefer (sub cid c) s r
+substituteSelfBody _   (JournalEntry txt)       = JournalEntry txt
+substituteSelfBody _   AdvanceDay               = AdvanceDay
 substituteSelfBody _   DoNothing                = DoNothing
 
 substituteSelfCondition :: CharId -> Condition -> Condition

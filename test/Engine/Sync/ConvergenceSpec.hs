@@ -408,12 +408,12 @@ spec = describe "Engine.Sync.ConvergenceSpec" $ do
       -- This represents the state they had in common before diverging —
       -- e.g., they synced up to this point, then went offline.
       let shared = LogEntry "shared-1"
-                     (LamportClock 1 (PlayerId "p1")) (PlayerId "p1") (ActionId "act1") emptyDiff Nothing Map.empty
+                     (LamportClock 1 (PlayerId "p1")) (PlayerId "p1") (ActionId "act1") emptyDiff Nothing Map.empty 1
           -- After the shared prefix, each player took different actions.
           tailA  = LogEntry "2-p1"
-                     (LamportClock 2 (PlayerId "p1")) (PlayerId "p1") (ActionId "act1") emptyDiff Nothing Map.empty
+                     (LamportClock 2 (PlayerId "p1")) (PlayerId "p1") (ActionId "act1") emptyDiff Nothing Map.empty 1
           tailB  = LogEntry "1-p2"
-                     (LamportClock 1 (PlayerId "p2")) (PlayerId "p2") (ActionId "act2") emptyDiff Nothing Map.empty
+                     (LamportClock 1 (PlayerId "p2")) (PlayerId "p2") (ActionId "act2") emptyDiff Nothing Map.empty 1
       let (commonLen, merged) = mergeLogs [shared, tailA] [shared, tailB]
       -- One shared entry recognized as common prefix.
       commonLen `shouldBe` 1

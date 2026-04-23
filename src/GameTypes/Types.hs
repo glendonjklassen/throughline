@@ -33,14 +33,19 @@ data LamportClock = LamportClock
   , lcPlayerId :: PlayerId
   } deriving (Show, Eq, Ord, Generic)
 
+-- | One action's worth of log, written append-only to the event log.
+-- 'entrySchemaVersion' stamps the on-disk format so future schema changes
+-- can migrate older logs rather than rejecting them. Absent from a parsed
+-- entry means "pre-versioning" and is treated as version 1.
 data LogEntry = LogEntry
-  { entryId        :: String
-  , entryClock     :: LamportClock
-  , entryPlayerId  :: PlayerId
-  , entryActionId  :: ActionId
-  , entryDiff      :: WorldDiff
-  , entrySignature :: Maybe BS.ByteString
-  , entryFrontier  :: CausalFrontier
+  { entryId            :: String
+  , entryClock         :: LamportClock
+  , entryPlayerId      :: PlayerId
+  , entryActionId      :: ActionId
+  , entryDiff          :: WorldDiff
+  , entrySignature     :: Maybe BS.ByteString
+  , entryFrontier      :: CausalFrontier
+  , entrySchemaVersion :: Int
   } deriving (Show, Eq, Generic)
 
 -- ---------------------------------------------------------------------------
@@ -151,7 +156,7 @@ data Narration
 -- Stats
 -- ---------------------------------------------------------------------------
 
-data CapacityStat = Intelligence | Strength | Charisma | Understanding | Hunger | SocialStamina | Stillness
+data CapacityStat = Intelligence | Strength | Charisma | Understanding | Hunger | SocialStamina | Stillness | Experience
   deriving (Show, Read, Eq, Ord, Enum, Bounded, Generic)
 
 data StatType
@@ -196,6 +201,16 @@ data GameWorld = GameWorld
   , worldLocationVisits   :: Map.Map CharId (Map.Map Location Int)
     -- ^ Per-character visit count for each location, incremented on
     -- arrival.  Powers familiarity cues in the spatial HUD.
+  , worldJournal          :: [String]
+    -- ^ Append-only list of journal entries written by the player
+    -- character over the life of the scenario (across all days).
+    -- Ordered oldest-first.  Entries are produced by the
+    -- 'JournalEntry' effect body and carried on the event log via
+    -- 'diffJournal', so they survive session close and merge.
+  , worldDayNumber        :: Int
+    -- ^ Which in-scenario day the player is on.  Starts at 1 on
+    -- scenario open and increments each time the day rolls over.
+    -- Scenarios that don't use multi-day structure can leave it at 1.
   } deriving (Generic)
 
 -- ---------------------------------------------------------------------------
@@ -274,6 +289,15 @@ data EffectBody
     -- | Move character to a random adjacent location, preferring locations in
     -- the given region. Salt + Lamport clock determines the choice.
   | SetLocationAdjacentPrefer CharId Int Region
+    -- | Append a line to the player's journal.  Renders no prose — the
+    -- entry becomes visible when the player opens the journal.  Carried
+    -- on the event log so it persists across sessions and replays.
+  | JournalEntry String
+    -- | Increment 'worldDayNumber' by one.  Scenarios emit this from
+    -- a day-rollover handler after any day-ending event; the engine
+    -- keeps no other notion of "day" so authors stay in control of
+    -- when one day becomes the next.
+  | AdvanceDay
     -- | No-op placeholder; useful as a default or in conditional branches.
   | DoNothing
   deriving (Show, Eq, Generic)
@@ -353,6 +377,12 @@ data WorldDiff = WorldDiff
   , diffWorldTagsAdded   :: [Tag]
   , diffWorldTagsRemoved :: [Tag]
   , diffLocations        :: [LocationDelta]
+  , diffJournal          :: [String]
+    -- ^ Journal lines newly appended during this step, oldest-first.
+    -- Carried so replay and session load reconstruct 'worldJournal'.
+  , diffDayDelta         :: Int
+    -- ^ Change in 'worldDayNumber' during this step.  Almost always
+    -- 0 or 1, driven by day-rollover effects.
   } deriving (Show, Eq, Generic)
 
 -- ---------------------------------------------------------------------------

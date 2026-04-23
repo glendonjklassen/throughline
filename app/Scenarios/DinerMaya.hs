@@ -31,6 +31,8 @@ dinerMayaDisplay = ScenarioDisplay
   , sdLocationSparkle = \_ _ _ -> 0
   , sdZoneTintFor     = \_ _   -> Nothing
   , sdSensoryFor      = \_ _ _ -> Nothing
+  , sdCatalog         = const []
+  , sdDayLabel        = \n -> "Day " <> show n
   }
 
 endScreen :: GameWorld -> [String]

@@ -22,7 +22,7 @@ mkIdent = do
 
 testEntry :: PlayerId -> LogEntry
 testEntry pid =
-  mkLogEntry pid (LamportClock 1 pid) (ActionId "test-action") (WorldDiff [] [] [] [] [] [] []) Map.empty
+  mkLogEntry pid (LamportClock 1 pid) (ActionId "test-action") (WorldDiff [] [] [] [] [] [] [] [] 0) Map.empty
 
 spec :: Spec
 spec = describe "Engine.Sync.Identity" $ do
@@ -77,7 +77,7 @@ spec = describe "Engine.Sync.Identity" $ do
       let entry = testEntry pid
       let signed   = signEntry ident entry
           modified = signed { entryDiff = WorldDiff [] [] [] []
-                                [ScenarioTag (MkScenarioTag "injected")] [] [] }
+                                [ScenarioTag (MkScenarioTag "injected")] [] [] [] 0 }
       verifyEntry modified `shouldBe` False
 
     it "modifying the actionId after signing fails verification" $ do

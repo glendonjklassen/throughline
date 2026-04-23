@@ -5,6 +5,8 @@ import           Data.Maybe           (fromMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 import           Data.List.NonEmpty (NonEmpty(..))
+import           Data.Time.Calendar (Day, DayOfWeek(..), addDays, dayOfWeek,
+                                     fromGregorian, toGregorian)
 import           Engine.Author.DSL
 import           Engine.Author.Random   (rollChoice)
 import           System.Random          (mkStdGen, randomR)
@@ -13,6 +15,51 @@ import           Engine.Core.World      (setCharacterStat)
 import           GameTypes
 import           Scenarios.DeerHunt.Generation (GeneratedMap(..), TerrainClass(..))
 import           Scenarios.DeerHunt.World      (HuntWorld(..), hwClass, hwLocsOfClass, hwStart, hwDeerStart)
+
+-- ---------------------------------------------------------------------------
+-- Calendar
+-- ---------------------------------------------------------------------------
+
+-- | Opening day of rifle season on the Saskatchewan prairie — the
+-- hunt's in-world anchor date.  Changing this shifts every day
+-- marker in the journal so the season still reads as contiguous.
+-- The year is chosen so the weekday order reads right; nothing in
+-- the game depends on it being the current year.
+huntStartDate :: Day
+huntStartDate = fromGregorian 2024 11 7
+
+-- | Calendar date for the @n@'th day of the hunt (1-indexed).
+huntDayDate :: Int -> Day
+huntDayDate n = addDays (fromIntegral (max 0 (n - 1))) huntStartDate
+
+-- | Short journal-style date label for the @n@'th day — e.g.
+-- \"Thu, Nov 7\".  Used for notebook day headers, the day-end
+-- transition overlay, and each discovery's first-seen stamp in the
+-- index.  The weekday makes the passage of time feel lived-in; the
+-- terse month abbreviation keeps headers from crowding a narrow
+-- viewport.
+formatHuntDate :: Int -> String
+formatHuntDate n =
+  let d = huntDayDate n
+      (_y, m, dom) = toGregorian d
+  in dowShort (dayOfWeek d) <> ", " <> monthShort m <> " " <> show dom
+
+dowShort :: DayOfWeek -> String
+dowShort dow = case dow of
+  Monday    -> "Mon"
+  Tuesday   -> "Tue"
+  Wednesday -> "Wed"
+  Thursday  -> "Thu"
+  Friday    -> "Fri"
+  Saturday  -> "Sat"
+  Sunday    -> "Sun"
+
+monthShort :: Int -> String
+monthShort m = case m of
+  1  -> "Jan"; 2  -> "Feb"; 3  -> "Mar"; 4  -> "Apr"
+  5  -> "May"; 6  -> "Jun"; 7  -> "Jul"; 8  -> "Aug"
+  9  -> "Sep"; 10 -> "Oct"; 11 -> "Nov"; 12 -> "Dec"
+  _  -> "?"
 
 -- ---------------------------------------------------------------------------
 -- Characters
@@ -25,9 +72,11 @@ deer = Named "deer"
 -- Tags
 -- ---------------------------------------------------------------------------
 
-data DeerHuntTag
+-- | Day-scoped tags — cleared by the day-rollover axiom.  If a state
+-- belongs here, 'allDayScopedTags' automatically picks it up; no more
+-- hand-listing in the rollover.
+data DeerHuntDayTag
   = DeerKilled
-  | HunterShot
   | DeerGone
   | DeerSpooked
   | DeerSpotted
@@ -36,20 +85,36 @@ data DeerHuntTag
   | ShotTaken
   | NightFall
   | BackAtTruck
-  | DayTwo
-  | DayThree
-  | WindAngle Int        -- ^ Wind direction in hundredths of degrees (0–36000)
-  | WindStrength Int     -- ^ Wind strength in hundredths (0–100, maps to 0.0–1.0)
-  | PlayerSitting        -- ^ Player is sitting (toggle state)
+  | PlayerSitting
   | SignTracks           -- ^ Fresh tracks at a location
   | SignBed              -- ^ Bedding site found
   | SignRub              -- ^ Antler rub found (repeated visits)
   | SignScrape           -- ^ Ground scrape (very recent activity)
+  | DayOver              -- ^ Current day is ending; triggers rollover axiom
+  deriving (Show, Eq, Ord, Enum, Bounded)
+
+-- | Season-scoped tags — persist across day rollovers.  Things the
+-- hunter has learned or accumulated over the run, plus terminal
+-- states that end the scenario entirely.
+data DeerHuntSeasonTag
+  = HunterShot
+  | SeasonOver
+  | DayTwo
+  | DayThree
   | FoundSignTracks      -- ^ First time finding tracks (experience gate)
   | FoundSignBed         -- ^ First time finding a bed
   | FoundSignRub         -- ^ First time finding a rub
   | FoundSignScrape      -- ^ First time finding a scrape
+  | WindAngle Int        -- ^ Wind direction in hundredths of degrees (0–36000)
+  | WindStrength Int     -- ^ Wind strength in hundredths (0–100, maps to 0.0–1.0)
   deriving (Show, Eq, Ord)
+
+-- | Every day-scoped tag, as engine 'Tag' values.  Consumed by the
+-- day-rollover axiom to clear per-day state in one sweep.  New
+-- day-scoped tags picked up automatically by adding to
+-- 'DeerHuntDayTag'.
+allDayScopedTags :: [Tag]
+allDayScopedTags = map scenarioTag [minBound .. maxBound :: DeerHuntDayTag]
 
 deerKilled :: Tag
 deerKilled = scenarioTag DeerKilled
@@ -113,6 +178,12 @@ foundSignRub = scenarioTag FoundSignRub
 
 foundSignScrape :: Tag
 foundSignScrape = scenarioTag FoundSignScrape
+
+dayOver :: Tag
+dayOver = scenarioTag DayOver
+
+seasonOver :: Tag
+seasonOver = scenarioTag SeasonOver
 
 -- ---------------------------------------------------------------------------
 -- Per-location sign tags (string-encoded)
@@ -547,5 +618,7 @@ initialWorld hw you = GameWorld
   , worldSeed          = hwSeed hw
   , worldLocationHistory = Map.empty
   , worldLocationVisits  = Map.empty
+  , worldJournal         = []
+  , worldDayNumber       = 1
   }
 

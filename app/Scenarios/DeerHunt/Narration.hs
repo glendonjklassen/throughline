@@ -452,71 +452,71 @@ sensoryPool :: Map (TerrainClass, PositionHint) [String]
 sensoryPool = Map.fromList
   [ ((CField, Interior),
       [ "wind through the stalks"
-      , "flat, exposed ground"
-      , "mice in the rows"
-      , "stubble to the horizon"
+      , "flat, exposed — deer will see you first"
+      , "mouse runs in the rows, owls work the edges"
+      , "stubble to the horizon, sightlines forever"
       , "no cover for a hundred yards"
-      , "sky doing most of the work"
+      , "hot sun on the stubble keeps the deer bedded"
       ])
   , ((CField, Edge),
       [ "stubble thinning ahead"
-      , "line of something darker"
-      , "edge of the open"
-      , "a different texture starts"
-      , "wind changes pitch here"
+      , "line of something darker — worth closing on"
+      , "edge of the open; scent carries here"
+      , "where deer step out to feed at dusk"
+      , "wind changes pitch here; check your direction"
       ])
   , ((CField, Bridge),
       [ "open behind, cover ahead"
       , "a seam the deer use at dusk"
-      , "two winds meeting"
-      , "visible from both sides"
-      , "dry stalks, then shadow"
+      , "scent split — carries to both sides"
+      , "visible from both sides while you cross"
+      , "dry stalks, then shadow — worth sitting just inside"
       ])
   , ((CRoad, Interior),
       [ "gravel warm from the sun"
-      , "fence posts leaning north"
-      , "no tire tracks since dawn"
-      , "dust settling behind you"
-      , "section road, section quiet"
+      , "fence posts leaning north — wind's been steady"
+      , "no tire tracks since dawn; nobody else out"
+      , "every step kicks stone; deer hear you a quarter mile"
+      , "easy walking, no cover either way"
       ])
   , ((CRoad, Edge),
       [ "ditch water black and still"
-      , "grass frayed at the shoulder"
-      , "culvert ticking somewhere"
-      , "loose stone, frost under it"
+      , "grass frayed at the shoulder — cover if you need it"
+      , "cold pools in the ditch; scent hangs low here"
+      , "loose stone, frost under it — footing's bad"
       ])
   , ((CRoad, Bridge),
-      [ "gravel running into green"
-      , "a short, bright exposure"
-      , "ten seconds of open"
+      [ "gravel running into green — cover starts just past the shoulder"
+      , "brief open stretch; cross it quick"
+      , "about ten seconds exposed before you reach cover"
       , "cover close on the far side"
       ])
   , ((CBush, Interior),
-      [ "canopy closed overhead"
-      , "deadfall underfoot"
-      , "sightlines in yards"
+      [ "canopy closed overhead; sound muffled, scent short"
+      , "deadfall underfoot — hard to move quiet"
+      , "sightlines in yards; he could bed ten feet off"
       , "every step makes noise"
-      , "swallowed by it"
-      , "bush keeps its own time"
+      , "thick enough to hide you if you stop moving"
+      , "slow going; good spot to sit and let him come to you"
       ])
   , ((CBush, Edge),
-      [ "light reaching the ground"
-      , "canopy breaking ahead"
-      , "trees standing apart"
+      [ "light gaps ahead — where deer browse at first light"
+      , "canopy breaking; you'll be visible past this"
+      , "trees standing apart; sightlines opening up"
       , "bush thinning here"
       ])
   , ((CBush, Bridge),
-      [ "last of the poplars"
-      , "cover ends in a line"
-      , "treeline, then something else"
-      , "edge of the thick"
+      [ "last of the poplars before the open"
+      , "cover ends in a line; watch your exposure"
+      , "treeline, then something else — check wind before stepping out"
+      , "edge of the thick; deer travel these seams"
       ])
   , ((CRidge, Interior),
       [ "higher ground, honest wind"
-      , "rocks and oak mast"
-      , "everything far and soft"
-      , "the low country below"
-      , "lichen on limestone"
+      , "oak mast — deer come to these rocks to feed"
+      , "long views, wind you can trust"
+      , "the low country below; watch for movement in the field"
+      , "lichen on limestone; deer bed on south-facing pockets"
       ])
   , ((CRidge, Edge),
       [ "slope, not summit"
@@ -531,22 +531,22 @@ sensoryPool = Map.fromList
       , "end of the climb"
       ])
   , ((CCreek, Interior),
-      [ "water sound, constant"
-      , "alders close above"
-      , "colder air down here"
-      , "mud holding prints"
-      , "a different country"
+      [ "water sound masks your footfalls"
+      , "alders close overhead; good cover, short sightlines"
+      , "colder air down here — deer water in the morning"
+      , "mud holding prints — check before you step"
+      , "deer cross the creek here; watch the far bank"
       ])
   , ((CCreek, Edge),
-      [ "top of the bank"
-      , "wet ground, dry ground"
-      , "water a few feet below"
-      , "smell of the creek"
+      [ "top of the bank — look for tracks in the wet ground"
+      , "wet ground, dry ground; prints show up clean"
+      , "water a few feet below; deer come down for it"
+      , "smell of the creek; scent sits low"
       ])
   , ((CCreek, Bridge),
-      [ "water handing you off"
-      , "bank opening out"
-      , "end of the cut"
-      , "alders giving up"
+      [ "crossing opens out to new ground"
+      , "bank opening; sightlines coming back"
+      , "end of the cut; easier walking ahead"
+      , "cover thinning as the bank widens"
       ])
   ]

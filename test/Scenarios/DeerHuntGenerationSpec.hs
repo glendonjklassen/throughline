@@ -98,6 +98,46 @@ spec = describe "DeerHunt procedural generation" $ do
                 Set.member b locs `shouldBe` True
             ) (Set.toList eds)
 
+    -- A location with only one exit reads as a dead-end: the player
+    -- arrives, sees one way forward, and the HUD has no sense of
+    -- "landscape."  Two neighbours is the minimum for continuity.
+    -- Upper bound: the spatial HUD uses the ten-letter qwerty row
+    -- for movement options, so we must never generate more than
+    -- that from a single location.
+    it "gives every location between 2 and 10 neighbours" $ do
+      let locs  = gmLocations gm
+          eds   = lgEdges (gmGraph gm)
+          deg l = length [ ()
+                         | (a, b) <- Set.toList eds
+                         , a == l || b == l
+                         ]
+      mapM_ (\l -> deg l `shouldSatisfy` (\d -> d >= 2 && d <= 10)) locs
+
+    -- Shared-neighbour continuity: when the player walks from A to B,
+    -- B's neighbours should include some of A's neighbours (or A's
+    -- near-neighbours) so the map feels geometrically continuous
+    -- rather than teleporting between disjoint scene graphs.  We
+    -- sample all edges and check that, on average, >= 1 of A's
+    -- neighbours is also a neighbour of B.  Empirically the new
+    -- sector-fill edge policy gives well over that; the bound is
+    -- deliberately loose so future tuning doesn't break the spec.
+    it "makes neighbours share at least one neighbour on average" $ do
+      let locs  = gmLocations gm
+          eds   = lgEdges (gmGraph gm)
+          nbrs l = Set.fromList $
+            [ if a == l then b else a
+            | (a, b) <- Set.toList eds
+            , a == l || b == l
+            ]
+          shared a b =
+            Set.size (Set.intersection (nbrs a) (nbrs b)
+                      `Set.difference` Set.fromList [a, b])
+          sharedCounts = [ shared a b | (a, b) <- Set.toList eds ]
+          avg = fromIntegral (sum sharedCounts)
+                / fromIntegral (max 1 (length sharedCounts)) :: Double
+      length locs `shouldSatisfy` (> 0)
+      avg `shouldSatisfy` (>= 1.0)
+
     it "produces the canonical set of biome region names" $ do
       let regions = Set.fromList
             [ name | Region name <- Map.elems (lgRegions (gmGraph gm)) ]

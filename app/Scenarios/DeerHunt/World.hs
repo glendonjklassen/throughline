@@ -11,6 +11,7 @@
 module Scenarios.DeerHunt.World
   ( HuntWorld(..)
   , PositionHint(..)
+  , RareFind(..)
   , huntWorld
   , hwClass
   , hwLocsOfClass
@@ -20,6 +21,8 @@ module Scenarios.DeerHunt.World
   , hwDeerStart
   , hwCoords
   , hwRegion
+  , rareFindCatalog
+  , placeFinds
   ) where
 
 import           Data.List        (sortOn)
@@ -64,6 +67,12 @@ data HuntWorld = HuntWorld
   , hwDeerStartLoc :: !Location
     -- ^ Seeded choice from cover locations (bush/ridge/creek); the
     -- deer starts here.
+  , hwFinds      :: !(Map Location String)
+    -- ^ Rare location-bound finds placed deterministically from the
+    -- seed.  The value is the find's name (matches the 'Discovery'
+    -- entry and the 'spriteByName' key).  Each find is independently
+    -- rolled; many hunts will have none of a given find.  Populated
+    -- by 'Scenarios.DeerHunt.Finds.placeFinds'.
   }
 
 -- | Build the complete 'HuntWorld' from a seed.  Uses the canonical
@@ -87,6 +96,7 @@ huntWorld seed =
                           Just c  -> c `elem` [CBush, CRidge, CCreek]
                           Nothing -> False ]
       deerStart = seededPickDef start (seed * 71 + 13) deerCover
+      finds     = placeFinds seed byCls
   in HuntWorld
        { hwMap          = gmap
        , hwSeed         = seed
@@ -96,6 +106,7 @@ huntWorld seed =
        , hwTrucks       = trucks
        , hwStartLoc     = start
        , hwDeerStartLoc = deerStart
+       , hwFinds        = finds
        }
 
 -- | Look up a location's terrain class.  Unknown locations are
@@ -194,3 +205,54 @@ adjacencyMap =
     Map.insertWith Set.union a (Set.singleton b) $
     Map.insertWith Set.union b (Set.singleton a) m)
     Map.empty
+
+-- ---------------------------------------------------------------------------
+-- Rare finds
+-- ---------------------------------------------------------------------------
+--
+-- Each 'RareFind' is rolled once per hunt section with 'rfChance'.  If
+-- it hits, a location is picked from the first terrain class in
+-- 'rfTerrain' that has any candidates.  Most hunts will see one or
+-- two finds total; some will see none.  Deterministic from 'hwSeed'
+-- so the same section always surfaces the same set.
+
+-- | Specification for a rare location-bound find — the kind of thing
+-- you tell someone about after a hunt.  @rfName@ also keys into
+-- 'SDL.Sprites.spriteByName' for rendering.
+data RareFind = RareFind
+  { rfName    :: String
+  , rfTerrain :: [TerrainClass]
+  , rfChance  :: Double
+  }
+
+-- | Catalog of rare finds.  The chances are intentionally low — the
+-- rusty car especially is the story you tell.  Tune here.
+rareFindCatalog :: [RareFind]
+rareFindCatalog =
+  [ RareFind "rusty 50s car"   [CBush]         0.15
+  , RareFind "shed antler"     [CBush, CRidge] 0.40
+  , RareFind "abandoned stand" [CBush, CRidge] 0.25
+  , RareFind "survey stake"    [CRoad]         0.30
+  , RareFind "beaver stump"    [CCreek]        0.35
+  , RareFind "skull"           [CBush, CRidge] 0.20
+  ]
+
+-- | Roll each find independently.  Returns a map of
+-- @location -> find name@ for finds that landed.  Multiple finds can
+-- share a location in principle; in practice the small catalog and
+-- low chances make that vanishingly rare, so we accept the collision
+-- (later write wins) rather than add bookkeeping.
+placeFinds :: Int -> Map TerrainClass [Location] -> Map Location String
+placeFinds seed byCls =
+  Map.fromList (concatMap (placeOne seed byCls) (zip [0 ..] rareFindCatalog))
+
+placeOne :: Int -> Map TerrainClass [Location] -> (Int, RareFind) -> [(Location, String)]
+placeOne seed byCls (idx, rf) =
+  let g0            = mkStdGen (seed * 10007 + idx * 97 + 3)
+      (roll,    g1) = randomR (0.0 :: Double, 1.0) g0
+      candidates    = concatMap (\cls -> Map.findWithDefault [] cls byCls) (rfTerrain rf)
+  in if roll < rfChance rf && not (null candidates)
+       then
+         let (lidx, _) = randomR (0, length candidates - 1) g1
+         in [(candidates !! lidx, rfName rf)]
+       else []

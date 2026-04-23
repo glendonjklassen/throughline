@@ -21,6 +21,7 @@ module Scenarios.DeerHuntTestFixtures
   , inFieldRegion
   , anyEdgeActionId
   , coLocateAtClass
+  , withoutRollover
   ) where
 
 import           Data.List       (find)
@@ -121,3 +122,12 @@ coLocateAtClass cls player deerId w =
   in w { worldLocations = Map.insert player loc
                        $ Map.insert deerId loc
                        $ worldLocations w }
+
+-- | Strip the day-rollover axiom from a scenario.  Tests that assert
+-- per-day world tags (deerKilled, deerGone, hunterShot) immediately
+-- after the shot need the raw action outcome, not the rolled-over
+-- state where those tags have already been cleared for the next day.
+withoutRollover :: Scenario -> Scenario
+withoutRollover s = s { scenarioAxioms = filter (not . isRollover) (scenarioAxioms s) }
+  where
+    isRollover ax = axiomId ax == ScenarioAxiom "dayRollover"
