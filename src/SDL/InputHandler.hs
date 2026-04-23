@@ -3,6 +3,8 @@
 module SDL.InputHandler
   ( awaitKeySDL
   , awaitAnyKeySDL
+  , InputEvent(..)
+  , awaitInputSDL
   , pollQuit
   , pollAnyKey
   , waitOrKey
@@ -19,12 +21,14 @@ module SDL.InputHandler
   ) where
 
 import           Control.Applicative ((<|>))
+import           Data.Int            (Int32)
 import           Data.List           (elemIndex)
 import qualified SDL
 import qualified SDL.Input.Keyboard.Codes as KC
 
 -- | Block until a relevant keypress, returning the character.
--- Returns Nothing on window close.
+-- Returns Nothing on window close.  Clicks and touches are ignored
+-- by this variant; use 'awaitInputSDL' when either is acceptable.
 awaitKeySDL :: IO (Maybe Char)
 awaitKeySDL = do
   event <- SDL.waitEvent
@@ -36,6 +40,53 @@ awaitKeySDL = do
             Just c  -> pure (Just c)
             Nothing -> awaitKeySDL  -- ignore unmapped keys
     _ -> awaitKeySDL
+
+-- | Either a mapped key press or a pointer event (mouse click or
+-- finger tap).  Pointer coordinates are in *pixels*, measured from
+-- the top-left of the window — the menu / runner code already knows
+-- each clickable region in pixels, so a single hit-test function
+-- fits both input paths.
+data InputEvent
+  = KeyPress Char
+  | ClickAt  !Int !Int
+  deriving (Show, Eq)
+
+-- | Block until any usable input — a mapped key, a mouse button-down,
+-- or a finger-down — or a window close.  Unmapped keys and motion
+-- events are silently skipped; only discrete \"I picked something\"
+-- events resolve the wait.  Clicks and touches return pixel
+-- coordinates relative to the window's top-left.
+awaitInputSDL :: IO (Maybe InputEvent)
+awaitInputSDL = do
+  event <- SDL.waitEvent
+  case SDL.eventPayload event of
+    SDL.QuitEvent -> pure Nothing
+    SDL.KeyboardEvent kd
+      | SDL.keyboardEventKeyMotion kd == SDL.Pressed ->
+          case keycodeToChar (SDL.keysymKeycode (SDL.keyboardEventKeysym kd)) of
+            Just c  -> pure (Just (KeyPress c))
+            Nothing -> awaitInputSDL
+    SDL.MouseButtonEvent mb
+      | SDL.mouseButtonEventMotion mb == SDL.Pressed -> do
+          let SDL.P (SDL.V2 x y) = SDL.mouseButtonEventPos mb
+          pure (Just (ClickAt (fromIntegral x) (fromIntegral y)))
+    SDL.TouchFingerEvent tf
+      | SDL.touchFingerEventMotion tf == SDL.Pressed -> do
+          -- SDL reports touches in normalized [0, 1] coords.  We
+          -- scale against the canonical window dimensions; since
+          -- the renderer also works at that size, the mapping is
+          -- consistent with mouse clicks even on Deck / tablet.
+          let SDL.P (SDL.V2 nx ny) = SDL.touchFingerEventPos tf
+          pure (Just (ClickAt (round (nx * fromIntegral canonicalWindowW))
+                              (round (ny * fromIntegral canonicalWindowH))))
+    _ -> awaitInputSDL
+
+-- | Window dimensions the renderer assumes; kept local so callers of
+-- the input handler don't have to import 'SDL.Renderer'.  If the
+-- renderer's canonical size changes, update both.
+canonicalWindowW, canonicalWindowH :: Int32
+canonicalWindowW = 1280
+canonicalWindowH = 800
 
 -- | Block until any keypress or window close. Returns True on keypress, False on quit.
 awaitAnyKeySDL :: IO Bool

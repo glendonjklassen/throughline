@@ -15,7 +15,7 @@ module SDL.Onboarding
   ) where
 
 import           SDL.FontContext  (renderText)
-import           SDL.InputHandler (awaitKeySDL)
+import           SDL.InputHandler (awaitInputSDL)
 import           SDL.Palette      (defaultText, dimText, greyText)
 import           SDL.Renderer     (SDLContext(..), clearSDL, presentSDL)
 
@@ -38,11 +38,12 @@ defaultHowToPlay =
   , "left off from the title screen."
   ]
 
--- | Render the how-to-play page and wait for any key to dismiss.
+-- | Render the how-to-play page and wait for any input to dismiss.
+-- A keypress or a click (touch) anywhere closes the overlay.
 howToPlayLoop :: SDLContext -> String -> [String] -> IO ()
 howToPlayLoop ctx title pages = do
   renderHowToPlay ctx title pages
-  _ <- awaitKeySDL
+  _ <- awaitInputSDL
   pure ()
 
 renderHowToPlay :: SDLContext -> String -> [String] -> IO ()
@@ -52,7 +53,8 @@ renderHowToPlay ctx title pages = do
   renderText fc ("— " <> title <> " —") defaultText (3, 2)
   renderText fc ""                      dimText     (3, 3)
   mapM_ (renderLine fc) (zip [0 :: Int ..] pages)
-  renderText fc "press any key to return" greyText (3, fromIntegral (5 + length pages + 1))
+  renderText fc "press any key or click to return" greyText
+    (3, fromIntegral (5 + length pages + 1))
   presentSDL ctx
   where
     renderLine fc (i, line) =

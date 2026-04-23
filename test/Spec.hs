@@ -22,6 +22,7 @@ import qualified Engine.CRDT.PNCounterPropSpec
 import qualified Engine.JSONRoundTripSpec
 import qualified SDL.AchievementsSpec
 import qualified SDL.AudioBackendSpec
+import qualified SDL.ClickMapSpec
 import qualified SDL.CrashHandlerSpec
 import qualified SDL.PaletteSpec
 import qualified SDL.SaveSlotsSpec
@@ -65,6 +66,7 @@ main = hspec $ do
   Engine.JSONRoundTripSpec.spec
   SDL.AchievementsSpec.spec
   SDL.AudioBackendSpec.spec
+  SDL.ClickMapSpec.spec
   SDL.CrashHandlerSpec.spec
   SDL.PaletteSpec.spec
   SDL.SaveSlotsSpec.spec

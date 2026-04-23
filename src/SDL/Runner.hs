@@ -24,11 +24,13 @@ import           GameTypes
 import           MonadStack
 
 import           SDL.Animation
+import           SDL.ClickMap          (hitTest)
 import           SDL.FontContext
 import           SDL.InputHandler
 import           SDL.Palette
 import           SDL.Renderer
-import           SDL.SpatialHUD        (SpatialHUD(..), HUDCell(..), layoutHUD)
+import           SDL.SpatialHUD        (SpatialHUD(..), HUDCell(..), hudClickMap,
+                                        layoutHUD)
 import           SDL.Text              (stripAnsi, wrapWords)
 import           SDL.Debug             (learningModeLines)
 #ifndef RELEASE_BUILD
@@ -47,7 +49,13 @@ sdlUI display = RuntimeUI
   , uiTeardown  = pure ()
   , uiGameLoop  = \env world -> do
       ctx <- initSDL fontPath
+      -- Gameplay is keyboard-first; hide the system cursor so it
+      -- doesn't float over the prose.  Clicks still register —
+      -- SDL dispatches mouse-button events whether or not the
+      -- cursor is visible.
+      SDL.cursorVisible SDL.$= False
       result <- runApp env world (sdlGameLoop ctx display)
+      SDL.cursorVisible SDL.$= True
       freeSDL ctx
       pure result
   , uiOnEnd     = \finalW -> do
@@ -159,7 +167,7 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
   liftIO $ render finalReveal
   liftIO $ render finalReveal
   liftIO $ writeIORef lastLocRef currentLoc
-  liftIO (awaitKeyLoop actions debugRef skipChar world render)
+  liftIO (awaitKeyLoop actions debugRef skipChar world render hud)
   where
     -- Split actions into the two pools the input handler expects:
     -- non-movement actions land on the home row, movement actions
@@ -174,11 +182,11 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
     isSetLocation _                           = False
 
     awaitKeyLoop :: [AnyAction] -> IORef DebugMode -> Maybe Char -> GameWorld
-                 -> (RevealFrame -> IO ()) -> IO (Maybe AnyAction)
-    awaitKeyLoop acts debugRef' pending worldNow render' = do
+                 -> (RevealFrame -> IO ()) -> SpatialHUD -> IO (Maybe AnyAction)
+    awaitKeyLoop acts debugRef' pending worldNow render' hudLayout = do
       mc <- case pending of
         Just c  -> pure (Just c)
-        Nothing -> awaitKeySDL
+        Nothing -> resolveInput ctx hudLayout acts
       let (generals, movements) = partitionActions acts
       case mc of
         Nothing -> pure Nothing
@@ -189,25 +197,72 @@ sdlActionSource ctx display countRef actionsRef lastLocRef actions = do
               render' finalReveal
               if confirmed
                 then pure Nothing
-                else awaitKeyLoop acts debugRef' Nothing worldNow render'
+                else awaitKeyLoop acts debugRef' Nothing worldNow render' hudLayout
 #ifndef RELEASE_BUILD
           | c == debugKeyChar -> do
               modifyIORef' debugRef' cycleDebug
-              awaitKeyLoop acts debugRef' Nothing worldNow render'
+              awaitKeyLoop acts debugRef' Nothing worldNow render' hudLayout
 #endif
           | c == '1' -> do
               journalOverlayLoop ctx display worldNow TabToday
               drainSDLEvents
               render' finalReveal
               render' finalReveal
-              awaitKeyLoop acts debugRef' Nothing worldNow render'
+              awaitKeyLoop acts debugRef' Nothing worldNow render' hudLayout
           | Just a <- safeOptionIndexIn generalOptionKeys  c generals  -> pure (Just a)
           | Just a <- safeOptionIndexIn movementOptionKeys c movements -> pure (Just a)
-          | otherwise -> awaitKeyLoop acts debugRef' Nothing worldNow render'
+          | otherwise -> awaitKeyLoop acts debugRef' Nothing worldNow render' hudLayout
+
+-- | Resolve a single input event — key, click, or touch — to a char
+-- the dispatch body understands.  Clicks are hit-tested against the
+-- gameplay HUD's click map; anything outside the map is treated as
+-- "no input, keep waiting".
+resolveInput :: SDLContext -> SpatialHUD -> [AnyAction] -> IO (Maybe Char)
+resolveInput ctx hudLayout _acts = go
+  where
+    go = do
+      me <- awaitInputSDL
+      case me of
+        Nothing              -> pure Nothing
+        Just (KeyPress c)    -> pure (Just c)
+        Just (ClickAt px py) -> case hitTest (buildHUDClicks ctx hudLayout) px py of
+          Just c  -> pure (Just c)
+          Nothing -> go
+
+-- | Assemble the HUD's click regions in pixel space.  Mirrors the
+-- renderer's layout math (genColW, genRowCount, spatialLeft,
+-- spatialTopRow) so clicks land where the labels do.
+buildHUDClicks :: SDLContext -> SpatialHUD -> [(Int, Int, Int, Int, Char)]
+buildHUDClicks ctx hud =
+  let fc   = sdlFont ctx
+      cw   = fromIntegral (cellWidth fc)  :: Int
+      chH  = fromIntegral (cellHeight fc) :: Int
+      cols = gridCols ctx
+      rws  = gridRows ctx
+      ml   = fromIntegral marginLeft      :: Int
+      genLabels    = shGeneralLabels hud
+      maxGenLen    = if null genLabels then 0 else maximum (map length genLabels)
+      genColW      = maxGenLen + 3
+      genNumCols   = max 1 ((cols - 4) `div` max 1 genColW)
+      genRowCount  = (length genLabels + genNumCols - 1) `div` max 1 genNumCols
+      hasSpatial   = not (null (shSpatialCells hud))
+      spatialH     = if hasSpatial then shBoxHeight hud else 0
+      hudRowsTotal = 1 + 1 + genRowCount
+                       + (if hasSpatial then 1 + spatialH else 0) + 1
+      hudStartRow  = rws - hudRowsTotal
+      spatialTopRow = hudStartRow + 2 + genRowCount
+                       + (if hasSpatial then 1 else 0)
+      spatialLeft   = (cols - shBoxWidth hud) `div` 2
+      gridHits = hudClickMap ml genColW genRowCount hudStartRow
+                             spatialLeft spatialTopRow hud
+  in [ (col * cw, row * chH, w * cw, chH, c)
+     | (col, row, w, c) <- gridHits
+     ]
 
 -- | Ask the player to confirm a mid-hunt quit.  Every action autosaves
 -- so leaving truly costs nothing, but a stray Escape keypress shouldn't
 -- send them back to the launcher — confirmation protects against that.
+-- Accepts key presses and clicks on either option row.
 confirmQuit :: SDLContext -> IO Bool
 confirmQuit ctx = do
   clearSDL ctx
@@ -220,29 +275,79 @@ confirmQuit ctx = do
   renderText fc "y) Yes, quit"                            defaultText (4, 8)
   renderText fc "n) No, keep hunting"                     defaultText (4, 9)
   presentSDL ctx
-  mc <- awaitKeySDL
-  pure (mc == Just 'y' || mc == Just 'Y')
+  let yesRect = confirmRowRect fc 8 'y'
+      noRect  = confirmRowRect fc 9 'n'
+      cm = [yesRect, noRect]
+  loop cm
+  where
+    loop cm = do
+      me <- awaitInputSDL
+      case me of
+        Nothing              -> pure False
+        Just (KeyPress c)    -> pure (c == 'y' || c == 'Y')
+        Just (ClickAt px py) -> case hitTest cm px py of
+          Just c  -> pure (c == 'y' || c == 'Y')
+          Nothing -> loop cm
+
+-- | Helper for the single-column confirmation dialogs: a full-width
+-- row at 'row' that resolves to 'ch' when clicked.
+confirmRowRect :: FontContext -> Int -> Char -> (Int, Int, Int, Int, Char)
+confirmRowRect fc row ch =
+  let cw = fromIntegral (cellWidth fc)  :: Int
+      hh = fromIntegral (cellHeight fc) :: Int
+  in (0, row * hh, 80 * cw, hh, ch)
 
 -- | Drive the journal overlay.  Pressing the number of a *different*
 -- tab switches to it; pressing the number of the *current* tab
 -- closes the overlay (so the key that opened the journal also
 -- closes it).  Any other key dismisses.
+--
+-- Clicks and touches work too: each tab word in the footer is a hit
+-- region that behaves exactly as pressing its digit would.  A click
+-- outside the footer (i.e. on the body or anywhere else) dismisses
+-- the overlay, same as pressing any non-tab key.
 journalOverlayLoop :: SDLContext -> ScenarioDisplay -> GameWorld -> JournalTab -> IO ()
 journalOverlayLoop ctx display world tab = do
   renderJournalOverlay ctx display world tab
-  mc <- awaitKeySDL
-  case mc of
+  let fc = sdlFont ctx
+      rows = gridRows ctx
+      footerRow = rows - 2
+      -- Layout of the footer text "1 today  2 past days  3 catalog …"
+      -- Column positions are stable because marginLeft and the label
+      -- strings are fixed.
+      todayRect   = journalRect fc footerRow 0  7 '1'
+      pastRect    = journalRect fc footerRow 9  14 '2'
+      catalogRect = journalRect fc footerRow 25 11 '3'
+      cm = [todayRect, pastRect, catalogRect]
+  me <- awaitInputSDL
+  case me of
     Nothing -> pure ()
-    Just c
-      | c == currentTabKey tab -> pure ()
-      | c == '1'               -> journalOverlayLoop ctx display world TabToday
-      | c == '2'               -> journalOverlayLoop ctx display world TabPast
-      | c == '3'               -> journalOverlayLoop ctx display world TabCatalog
-      | otherwise              -> pure ()
+    Just (KeyPress c)    -> dispatch c
+    Just (ClickAt px py) -> case hitTest cm px py of
+      Just c  -> dispatch c
+      Nothing -> pure ()          -- click outside tabs dismisses
   where
+    dispatch c
+      | c == currentTabKey tab = pure ()
+      | c == '1'               = journalOverlayLoop ctx display world TabToday
+      | c == '2'               = journalOverlayLoop ctx display world TabPast
+      | c == '3'               = journalOverlayLoop ctx display world TabCatalog
+      | otherwise              = pure ()
     currentTabKey TabToday   = '1'
     currentTabKey TabPast    = '2'
     currentTabKey TabCatalog = '3'
+
+-- | Build a single clickable rectangle for a tab label on the
+-- journal footer row.  Offset from 'marginLeft' matches the column
+-- where the corresponding text starts in the footer string.
+journalRect :: FontContext -> Int -> Int -> Int -> Char -> (Int, Int, Int, Int, Char)
+journalRect fc row offset widthCells c =
+  let cw = fromIntegral (cellWidth fc)  :: Int
+      ch = fromIntegral (cellHeight fc) :: Int
+      margin = fromIntegral marginLeft :: Int
+      x = (margin + offset) * cw
+      y = row * ch
+  in (x, y, widthCells * cw, ch, c)
 
 -- | Hash a location (or its absence) into an Int for seeded sensory
 -- selection.  Co-arrivals at the same tick and location pick the same

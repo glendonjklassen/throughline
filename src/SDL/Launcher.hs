@@ -17,15 +17,16 @@ module SDL.Launcher
 
 import           Control.Exception      (SomeException, try)
 
-import           Engine
-import           GameTypes              (CharId(..), PlayerId, Scenario, scenarioName)
-import           SDL.CrashHandler       (withCrashHandler)
-import           SDL.FontContext        (renderText)
-import           SDL.InputHandler       (awaitKeySDL)
-import           SDL.Layout             (ScenarioDisplay)
 import qualified Data.Version           as Version
 
+import           Engine
+import           GameTypes              (CharId(..), PlayerId, Scenario, scenarioName)
 import           Paths_throughline      (version)
+import           SDL.ClickMap           (ClickMap, gridRowRect, hitTest)
+import           SDL.CrashHandler       (withCrashHandler)
+import           SDL.FontContext        (renderText)
+import           SDL.InputHandler       (InputEvent(..), awaitInputSDL)
+import           SDL.Layout             (ScenarioDisplay)
 import           SDL.Onboarding         (defaultHowToPlay, howToPlayLoop)
 import           SDL.Palette            (PaletteMode(..), defaultText, dimText, greyText, warningColor)
 import           SDL.Renderer           (SDLContext(..), clearSDL, freeSDL, initSDLWith, presentSDL)
@@ -94,66 +95,91 @@ launcherMain entries = do
 singleScenarioMenu :: SDLContext -> PlayerId -> ScenarioEntry -> IO (Maybe ScenarioEntry)
 singleScenarioMenu ctx pid entry = do
   status <- scenarioEntryStatus pid entry
-  renderSingleMenu ctx entry status
-  pickSingle ctx pid entry status
+  cm <- renderSingleMenu ctx entry status
+  pickSingle ctx pid entry status cm
 
-renderSingleMenu :: SDLContext -> ScenarioEntry -> SaveStatus -> IO ()
+-- | Render the title screen and return the click-map that resolves a
+-- pointer position to the same dispatch char the keyboard uses.
+renderSingleMenu :: SDLContext -> ScenarioEntry -> SaveStatus -> IO ClickMap
 renderSingleMenu ctx entry status = do
   clearSDL ctx
   let fc = sdlFont ctx
+      -- Each clickable row spans the full screen width so a tap
+      -- anywhere on the line selects the option.
+      rowHit r c = gridRowRect fc 0 r 80 c
   renderText fc (entryLabel entry)                  defaultText (3, 2)
   renderText fc (entryTagline entry)                dimText     (3, 3)
   renderText fc ""                                  dimText     (3, 4)
-  if hasSave status
-    then do
-      renderText fc "1) Continue"                   defaultText (4, 6)
-      renderText fc (continueHint status)           dimText     (4, 7)
-      renderText fc "2) New hunt (discards save)"   defaultText (4, 9)
-    else
-      renderText fc "1) Begin"                      defaultText (4, 6)
+  let primaryRow =
+        if hasSave status
+          then do
+            renderText fc "1) Continue"                 defaultText (4, 6)
+            renderText fc (continueHint status)         dimText     (4, 7)
+            renderText fc "2) New hunt (discards save)" defaultText (4, 9)
+          else
+            renderText fc "1) Begin"                    defaultText (4, 6)
+  primaryRow
   renderText fc "h) How to play"                    greyText    (4, 11)
   renderText fc "s) Settings"                       greyText    (4, 12)
   renderText fc "q) Quit"                           greyText    (4, 13)
   renderText fc versionTag                          dimText     (4, 15)
   presentSDL ctx
+  let continueMap =
+        [ rowHit 6 '1'
+        , rowHit 7 '1'   -- hint line belongs to Continue
+        , rowHit 9 '2'
+        ]
+      beginMap = [ rowHit 6 '1' ]
+      footer   =
+        [ rowHit 11 'h'
+        , rowHit 12 's'
+        , rowHit 13 'q'
+        ]
+  pure (if hasSave status then continueMap <> footer else beginMap <> footer)
   where
     continueHint s = "   " <> show (saveEntryCount s) <> " actions logged"
 
-pickSingle :: SDLContext -> PlayerId -> ScenarioEntry -> SaveStatus -> IO (Maybe ScenarioEntry)
+pickSingle :: SDLContext -> PlayerId -> ScenarioEntry -> SaveStatus
+           -> ClickMap -> IO (Maybe ScenarioEntry)
 pickSingle ctx pid entry status = loop
   where
-    loop = do
-      mc <- awaitKeySDL
-      case mc of
-        Nothing  -> pure Nothing
-        Just 'q' -> pure Nothing
-        Just 'h' -> showHelp
-        Just 'H' -> showHelp
-        Just 's' -> showSettings
-        Just 'S' -> showSettings
-        Just '1'
-          | hasSave status -> pure (Just entry)       -- Continue
-          | otherwise      -> pure (Just entry)       -- Begin (no save yet)
-        Just '2'
-          | hasSave status -> do
+    loop cm = do
+      me <- awaitInputSDL
+      case me of
+        Nothing                  -> pure Nothing
+        Just (KeyPress c)        -> dispatch cm c
+        Just (ClickAt px py)     -> case hitTest cm px py of
+          Just c  -> dispatch cm c
+          Nothing -> loop cm
+
+    dispatch cm c = case c of
+      'q' -> pure Nothing
+      'h' -> showHelp
+      'H' -> showHelp
+      's' -> showSettings
+      'S' -> showSettings
+      '1' | hasSave status -> pure (Just entry)
+          | otherwise      -> pure (Just entry)
+      '2' | hasSave status -> do
               confirmed <- confirmDiscard ctx (entryLabel entry)
               if confirmed
                 then do
                   resetScenarioSave pid (scenarioName (entryMake entry 0 dummyChar))
                   pure (Just entry)
                 else do
-                  renderSingleMenu ctx entry status
-                  loop
-          | otherwise -> loop
-        _ -> loop
+                  cm' <- renderSingleMenu ctx entry status
+                  loop cm'
+          | otherwise -> loop cm
+      _   -> loop cm
+
     showHelp = do
       howToPlayLoop ctx (entryLabel entry) (helpPagesFor entry)
-      renderSingleMenu ctx entry status
-      loop
+      cm' <- renderSingleMenu ctx entry status
+      loop cm'
     showSettings = do
       _ <- settingsMenu ctx
-      renderSingleMenu ctx entry status
-      loop
+      cm' <- renderSingleMenu ctx entry status
+      loop cm'
 
 -- | A placeholder CharId used only to ask a scenario for its 'scenarioName'.
 -- Scenario names are static strings that never depend on the player
@@ -171,36 +197,44 @@ dummyChar = Truth
 multiScenarioMenu :: SDLContext -> PlayerId -> [ScenarioEntry] -> IO (Maybe ScenarioEntry)
 multiScenarioMenu ctx pid entries = do
   statuses <- mapM (scenarioEntryStatus pid) entries
-  renderMultiMenu ctx entries statuses
-  pickMulti statuses
+  cm <- renderMultiMenu ctx entries statuses
+  pickMulti statuses cm
   where
-    pickMulti statuses = do
-      mc <- awaitKeySDL
-      case mc of
-        Nothing  -> pure Nothing
-        Just 'q' -> pure Nothing
-        Just 'h' -> showHelp statuses
-        Just 'H' -> showHelp statuses
-        Just 's' -> showSettings statuses
-        Just 'S' -> showSettings statuses
-        Just ch  ->
-          let n = fromEnum ch - fromEnum '0'
-          in if n >= 1 && n <= length entries
-               then pure (Just (entries !! (n - 1)))
-               else pickMulti statuses
+    pickMulti statuses cm = do
+      me <- awaitInputSDL
+      case me of
+        Nothing              -> pure Nothing
+        Just (KeyPress c)    -> dispatch statuses cm c
+        Just (ClickAt px py) -> case hitTest cm px py of
+          Just c  -> dispatch statuses cm c
+          Nothing -> pickMulti statuses cm
+
+    dispatch statuses cm c = case c of
+      'q' -> pure Nothing
+      'h' -> showHelp statuses
+      'H' -> showHelp statuses
+      's' -> showSettings statuses
+      'S' -> showSettings statuses
+      ch  ->
+        let n = fromEnum ch - fromEnum '0'
+        in if n >= 1 && n <= length entries
+             then pure (Just (entries !! (n - 1)))
+             else pickMulti statuses cm
+
     showHelp statuses = do
       howToPlayLoop ctx "how to play" defaultHowToPlay
-      renderMultiMenu ctx entries statuses
-      pickMulti statuses
+      cm' <- renderMultiMenu ctx entries statuses
+      pickMulti statuses cm'
     showSettings statuses = do
       _ <- settingsMenu ctx
-      renderMultiMenu ctx entries statuses
-      pickMulti statuses
+      cm' <- renderMultiMenu ctx entries statuses
+      pickMulti statuses cm'
 
-renderMultiMenu :: SDLContext -> [ScenarioEntry] -> [SaveStatus] -> IO ()
+renderMultiMenu :: SDLContext -> [ScenarioEntry] -> [SaveStatus] -> IO ClickMap
 renderMultiMenu ctx entries statuses = do
   clearSDL ctx
   let fc = sdlFont ctx
+      rowHit r c = gridRowRect fc 0 r 80 c
   renderText fc "throughline" defaultText (3, 2)
   renderText fc "A narrative engine." dimText (3, 3)
   renderText fc "" dimText (3, 4)
@@ -213,6 +247,25 @@ renderMultiMenu ctx entries statuses = do
   renderText fc "q) Quit"        greyText (4, quitRow)
   renderText fc versionTag       dimText  (4, quitRow + 2)
   presentSDL ctx
+  -- Each scenario takes two text rows (label + tagline); click on
+  -- either row dispatches the scenario's digit.
+  let scenarioRects =
+        concat
+          [ let key = digitFor n
+            in [ rowHit (4 + n * 2)     key
+               , rowHit (4 + n * 2 + 1) key
+               ]
+          | n <- [1 .. length entries]
+          ]
+      digitFor n = case show n of
+        (c : _) -> c
+        []      -> '?'   -- unreachable: show never yields [] on Int
+      footer =
+        [ rowHit (fromIntegral helpRow)     'h'
+        , rowHit (fromIntegral settingsRow) 's'
+        , rowHit (fromIntegral quitRow)     'q'
+        ]
+  pure (scenarioRects <> footer)
   where
     renderRow fc (n, e, s) = do
       let row   = fromIntegral (4 + n * 2)
@@ -244,13 +297,15 @@ helpPagesFor e = case entryHowToPlay e of
   Just pages -> pages
   Nothing    -> defaultHowToPlay
 
--- | Two-key confirmation: y starts over, anything else cancels.  Kept
--- deliberately spartan — the "discards save" wording already does the
--- warning work on the main screen.
+-- | Two-option confirmation.  Either key (y / n) or a click on the
+-- corresponding row resolves; anything else cancels conservatively.
+-- The "discards save" wording on the main screen already does the
+-- warning work, so this screen stays spartan.
 confirmDiscard :: SDLContext -> String -> IO Bool
 confirmDiscard ctx label = do
   clearSDL ctx
   let fc = sdlFont ctx
+      rowHit r c = gridRowRect fc 0 r 80 c
   renderText fc "Start a new hunt?"             defaultText  (3, 2)
   renderText fc ("This deletes your " <> label) warningColor (3, 3)
   renderText fc "save permanently."             warningColor (3, 4)
@@ -258,8 +313,18 @@ confirmDiscard ctx label = do
   renderText fc "y) Yes, start over"            defaultText  (4, 7)
   renderText fc "n) Cancel"                     defaultText  (4, 8)
   presentSDL ctx
-  mc <- awaitKeySDL
-  pure (mc == Just 'y' || mc == Just 'Y')
+  let cm = [rowHit 7 'y', rowHit 8 'n']
+  loop cm
+  where
+    loop cm = do
+      me <- awaitInputSDL
+      case me of
+        Nothing              -> pure False
+        Just (KeyPress c)    -> decide c
+        Just (ClickAt px py) -> case hitTest cm px py of
+          Just c  -> decide c
+          Nothing -> loop cm
+    decide c = pure (c == 'y' || c == 'Y')
 
 -- ---------------------------------------------------------------------------
 -- Crash screen
@@ -291,9 +356,9 @@ renderCrashScreen reportPath message = do
       renderText fc ""                                        dimText      (3, 9)
       renderText fc (excerpt message)                         greyText     (3, 10)
       renderText fc ""                                        dimText      (3, 11)
-      renderText fc "Press any key to close."                 greyText     (3, 12)
+      renderText fc "Press any key or click to close."        greyText     (3, 12)
       presentSDL ctx
-      _ <- awaitKeySDL
+      _ <- awaitInputSDL
       freeSDL ctx
   where
     excerpt s = take 80 (takeWhile (/= '\n') s)

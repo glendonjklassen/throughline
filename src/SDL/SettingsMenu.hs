@@ -10,17 +10,36 @@
 -- (they affect 'initSDLWith'), which the footer reminds the player of.
 -- Volumes and reveal-speed are live once the relevant subsystems read
 -- them from disk at runtime.
+--
+-- Supports both keyboard and pointer input:
+--   keyboard — j/k to move between rows, h/l to adjust, enter to
+--              save, escape to cancel.
+--   pointer  — click a row to focus it; click the \'<\' or \'>\'
+--              beside the value to step it; click the footer rows
+--              to save or cancel.  Touches work the same way.
 module SDL.SettingsMenu
   ( settingsMenu
   ) where
 
 import           Data.IORef         (newIORef, readIORef, writeIORef)
 
+import           SDL.ClickMap       (ClickMap, gridRect, gridRowRect, hitTest)
 import           SDL.FontContext    (renderText)
-import           SDL.InputHandler   (awaitKeySDL)
+import           SDL.InputHandler   (InputEvent(..), awaitInputSDL)
 import           SDL.Palette        (defaultText, dimText, greyText, warningColor)
 import           SDL.Renderer       (SDLContext(..), clearSDL, presentSDL)
-import           SDL.Settings       (DisplayMode(..), Settings(..), loadSettings, saveSettings)
+import           SDL.Settings       (DisplayMode(..), Settings(..), loadSettings,
+                                     saveSettings)
+
+-- | Internal event the dispatch loop reacts to.  Clicks and keys both
+-- resolve to one of these; the loop then handles each symmetrically.
+data MenuCmd
+  = SelectRow !Int
+  | AdjustRow !Int !Int    -- row, direction (-1 or +1)
+  | Commit
+  | Cancel
+  | MoveBy !Int            -- relative row move (+1 / -1)
+  deriving (Eq)
 
 -- | Open the settings menu and loop until the player commits or
 -- cancels.  On commit, persists to disk.  Returns the resulting
@@ -29,36 +48,60 @@ import           SDL.Settings       (DisplayMode(..), Settings(..), loadSettings
 settingsMenu :: SDLContext -> IO Settings
 settingsMenu ctx = do
   baseline <- loadSettings
-  stateRef <- newIORef (baseline, 0 :: Int)   -- (current settings, selected row)
+  stateRef <- newIORef (baseline, 0 :: Int)
   loop baseline stateRef
   where
     loop baseline stateRef = do
       (s, sel) <- readIORef stateRef
-      renderMenu ctx s sel
-      mc <- awaitKeySDL
-      case mc of
-        Nothing                    -> pure baseline
-        Just '\x1B'                -> pure baseline
-        Just 'q'                   -> pure baseline
-        Just '\n'                  -> commit s
-        Just '\r'                  -> commit s
-        Just c | c `elem` "jJ"     -> move stateRef (+ 1)    >> loop baseline stateRef
-               | c `elem` "kK"     -> move stateRef (subtract 1) >> loop baseline stateRef
-               | c `elem` "hH"     -> adjust stateRef (-1)    >> loop baseline stateRef
-               | c `elem` "lL"     -> adjust stateRef 1       >> loop baseline stateRef
-               | otherwise         -> loop baseline stateRef
-    commit s = do
-      saveSettings s
-      pure s
+      cm <- renderMenu ctx s sel
+      me <- awaitInputSDL
+      case me of
+        Nothing              -> pure baseline
+        Just (KeyPress c)    -> handleCmd baseline stateRef (keyToCmd c sel)
+        Just (ClickAt px py) -> case hitTest cm px py of
+          Just ch -> handleCmd baseline stateRef (clickToCmd ch)
+          Nothing -> loop baseline stateRef
 
-    move stateRef f = do
-      (s, sel) <- readIORef stateRef
-      let sel' = wrap (f sel)
-      writeIORef stateRef (s, sel')
+    -- Click dispatches encode the command as a single character so
+    -- the click-map shape stays flat: 'A'/'B'/... = adjust row N+,
+    -- 'a'/'b'/... = adjust row N-, digits = select row, '.' = save,
+    -- ',' = cancel.  This is internal; never seen by the player.
+    clickToCmd ch
+      | ch == '.'                   = Commit
+      | ch == ','                   = Cancel
+      | ch >= '0' && ch <= '9'      = SelectRow (fromEnum ch - fromEnum '0')
+      | ch >= 'a' && ch <= 'z'      = AdjustRow (fromEnum ch - fromEnum 'a') (-1)
+      | ch >= 'A' && ch <= 'Z'      = AdjustRow (fromEnum ch - fromEnum 'A')   1
+      | otherwise                   = MoveBy 0   -- no-op
 
-    adjust stateRef d = do
-      (s, sel) <- readIORef stateRef
-      writeIORef stateRef (adjustRow sel d s, sel)
+    keyToCmd c sel
+      | c == '\x1B'          = Cancel
+      | c == 'q'             = Cancel
+      | c == '\n' || c == '\r' = Commit
+      | c `elem` "jJ"        = MoveBy 1
+      | c `elem` "kK"        = MoveBy (-1)
+      | c `elem` "hH"        = AdjustRow sel (-1)
+      | c `elem` "lL"        = AdjustRow sel 1
+      | otherwise            = MoveBy 0
+
+    handleCmd baseline stateRef cmd = case cmd of
+      Cancel -> pure baseline
+      Commit -> do
+        (s, _) <- readIORef stateRef
+        saveSettings s
+        pure s
+      SelectRow r -> do
+        (s, _) <- readIORef stateRef
+        writeIORef stateRef (s, wrap r)
+        loop baseline stateRef
+      AdjustRow r d -> do
+        (s, sel) <- readIORef stateRef
+        writeIORef stateRef (adjustRow r d s, sel)
+        loop baseline stateRef
+      MoveBy delta -> do
+        (s, sel) <- readIORef stateRef
+        writeIORef stateRef (s, wrap (sel + delta))
+        loop baseline stateRef
 
     wrap n =
       let total = length rowLabels
@@ -67,10 +110,6 @@ settingsMenu ctx = do
 -- ---------------------------------------------------------------------------
 -- Row model
 -- ---------------------------------------------------------------------------
---
--- Each row is a (label, value-renderer, adjuster) triple.  Keeping the
--- list concrete means the menu stays readable — adding a field is one
--- entry here plus its 'Settings' field.
 
 rowLabels :: [String]
 rowLabels =
@@ -83,7 +122,6 @@ rowLabels =
   , "SFX volume"
   ]
 
--- | Render a value string for a given row of 'Settings'.
 valueOf :: Int -> Settings -> String
 valueOf 0 s = case sDisplayMode s of
   Windowed   -> "windowed"
@@ -127,22 +165,38 @@ pct v = show (round (v * 100) :: Int) <> "%"
 -- Rendering
 -- ---------------------------------------------------------------------------
 
-renderMenu :: SDLContext -> Settings -> Int -> IO ()
+renderMenu :: SDLContext -> Settings -> Int -> IO ClickMap
 renderMenu ctx s sel = do
   clearSDL ctx
   let fc = sdlFont ctx
   renderText fc "— settings —"                       defaultText (3, 2)
   renderText fc ""                                   dimText     (3, 3)
   mapM_ (renderRow fc) (zip [0 :: Int ..] rowLabels)
-  let footerStart = fromIntegral (5 + length rowLabels * 2 + 1)
+  let footerRowStart = 5 + length rowLabels * 2 + 1 :: Int
+      footerStart    = fromIntegral footerRowStart
   renderText fc "j / k       select row"             greyText (3, footerStart)
-  renderText fc "h / l       adjust value"           greyText (3, footerStart + 1)
+  renderText fc "h / l       adjust value (< / >)"   greyText (3, footerStart + 1)
   renderText fc "enter       save and close"         greyText (3, footerStart + 2)
   renderText fc "esc         cancel"                 greyText (3, footerStart + 3)
   renderText fc ""                                   dimText  (3, footerStart + 4)
   renderText fc "display / contrast take effect on next launch"
                                                      warningColor (3, footerStart + 5)
   presentSDL ctx
+  -- Build click targets:
+  --   * each label region selects the row (digit character)
+  --   * the '<' glyph adjusts row -1 (lowercase letter)
+  --   * the '>' glyph adjusts row +1 (uppercase letter)
+  --   * footer "enter" row commits ('.'), "esc" row cancels (',')
+  let selectChar i = toEnum (fromEnum '0' + i)
+      minusChar  i = toEnum (fromEnum 'a' + i)
+      plusChar   i = toEnum (fromEnum 'A' + i)
+      rows = [ (i, 5 + i * 2) | i <- [0 .. length rowLabels - 1] ]
+      selectRects = [ gridRect fc 3 r 23 1 (selectChar i) | (i, r) <- rows ]
+      minusRects  = [ gridRect fc 26 r 2 1 (minusChar i)  | (i, r) <- rows ]
+      plusRects   = [ gridRect fc 45 r 2 1 (plusChar i)   | (i, r) <- rows ]
+      enterRect   = gridRowRect fc 0 (footerRowStart + 2) 80 '.'
+      escRect     = gridRowRect fc 0 (footerRowStart + 3) 80 ','
+  pure (selectRects <> minusRects <> plusRects <> [enterRect, escRect])
   where
     renderRow fc (i, label) = do
       let row       = fromIntegral (5 + i * 2)
@@ -150,4 +204,6 @@ renderMenu ctx s sel = do
           labelCol  = defaultText
           valueCol  = if i == sel then defaultText else dimText
       renderText fc (marker <> label) labelCol (3, row)
+      renderText fc "<"               greyText (26, row)
       renderText fc (valueOf i s)     valueCol (28, row)
+      renderText fc ">"               greyText (45, row)

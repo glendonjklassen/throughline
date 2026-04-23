@@ -192,6 +192,7 @@ tests:
     - Engine.Sync.IdentitySpec
     - SDL.AchievementsSpec
     - SDL.AudioBackendSpec
+    - SDL.ClickMapSpec
     - SDL.CrashHandlerSpec
     - SDL.PaletteSpec
     - SDL.SaveSlotsSpec

@@ -11,6 +11,7 @@ module SDL.SpatialHUD
   , layoutHUD
   , terrainSprites
   , terrainSpriteScatter
+  , hudClickMap
   , SpritePlacement(..)
   , trailMarks
   ) where
@@ -667,3 +668,66 @@ partitionEither = foldr step ([], [])
   where
     step (Left  a) (ls, rs) = (a : ls, rs)
     step (Right b) (ls, rs) = (ls, b : rs)
+
+-- ---------------------------------------------------------------------------
+-- HUD click map
+-- ---------------------------------------------------------------------------
+
+-- | Build hit-test regions for an action HUD so a player can click or
+-- touch an option instead of pressing its letter key.  Each region
+-- resolves to the same 'Char' the keyboard dispatcher would produce
+-- — the runner then runs it through the same code path as a
+-- keypress.
+--
+-- The geometry mirrors the renderer's layout:
+--   * Generals are laid out left-to-right in a grid starting at
+--     column 'marginLeft + 1', each cell 'genColW' wide and one row
+--     tall, starting two rows below the HUD divider.
+--   * Spatial movement cells sit at '(spatialLeft + hudCol,
+--     spatialTopRow + hudRow)' with the label's width.
+-- Both live in *grid* coordinates here; the caller converts to
+-- pixels using 'SDL.ClickMap.gridRect'.  Returns a list of
+-- (col, row, widthCells, char) tuples.
+hudClickMap
+  :: Int                           -- ^ marginLeft
+  -> Int                           -- ^ genColW (width of one general column)
+  -> Int                           -- ^ genRowCount (number of general rows)
+  -> Int                           -- ^ hudStartRow
+  -> Int                           -- ^ spatialLeft
+  -> Int                           -- ^ spatialTopRow
+  -> SpatialHUD
+  -> [(Int, Int, Int, Char)]
+hudClickMap ml genColW genRowCount hudStartRow spatialLeft spatialTopRow hud =
+  generalsHits <> movementsHits
+  where
+    -- General options are chunked into genRowCount rows, left-to-right.
+    -- Key order follows 'generalOptionKeys' — 1-based position in the
+    -- label list maps to the key char via 'poolKeyFor'.
+    generalLabels = shGeneralLabels hud
+    chunk n = go
+      where
+        go [] = []
+        go xs = take n xs : go (drop n xs)
+    numCols = max 1 (length generalLabels `div` max 1 genRowCount + 1)
+    rows    = chunk numCols generalLabels
+    generalsHits =
+      [ ( ml + 1 + colIdx * genColW
+        , hudStartRow + 2 + rowIdx
+        , genColW
+        , poolKeyFor generalOptionKeys (rowIdx * numCols + colIdx + 1)
+        )
+      | (rowIdx, row)   <- zip [0 ..] rows
+      , (colIdx, _lbl)  <- zip [0 ..] row
+      ]
+
+    -- Movement cells: each carries its own column, row, and label.
+    -- Option keys come from the order of cells within 'shSpatialCells'
+    -- — matching the order the renderer uses when it draws them.
+    movementsHits =
+      [ ( spatialLeft + hudCol c
+        , spatialTopRow + hudRow c
+        , length (hudLabel c)
+        , poolKeyFor movementOptionKeys idx
+        )
+      | (idx, c) <- zip [1 ..] (shSpatialCells hud)
+      ]
