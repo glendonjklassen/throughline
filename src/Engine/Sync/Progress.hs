@@ -123,9 +123,7 @@ saveAll path m = do
 getProgress :: PlayerId -> FilePath -> IO Progress
 getProgress pid path = do
   all' <- loadAll path
-  case Map.lookup pid all' of
-    Just p  -> pure p
-    Nothing -> defaultProgress
+  maybe defaultProgress pure (Map.lookup pid all')
 
 -- | Increment the player's hunt count, persist, and return the new
 -- value.  Creates the identity's record if none exists yet.  Call
@@ -135,9 +133,7 @@ recordHunt :: PlayerId -> FilePath -> IO Progress
 recordHunt pid path = do
   now   <- getCurrentTime
   all'  <- loadAll path
-  base  <- case Map.lookup pid all' of
-    Just p  -> pure p
-    Nothing -> defaultProgress
+  base  <- maybe defaultProgress pure (Map.lookup pid all')
   let next = base
         { progressHuntCount = progressHuntCount base + 1
         , progressUpdatedAt = now
@@ -152,9 +148,7 @@ rotateEpoch :: PlayerId -> FilePath -> IO Progress
 rotateEpoch pid path = do
   now   <- getCurrentTime
   all'  <- loadAll path
-  base  <- case Map.lookup pid all' of
-    Just p  -> pure p
-    Nothing -> defaultProgress
+  base  <- maybe defaultProgress pure (Map.lookup pid all')
   let next = base
         { progressEpoch     = progressEpoch base + 1
         , progressHuntCount = 0
@@ -170,7 +164,7 @@ rotateEpoch pid path = do
 -- | Thin wrapper around the stored list so the top-level JSON has a
 -- named \"records\" field and a \"version\" stamp — cheap insurance
 -- against a future schema change.
-data File = File [(String, Progress)]
+newtype File = File [(String, Progress)]
 
 instance ToJSON File where
   toJSON (File recs) = A.object

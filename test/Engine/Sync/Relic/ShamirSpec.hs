@@ -54,7 +54,7 @@ spec = describe "Engine.Sync.Relic.Shamir" $ do
 
     it "produces n distinct x-coordinates" $ do
       let shares = splitSecret (mkStdGen 7) 3 7 (BS.pack [0 .. 9])
-          xs     = map (\s -> shareX s) shares
+          xs     = map shareX shares
       length (uniq xs) `shouldBe` 7
 
     it "is deterministic given the same StdGen seed" $ do
@@ -108,8 +108,9 @@ threes xs =
   [ [a, b, c]
   | (i, a) <- zip [0 :: Int ..] xs
   , (j, b) <- zip [0 :: Int ..] xs
+  , i < j
   , (k, c) <- zip [0 :: Int ..] xs
-  , i < j, j < k
+  , j < k
   ]
 
 uniq :: Eq a => [a] -> [a]

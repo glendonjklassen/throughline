@@ -120,7 +120,7 @@ combineShares shares@(first:_)
   | otherwise = Just (BS.pack [ combineByte i | i <- [0 .. len - 1] ])
   where
     len = BS.length (shareBytes first)
-    allSameLength xs = all (\s -> BS.length (shareBytes s) == len) xs
+    allSameLength = all (\s -> BS.length (shareBytes s) == len)
     hasDuplicateXs xs =
       let xs' = map shareX xs
       in length xs' /= length (dedup xs')

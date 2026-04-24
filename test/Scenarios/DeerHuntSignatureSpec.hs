@@ -7,7 +7,7 @@ import qualified Data.Map.Strict as Map
 import           Test.Hspec
 
 import           Engine.CRDT.ORSet              (orMember, orToList)
-import           GameTypes                      (Location(..), worldTags)
+import           GameTypes                      (CharId(..), Location(..), worldTags)
 
 import           Scenarios.DeerHunt.Constants   (initialWorld)
 import           Scenarios.DeerHunt.Discoveries (Discovery(..), DiscoveryKind(..),
@@ -15,8 +15,6 @@ import           Scenarios.DeerHunt.Discoveries (Discovery(..), DiscoveryKind(..
 import           Scenarios.DeerHunt.Signature
 import           Scenarios.DeerHunt.World       (huntWorld, hwSignature,
                                                  hwSignatureLoc, hwByClass)
-
-import           GameTypes                      (CharId(..))
 
 spec :: Spec
 spec = describe "Scenarios.DeerHunt.Signature" $ do
@@ -36,7 +34,7 @@ spec = describe "Scenarios.DeerHunt.Signature" $ do
 
     it "every signature has at least one detail line" $ do
       let sigs = map buildSignature [1 .. 20 :: Int]
-      all (not . null . sigDetail) sigs `shouldBe` True
+      not (any (null . sigDetail) sigs) `shouldBe` True
 
     it "every signature's name has an archetype prefix" $ do
       let sigs = map buildSignature [1 .. 20 :: Int]

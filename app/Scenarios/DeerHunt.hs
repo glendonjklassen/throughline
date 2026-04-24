@@ -118,9 +118,9 @@ situationalOverride world loc salt base
 -- malformed init) — the caller's @null xs@ guard turns that into a
 -- plain base line, so there's no narrative surprise.
 archetypeHintsFor :: GameWorld -> [String]
-archetypeHintsFor world = case firstJust (map parseSignatureArchetypeTag (orToList (worldTags world))) of
-  Just arch -> archetypeHint arch
-  Nothing   -> []
+archetypeHintsFor world =
+  maybe [] archetypeHint
+    (firstJust (map parseSignatureArchetypeTag (orToList (worldTags world))))
 
 -- | Find the first 'Just' in a list of 'Maybe's.
 firstJust :: [Maybe a] -> Maybe a

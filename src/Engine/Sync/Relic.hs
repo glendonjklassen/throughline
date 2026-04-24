@@ -39,10 +39,12 @@ module Engine.Sync.Relic
   , module Engine.Sync.Relic.Types
   ) where
 
+import           Control.Monad           (when)
 import qualified Data.Aeson              as Aeson
 import qualified Data.ByteString.Lazy    as BL
 import qualified Data.Map.Strict         as Map
 import           Data.Map.Strict         (Map)
+import           Data.Maybe              (catMaybes)
 import qualified Data.Text               as T
 import           System.Directory        (createDirectoryIfMissing,
                                           doesDirectoryExist, doesFileExist,
@@ -132,7 +134,7 @@ loadFragments dir = do
       entries <- listDirectory dir
       let jsonFiles = [ dir </> e | e <- entries, takeExtension e == ".json" ]
       fragMaybes <- mapM readOne jsonFiles
-      let frags = [ f | Just f <- fragMaybes ]
+      let frags = catMaybes fragMaybes
       pure (foldr insertFrag Map.empty frags)
   where
     readOne p = do
@@ -164,7 +166,7 @@ deleteFragment :: FilePath -> ShareId -> IO ()
 deleteFragment dir sid = do
   let path = dir </> T.unpack (unShareId sid) <.> "json"
   exists <- doesFileExist path
-  if exists then removeFile path else pure ()
+  when exists (removeFile path)
 
 -- | Path for a share's fragment file within the store directory.
 fragmentPath :: FilePath -> Share -> FilePath
@@ -208,7 +210,7 @@ loadAllBundles dir = do
       entries <- listDirectory dir
       let jsonFiles = [ dir </> e | e <- entries, takeExtension e == ".json" ]
       maybes <- mapM readOne jsonFiles
-      pure [b | Just b <- maybes]
+      pure (catMaybes maybes)
   where
     readOne p = do
       bs <- BL.readFile p
