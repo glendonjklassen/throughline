@@ -12,9 +12,13 @@ import qualified Engine.Author.SceneSpec
 import qualified Engine.Core.EffectsSpec
 import qualified Engine.Sync.EventLogSpec
 import qualified Engine.Sync.IdentitySpec
+import qualified Engine.Sync.ProgressSpec
+import qualified Engine.Sync.RelicSpec
+import qualified Engine.Sync.Relic.ShamirSpec
 import qualified Engine.Author.NarrativeSpec
 import qualified Engine.CRDT.ORSetSpec
 import qualified Engine.CRDT.PNCounterSpec
+import qualified Engine.CRDT.TombstoneGCSpec
 import qualified Engine.Sync.CausalitySpec
 import qualified Engine.Sync.ConvergenceSpec
 import qualified Engine.CRDT.ORSetPropSpec
@@ -41,6 +45,7 @@ import qualified Scenarios.DeerHuntSpec
 import qualified Scenarios.DeerHuntPlaythrough
 import qualified Scenarios.DeerHuntSyncSpec
 import qualified Scenarios.DeerHuntGenerationSpec
+import qualified Scenarios.DeerHuntSignatureSpec
 import qualified Scenarios.TopBuySpec
 
 main :: IO ()
@@ -57,8 +62,12 @@ main = hspec $ do
   Engine.ChainSpec.spec
   Engine.Sync.EventLogSpec.spec
   Engine.Sync.IdentitySpec.spec
+  Engine.Sync.ProgressSpec.spec
+  Engine.Sync.RelicSpec.spec
+  Engine.Sync.Relic.ShamirSpec.spec
   Engine.CRDT.ORSetSpec.spec
   Engine.CRDT.PNCounterSpec.spec
+  Engine.CRDT.TombstoneGCSpec.spec
   Engine.Sync.CausalitySpec.spec
   Engine.Sync.ConvergenceSpec.spec
   Engine.CRDT.ORSetPropSpec.spec
@@ -79,6 +88,7 @@ main = hspec $ do
   Scenarios.DeerHuntPlaythrough.spec
   Scenarios.DeerHuntSyncSpec.spec
   Scenarios.DeerHuntGenerationSpec.spec
+  Scenarios.DeerHuntSignatureSpec.spec
   Scenarios.TopBuySpec.spec
   Scenarios.DinerSpec.spec
   Scenarios.DinerSyncSpec.spec

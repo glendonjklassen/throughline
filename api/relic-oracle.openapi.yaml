@@ -1,0 +1,802 @@
+openapi: 3.1.0
+info:
+  title: Relic Oracle
+  version: 0.1.0
+  summary: Arbitration service for the Tier-3 partial-key system.
+  description: |
+    The Relic Oracle is a small HTTP service that arbitrates three
+    things in the throughline-engine relic system:
+
+      1. **Claims** — a player found a fragment cache in the wild;
+         the oracle verifies and issues an attestation.
+      2. **Transfers** — a fragment changes hands; the oracle
+         invalidates the old attestation and issues a new one,
+         preventing double-spend.
+      3. **Combines** — `k` attestations are submitted together; if
+         the reconstructed Shamir secret hashes to the set's
+         pre-committed hash, the oracle returns a signed content
+         bundle.
+
+    Everything else (narrative flavor, in-game UI, sprites, sound)
+    stays client-side.  The oracle is the cryptographic serialization
+    point, not a game server.
+
+    See [`proposals/relic-infrastructure.md`](../proposals/relic-infrastructure.md)
+    for the full design rationale, and [`proposals/unique-finds.md`](../proposals/unique-finds.md)
+    for the three-tier unique-finds system this implements Tier 3 of.
+
+    ### Client Verification Requirements (NORMATIVE)
+
+    A conforming client **MUST** perform every check in this list
+    before treating any oracle response as authoritative.  These
+    requirements exist so an adversary who stands up a lying server
+    against this spec cannot get honest clients to accept forged
+    content.  See §5 "Threat model" of the proposal for rationale.
+
+    1. **Pinned canonical trust.**  The game binary ships with
+       `canonicalOraclePubkeys` and `canonicalGenesisSeedHash`.
+       On first contact with an oracle, fetch `/health` and
+       `/trust-list`; only if the health response's
+       `genesisSeedHash` matches the pinned value AND the trust
+       list's signing keys overlap with `canonicalOraclePubkeys`
+       may the client treat the oracle as the canonical one.
+       Any other oracle is a non-canonical instance — its bundles
+       are real to its user group but MUST NOT be merged into
+       canonical-world state.
+
+    2. **Signature verification on every signed artifact.**
+       Every `Attestation`, every `Bundle`, and every oracle
+       response that carries a `signature` field MUST be verified
+       against the pubkey identified by `keyId` from the active
+       trust list.  Unverifiable or expired-key signatures MUST
+       cause the response to be rejected, not merely warned on.
+
+    3. **Content commitments.**  The binary also ships with a
+       frozen manifest of per-set commitments — `cmSecretHash`,
+       `cmBundleContentHash`, `cmBundleId`, `cmUnlockKind` per
+       set.  On a successful `/combine`:
+
+           a. The client MUST reconstruct the secret locally from
+              the submitted share bytes (the oracle MUST NOT send
+              the reconstructed secret over the wire, and clients
+              MUST reject any response that appears to include it).
+           b. `hash(reconstructedSecret)` MUST equal `cmSecretHash`.
+           c. `hash(bundle.body)` MUST equal `cmBundleContentHash`.
+           d. `bundle.kind` MUST equal `cmUnlockKind`.
+           e. `bundle.bundleId` MUST equal `cmBundleId`.
+
+       Any mismatch means the oracle is dishonest or buggy; the
+       client MUST discard the bundle and SHOULD surface a
+       user-visible error.
+
+    4. **Serial monotonicity.**  The client MUST track, per
+       `shareId`, the highest `serial` it has ever observed in a
+       valid `Attestation`.  An attestation with a `serial` less
+       than or equal to the stored value MUST be rejected even
+       if the signature verifies.
+
+    5. **Unknown-kind bundles are inert.**  If a bundle arrives
+       with a `kind` value the client does not recognize, the
+       client MUST store the bundle (for forward compat) but MUST
+       NOT apply any in-game effect from it.  This prevents a
+       forward-compat privilege attack where an older client
+       honors an invented kind with "free unlock" semantics.
+
+    6. **No bearer tokens.**  Clients MUST NOT send any form of
+       persistent bearer token to the oracle.  All authentication
+       happens per-request via Ed25519 signatures over the request
+       body (for POSTs) or over a fresh challenge nonce (for
+       authenticated GETs).
+
+    Non-conforming servers — including servers that conform to the
+    wire shape but omit the `signature`/`keyId` fields the client
+    verifies — will have every one of their responses rejected by
+    conforming clients.  This is the intended behavior.
+
+  contact:
+    name: throughline-engine
+    url: https://github.com/glendonjklassen/throughline-engine
+  license:
+    name: MIT
+
+servers:
+  - url: https://relic.throughline.example
+    description: Canonical author-run instance (placeholder; not yet live).
+  - url: http://localhost:8080
+    description: Local dev / self-hosted instance.
+
+tags:
+  - name: sets
+    description: Public, read-only metadata about relic sets.
+  - name: claim
+    description: Claiming a newly-discovered fragment.
+  - name: transfer
+    description: Transferring ownership of a held fragment.
+  - name: combine
+    description: Combining fragments to unlock a bundle.
+  - name: bundles
+    description: Fetching unlocked content bundles.
+  - name: meta
+    description: Service metadata and health.
+
+paths:
+
+  /health:
+    get:
+      tags: [meta]
+      summary: Liveness + minimal version info.
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is up.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /trust-list:
+    get:
+      tags: [meta]
+      summary: Oracle-key trust list for client signature verification.
+      description: |
+        Returns the set of (keyId, pubkey) pairs the client should
+        trust when verifying attestations and bundles.  Clients
+        cache this list and refresh periodically.  Rotation happens
+        by adding a new key to the list — old keys stay until every
+        known attestation signed under them expires.
+      operationId: getTrustList
+      responses:
+        '200':
+          description: Trust list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrustList'
+
+  /sets:
+    get:
+      tags: [sets]
+      summary: List public metadata for every relic set.
+      operationId: listSets
+      responses:
+        '200':
+          description: Set metadata.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SetMetadata'
+
+  /sets/{setId}:
+    get:
+      tags: [sets]
+      summary: Metadata for a single relic set.
+      operationId: getSet
+      parameters:
+        - $ref: '#/components/parameters/SetId'
+      responses:
+        '200':
+          description: Set metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetMetadata'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /claim:
+    post:
+      tags: [claim]
+      summary: Claim a newly-discovered fragment cache.
+      description: |
+        The client submits a `ClaimRequest` after it has computed
+        the cache's canonical id from `hash(worldSeed || huntSeed || location)`.
+        The oracle verifies:
+
+          - The `cacheId` is valid under the world's genesis seed.
+          - The cache has not been claimed before.
+          - The `proof` demonstrates the player ran a real hunt that
+            would have encountered the cache (simple "I was here"
+            attestation for now; VRF proofs are a future upgrade).
+          - The request signature verifies under `playerPubkey`.
+
+        On success the oracle allocates a new serial for the share,
+        records the attestation, and returns both.  The share data
+        itself is deterministic from the genesis seed; the oracle
+        emits it here so the client doesn't need to know the
+        genesis seed.
+      operationId: postClaim
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimRequest'
+      responses:
+        '200':
+          description: Fragment issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Cache has already been claimed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /transfer:
+    post:
+      tags: [transfer]
+      summary: Transfer a fragment from one player to another.
+      description: |
+        The request bundles a `TransferIntent` signed by the current
+        owner and a `TransferAccept` signed by the recipient.  The
+        oracle verifies both signatures, checks that the sender
+        still holds the current attestation (no double-spend), then
+        atomically:
+
+          1. Revokes the sender's attestation (bumps the share's
+             serial).
+          2. Issues a new attestation binding the share to the
+             recipient.
+
+        Returns the new attestation to the recipient.  The sender's
+        old attestation is not revoked on their device — it becomes
+        a dead blob because the serial no longer matches.
+      operationId: postTransfer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        '200':
+          description: Transfer applied; new attestation for the recipient.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Sender no longer holds the current attestation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /combine:
+    post:
+      tags: [combine]
+      summary: Combine k fragments to unlock a bundle.
+      description: |
+        The client submits `k` attestations (where `k` is the set's
+        threshold) plus an outer signature that links the combining
+        player(-set) to the request.  The oracle:
+
+          1. Verifies every attestation is current and binds to a
+             combining pubkey.
+          2. Reconstructs the Shamir secret from the share data.
+          3. Hashes the secret and compares to the set's
+             pre-committed hash.
+          4. On match, returns the bundle (with an oracle signature
+             over the bundle contents + the combining pubkeys, so
+             scoped unlocks can be verified at render time).
+
+        Combines are idempotent per (combinerPubkeys, setId) —
+        repeating the same call returns the same bundle.
+      operationId: postCombine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CombineRequest'
+      responses:
+        '200':
+          description: Combine succeeded; bundle returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CombineResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Attestations stale, insufficient, or mismatched.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: |
+            Cryptographic reconstruction succeeded but the secret's
+            hash didn't match the set's pre-committed hash.  Indicates
+            tampered share data or a bug.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /bundles/{bundleId}:
+    get:
+      tags: [bundles]
+      summary: Fetch a previously-unlocked bundle.
+      description: |
+        Returns a bundle if the caller has already unlocked it (i.e.
+        a previous `/combine` for this bundle included the caller's
+        pubkey among the combining set).  The caller proves identity
+        by signing a fresh nonce from `/bundles/{bundleId}/challenge`
+        and submitting it as the `X-Relic-Signature` header.
+
+        Clients cache bundles locally after first fetch, so this
+        endpoint is mostly used for cache repair / first-play-on-new-device.
+      operationId: getBundle
+      parameters:
+        - $ref: '#/components/parameters/BundleId'
+        - in: header
+          name: X-Relic-Signature
+          required: true
+          schema:
+            type: string
+          description: |
+            Hex-encoded Ed25519 signature over
+            `"get-bundle" || bundleId || nonce`, where `nonce` is the
+            latest challenge for the caller's pubkey.
+        - in: header
+          name: X-Relic-PubKey
+          required: true
+          schema:
+            type: string
+          description: Hex-encoded Ed25519 public key of the caller.
+      responses:
+        '200':
+          description: Bundle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bundle'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller has not unlocked this bundle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /bundles/{bundleId}/challenge:
+    get:
+      tags: [bundles]
+      summary: Get a fresh nonce for authenticated bundle retrieval.
+      operationId: getBundleChallenge
+      parameters:
+        - $ref: '#/components/parameters/BundleId'
+        - in: query
+          name: pubkey
+          required: true
+          schema:
+            type: string
+          description: Hex-encoded Ed25519 public key of the caller.
+      responses:
+        '200':
+          description: A fresh nonce, valid for ~60 seconds.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, expiresAt]
+                properties:
+                  nonce:
+                    type: string
+                    description: Hex-encoded random bytes.
+                  expiresAt:
+                    type: string
+                    format: date-time
+
+components:
+
+  parameters:
+    SetId:
+      in: path
+      name: setId
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9-]{1,32}$'
+      description: Human-readable set identifier (e.g. `whisper`).
+    BundleId:
+      in: path
+      name: bundleId
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9-]{1,64}$'
+      description: Stable bundle identifier.
+
+  responses:
+    BadRequest:
+      description: Request was malformed or missing required fields.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Signature verification failed or required header missing.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Rate limit exceeded for this IP or pubkey.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying.
+
+  schemas:
+
+    HealthResponse:
+      type: object
+      required: [status, version]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        version:
+          type: string
+          description: Oracle server version.
+        genesisSeedHash:
+          type: string
+          description: |
+            Hash of the genesis seed in use.  Lets clients detect when
+            they're talking to a different-world oracle without
+            leaking the seed itself.
+
+    TrustList:
+      type: object
+      required: [keys, updatedAt]
+      properties:
+        updatedAt:
+          type: string
+          format: date-time
+        keys:
+          type: array
+          items:
+            type: object
+            required: [keyId, pubkey, active]
+            properties:
+              keyId:
+                type: string
+                description: Short stable id for this key (e.g. `oracle-2026-q2`).
+              pubkey:
+                type: string
+                description: Hex-encoded Ed25519 public key.
+              active:
+                type: boolean
+                description: |
+                  Whether this key is currently issuing new signatures.
+                  Inactive keys are kept in the list to verify old
+                  attestations.
+              rotatedAt:
+                type: string
+                format: date-time
+                description: When this key stopped being active, if inactive.
+
+    SetMetadata:
+      type: object
+      required: [setId, threshold, totalShares, unlockKind, title, summary]
+      properties:
+        setId:
+          type: string
+          example: whisper
+        threshold:
+          type: integer
+          minimum: 1
+          description: `k` — fragments required to unlock.
+        totalShares:
+          type: integer
+          minimum: 1
+          description: `n` — total fragments seeded in the world.
+        unlockKind:
+          $ref: '#/components/schemas/BundleKind'
+        title:
+          type: string
+          example: The Hermit of the North Quarter
+        summary:
+          type: string
+          description: |
+            One-sentence teaser.  Shown in the client's relic
+            catalog so players know *that* something exists even
+            before they've found any of its fragments.
+        discovered:
+          type: integer
+          description: How many of the `totalShares` have been claimed.
+
+    Share:
+      type: object
+      required: [shareId, x, bytes]
+      properties:
+        shareId:
+          type: string
+          description: Opaque stable id for this share (hex).
+        x:
+          type: integer
+          minimum: 1
+          maximum: 255
+          description: |
+            The Shamir x-coordinate for this share.  GF(256), so
+            values 1-255; zero is reserved for the secret itself.
+        bytes:
+          type: string
+          description: Hex-encoded share bytes (`y` values for each secret byte).
+
+    Attestation:
+      type: object
+      required: [shareId, ownerPubkey, serial, issuedAt, signature, keyId]
+      properties:
+        shareId:
+          type: string
+        ownerPubkey:
+          type: string
+          description: Hex-encoded Ed25519 pubkey of the current owner.
+        serial:
+          type: integer
+          minimum: 0
+          description: Monotonically increasing per share; bumped on every transfer.
+        issuedAt:
+          type: string
+          format: date-time
+        signature:
+          type: string
+          description: |
+            Hex-encoded Ed25519 signature from the oracle over
+            `shareId || ownerPubkey || u32(serial) || iso8601(issuedAt)`.
+        keyId:
+          type: string
+          description: Which oracle key signed this attestation.
+
+    Fragment:
+      type: object
+      required: [setId, share, attestation]
+      description: |
+        A share plus its current attestation.  Fragments are what
+        the client stores locally.
+      properties:
+        setId:
+          type: string
+        share:
+          $ref: '#/components/schemas/Share'
+        attestation:
+          $ref: '#/components/schemas/Attestation'
+
+    ClaimRequest:
+      type: object
+      required: [cacheId, playerPubkey, proof, signature]
+      properties:
+        cacheId:
+          type: string
+          description: |
+            Client-computed `hash(worldSeed || huntSeed || location)`,
+            hex-encoded.  Oracle verifies this corresponds to a real
+            cache under the genesis seed.
+        playerPubkey:
+          type: string
+          description: Hex-encoded Ed25519 pubkey claiming the fragment.
+        proof:
+          type: object
+          required: [huntSeed, location, tick]
+          description: |
+            "I was here" attestation.  Contains enough to let the
+            oracle re-derive `cacheId` and sanity-check the claim.
+            VRF upgrades replace this with a proper unforgeable
+            proof in a future release.
+          properties:
+            huntSeed:
+              type: integer
+            location:
+              type: string
+            tick:
+              type: integer
+        signature:
+          type: string
+          description: |
+            Ed25519 signature by `playerPubkey` over
+            `"claim" || cacheId || hex(playerPubkey) || canonicalJSON(proof)`.
+
+    ClaimResponse:
+      type: object
+      required: [fragment]
+      properties:
+        fragment:
+          $ref: '#/components/schemas/Fragment'
+
+    TransferIntent:
+      type: object
+      required: [shareId, fromPubkey, toPubkey, nonce, issuedAt, signature]
+      properties:
+        shareId:
+          type: string
+        fromPubkey:
+          type: string
+        toPubkey:
+          type: string
+        nonce:
+          type: string
+          description: Fresh random bytes (hex).  Prevents replay.
+        issuedAt:
+          type: string
+          format: date-time
+        signature:
+          type: string
+          description: |
+            Ed25519 signature by `fromPubkey` over
+            `"transfer-intent" || shareId || hex(fromPubkey) || hex(toPubkey) || nonce || iso8601(issuedAt)`.
+
+    TransferAccept:
+      type: object
+      required: [intentHash, toPubkey, signature]
+      properties:
+        intentHash:
+          type: string
+          description: Hex-encoded SHA-256 of the canonical JSON of the intent.
+        toPubkey:
+          type: string
+        signature:
+          type: string
+          description: |
+            Ed25519 signature by `toPubkey` over
+            `"transfer-accept" || intentHash`.
+
+    TransferRequest:
+      type: object
+      required: [intent, accept]
+      properties:
+        intent:
+          $ref: '#/components/schemas/TransferIntent'
+        accept:
+          $ref: '#/components/schemas/TransferAccept'
+
+    TransferResponse:
+      type: object
+      required: [newAttestation]
+      properties:
+        newAttestation:
+          $ref: '#/components/schemas/Attestation'
+
+    CombineRequest:
+      type: object
+      required: [setId, combinerPubkeys, attestations, signature]
+      properties:
+        setId:
+          type: string
+        combinerPubkeys:
+          type: array
+          description: |
+            Every pubkey participating in this combine.  For a solo
+            combine (one player holds all `k` attestations), this is
+            a singleton.  For coalitions, all participating pubkeys
+            must be listed and every attestation must bind to one of
+            them.
+          items:
+            type: string
+        attestations:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Attestation'
+        signature:
+          type: string
+          description: |
+            Ed25519 signature by the *first* entry in `combinerPubkeys`
+            (the designated submitter) over
+            `"combine" || setId || canonicalJSON(combinerPubkeys) || canonicalJSON(attestations)`.
+
+    CombineResponse:
+      type: object
+      required: [bundle]
+      properties:
+        bundle:
+          $ref: '#/components/schemas/Bundle'
+
+    BundleKind:
+      type: string
+      enum: [lore, named-character, map-reveal, capability]
+      description: |
+        Shape of the bundle's body.  See
+        [`proposals/relic-infrastructure.md`](../proposals/relic-infrastructure.md)
+        for the semantics of each kind.
+
+    Bundle:
+      type: object
+      required: [bundleId, setId, kind, title, body, createdAt, signature, keyId]
+      properties:
+        bundleId:
+          type: string
+        setId:
+          type: string
+        kind:
+          $ref: '#/components/schemas/BundleKind'
+        title:
+          type: string
+        body:
+          type: object
+          description: |
+            Shape depends on `kind`.  Clients should not fail on
+            unknown fields — bundles may add fields over time in a
+            backward-compatible way.
+          additionalProperties: true
+        combinerPubkeys:
+          type: array
+          items:
+            type: string
+          description: |
+            If present, the bundle is combiner-scoped and should only
+            apply to these pubkeys.  Absent ⇒ globally available.
+        createdAt:
+          type: string
+          format: date-time
+        signature:
+          type: string
+          description: |
+            Hex-encoded Ed25519 signature from the oracle over the
+            canonical JSON of every field above except `signature`
+            and `keyId`.
+        keyId:
+          type: string
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - bad-request
+            - unauthorized
+            - not-found
+            - conflict
+            - rate-limited
+            - hash-mismatch
+            - internal-error
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+security:
+  - {}
+  # Endpoints that need authentication do it via request-body
+  # signatures (claim / transfer / combine) or custom headers
+  # (bundles).  No bearer tokens — PlayerId = pubkey.

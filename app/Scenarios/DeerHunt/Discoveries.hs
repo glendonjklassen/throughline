@@ -16,6 +16,7 @@ module Scenarios.DeerHunt.Discoveries
   , discoveryCatalog
   ) where
 
+import           Data.List       (isPrefixOf, sortOn)
 import qualified Data.Map.Strict as Map
 import           Text.Read       (readMaybe)
 
@@ -25,15 +26,25 @@ import           Engine.Core.Conditions  (checkCondition)
 import           GameTypes
 import           Scenarios.DeerHunt.Constants  (formatHuntDate)
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
-import           Scenarios.DeerHunt.World      (HuntWorld, hwClass, hwFinds)
+import           Scenarios.DeerHunt.Signature  (SignatureArchetype(..),
+                                                SignatureFind(..),
+                                                signatureDiaryLines,
+                                                signatureFactoid,
+                                                signatureFoundTag)
+import           Scenarios.DeerHunt.World      (HuntWorld, hwClass, hwFinds,
+                                                hwSignature, hwSignatureLoc)
 
 -- | High-level categorization for a discoverable entry.  Matches the
--- groupings the journal's catalog view will display.
+-- groupings the journal's catalog view will display.  'Signature' is
+-- the per-hunt unique find from 'Scenarios.DeerHunt.Signature'; every
+-- hunt seeds exactly one, and the catalog shows them separately from
+-- the generic rare 'Find' pool.
 data DiscoveryKind
   = Tree
   | Animal
   | Sign
   | Find
+  | Signature
   deriving (Show, Read, Eq, Ord, Enum, Bounded)
 
 -- | A discoverable entry: its category plus its name as it appears
@@ -60,13 +71,34 @@ firstFind d@(Discovery kind name) =
      , immediateWhen guard (AddWorldTag tag)
      ]
 
+-- | First-sighting beat for a 'SignatureFind'.  Mirrors 'firstFind'
+-- but lays down multiple journal lines so the signature reads as a
+-- paragraph — the whole point of the Tier 1 slot is that it matters
+-- more than a one-line catalog entry.  Every effect shares the same
+-- guard so repeat arrivals collapse as usual.
+firstSignature :: SignatureFind -> [Effect]
+firstSignature sig =
+  let d     = Discovery Signature (sigName sig)
+      tag   = discoveryTag d
+      guard = Not (HasWorldTag tag)
+      detail = signatureDiaryLines sig
+      header = "First Signature: " <> sigName sig <> "."
+  in [ immediateWhen guard (Narrate (openingLine Signature (sigName sig))) ]
+     <> [ immediateWhen guard (Narrate line) | line <- detail ]
+     <> [ immediateWhen guard (JournalEntry header) ]
+     <> [ immediateWhen guard (JournalEntry ("  " <> line)) | line <- detail ]
+     <> [ immediateWhen guard (AddWorldTag tag)
+        , immediateWhen guard (AddWorldTag signatureFoundTag)
+        ]
+
 -- | Category-aware one-liner for a first-find.  Keeps the voice of
 -- the rest of DeerHunt's prose — short, observational, prairie-dry.
 openingLine :: DiscoveryKind -> String -> String
-openingLine Tree   name = "A " <> name <> ". Old trunk, new to your map."
-openingLine Animal name = "A " <> name <> ". You stand still a moment."
-openingLine Sign   name = name <> ". Recent."
-openingLine Find   name = name <> ". Not something you expected to see out here."
+openingLine Tree      name = "A " <> name <> ". Old trunk, new to your map."
+openingLine Animal    name = "A " <> name <> ". You stand still a moment."
+openingLine Sign      name = name <> ". Recent."
+openingLine Find      name = name <> ". Not something you expected to see out here."
+openingLine Signature name = name <> ". You stop."
 
 -- ---------------------------------------------------------------------------
 -- Discovery pools
@@ -182,11 +214,23 @@ findDiscoveryAxiom hw you = Axiom
       concatMap (handleFindArrival hw) (playerArrivals you diff)
   }
 
+-- | Handle arrival at a find-bearing location.  Signature-slot hits
+-- take precedence over generic rare finds at the same cell, since
+-- the signature's richer beat subsumes the plain one.  Both tags can
+-- co-exist on the world, so a later rare-find rework won't lose a
+-- stacked discovery.
 handleFindArrival :: HuntWorld -> Location -> [Effect]
-handleFindArrival hw loc =
-  case Map.lookup loc (hwFinds hw) of
-    Nothing   -> []
-    Just name -> firstFind (Discovery Find name)
+handleFindArrival hw loc
+  | hwSignatureLoc hw == Just loc =
+      let sig = hwSignature hw
+      in firstSignature sig
+         <> case Map.lookup loc (hwFinds hw) of
+              Just name | name /= sigName sig -> firstFind (Discovery Find name)
+              _                               -> []
+  | otherwise =
+      case Map.lookup loc (hwFinds hw) of
+        Nothing   -> []
+        Just name -> firstFind (Discovery Find name)
 
 -- ---------------------------------------------------------------------------
 -- Catalog view
@@ -208,14 +252,16 @@ discoveredEntries world =
 -- in the hunter's voice: the day it was first seen, a terse phrasing
 -- of the sighting, and a short factoid.  Order follows the journal
 -- (chronological) so the index reads as a running log instead of an
--- alphabetised list.
+-- alphabetised list — 'discoveredEntries' hands us Map-key order
+-- (alphabetical by 'Show Discovery'), so we re-sort by first-seen
+-- day and tiebreak on the discovery key to keep same-day entries
+-- stable across redraws.
 discoveryCatalog :: GameWorld -> [String]
 discoveryCatalog world =
-  let entries = discoveredEntries world
-      dayMap  = discoveryDays (worldJournal world)
-      line d  =
-        let day = Map.findWithDefault 1 (discoveryKey d) dayMap
-        in diaryLine day d
+  let dayMap    = discoveryDays (worldJournal world)
+      dayOf d   = Map.findWithDefault 1 (discoveryKey d) dayMap
+      entries   = sortOn (\d -> (dayOf d, discoveryKey d)) (discoveredEntries world)
+      line d    = diaryLine (dayOf d) d
   in map line entries
 
 -- | Key used to look up a discovery's first-seen day in the journal
@@ -275,10 +321,11 @@ diaryLine day d@(Discovery kind name) =
 -- Trees and finds drop the article or use "a patch of" where it
 -- helps the prose land; animals get an indefinite article.
 sightingPhrase :: DiscoveryKind -> String -> String
-sightingPhrase Animal name = "a " <> name <> " went through"
-sightingPhrase Tree   name = "stopped by a " <> name
-sightingPhrase Sign   name = "picked up " <> name
-sightingPhrase Find   name = "found " <> name
+sightingPhrase Animal    name = "a " <> name <> " went through"
+sightingPhrase Tree      name = "stopped by a " <> name
+sightingPhrase Sign      name = "picked up " <> name
+sightingPhrase Find      name = "found " <> name
+sightingPhrase Signature name = "found " <> name
 
 -- | Short, authored factoid per species.  Written in the same terse
 -- prairie voice as the rest of the game; each one grounds the entry
@@ -312,4 +359,17 @@ factoidFor (Discovery Find name) = case name of
   "beaver stump"     -> "Clean bevels. They work by the hour."
   "skull"            -> "White as paper. You leave it where it lay."
   _                  -> ""
+factoidFor (Discovery Signature name) = signatureFactoid (archetypeOfName name)
 factoidFor _ = ""
+
+-- | Reconstruct a signature's archetype from the name prefix.  Names
+-- all begin with the archetype's common noun (\"shed\", \"cairn\",
+-- \"carving\", \"skull\") so a prefix scan is enough — the seeded
+-- descriptor can't collide because it's always joined by \" — \".
+archetypeOfName :: String -> SignatureArchetype
+archetypeOfName name
+  | "shed "    `isPrefixOf` name = SigAntler
+  | "cairn "   `isPrefixOf` name = SigCairn
+  | "carving " `isPrefixOf` name = SigCarving
+  | "skull "   `isPrefixOf` name = SigSkull
+  | otherwise                    = SigAntler

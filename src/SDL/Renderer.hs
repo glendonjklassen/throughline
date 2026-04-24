@@ -43,7 +43,7 @@ import           SDL.FontContext
 import           SDL.Palette
 import           SDL.Text (stripAnsi, wrapWords)
 import           SDL.Primitives (drawCellUnderline)
-import           SDL.Sprites    (drawSprite, spritesForClass)
+import           SDL.Sprites    (drawSparkleParticles, drawSprite, spritesForClass)
 import           SDL.SpatialHUD (SpatialHUD(..), HUDCell(..),
                                  TrailMark(..), SpritePlacement(..),
                                  layoutHUD, hudGenRowCount,
@@ -563,6 +563,62 @@ drawSpatialHUD fc totalCols sparkleFn zoneTintFn frame you world hud spatialLeft
             halo   = hudTarget cell >>= zoneTintFn
         in cell { hudTint = tint, hudHalo = halo }
       visibleCells = filter (\c -> rfCellAlpha frame c > 0.01) (shSpatialCells hud)
+      -- For each HUD row, the set of HUD columns currently occupied
+      -- by some cell's label.  Sensory fragments below consult this
+      -- so they can skip any character-position that would scribble
+      -- through a neighboring label.  Built from every HUD cell,
+      -- not just 'visibleCells' — a label fading in on the
+      -- fragment's row still owns its column space.
+      labelCols :: Map.Map Int (Set.Set CInt)
+      labelCols =
+        let addCell c acc =
+              let row    = hudRow c
+                  startC = spatialLeft + fromIntegral (hudCol c)
+                  cols   = [startC .. startC + fromIntegral (length (hudLabel c)) - 1]
+              in Map.insertWith Set.union row (Set.fromList cols) acc
+        in foldr addCell Map.empty (shSpatialCells hud)
+  -- Render the active sensory fragments FIRST (below the labels in
+  -- z-order) so any collision between a fragment and a neighboring
+  -- label is resolved in the label's favour — the label over-draws
+  -- the fragment char and stays readable.
+  --
+  -- Right-edge clamp: if a fragment anchored to its cell's column
+  -- would overflow the screen, nudge its starting column left just
+  -- enough that the last character fits, leaving a small right
+  -- margin.  Cell-to-fragment visual tie loosens slightly for these
+  -- edge cases, but the alternative (clipping off the tail) is
+  -- strictly worse to read.
+  --
+  -- Per-char label-column exclusion: even with label-overdraw, a
+  -- fragment char whose target column is occupied by a neighbouring
+  -- cell's label is skipped outright.  Over-drawing the *same*
+  -- glyph twice isn't the issue — it's that anti-aliased fragment
+  -- text under a label produces fringe artifacts during the sweep.
+  mapM_ (\(cell, sweep, darkening, fragment) ->
+    unless (null fragment) $ do
+      let fragRow    = hudRow cell + 1
+          baseRow    = spatialTopRow + fromIntegral fragRow
+          naturalCol = spatialLeft   + fromIntegral (hudCol cell)
+          rightEdge  = fromIntegral totalCols - 1 :: CInt
+          maxStart   = max 0 (rightEdge - fromIntegral (length fragment))
+          startCol   = max 0 (min naturalCol maxStart)
+          py         = baseRow * cellHeight fc
+          baseX      = startCol * cellWidth fc
+          cw         = cellWidth fc
+          occupied   = Map.findWithDefault Set.empty fragRow labelCols
+      mapM_ (\(i, ch) -> do
+        let a      = charSweepAlpha i sweep darkening
+            col    = startCol + fromIntegral i
+            clash  = Set.member col occupied
+        when (a > 0.01 && not clash) $
+          renderTextAtPixel fc [ch] (applyAlpha a thoughtColor)
+            (baseX + fromIntegral i * cw, py)
+        ) (zip [0 :: Int ..] fragment)
+    ) (rfActiveSenses frame)
+  -- Then draw the labels ON TOP.  Any fragment char that squeaked
+  -- past the occupied-column check above but still happens to sit
+  -- under a label (e.g. diagonal anti-aliasing from the previous
+  -- row) gets over-drawn cleanly here.
   mapM_ (\cell0 -> do
     let cell  = enrich cell0
         alpha = rfCellAlpha frame cell0
@@ -583,43 +639,30 @@ drawSpatialHUD fc totalCols sparkleFn zoneTintFn frame you world hud spatialLeft
                      (fromIntegral baseCol, fromIntegral baseRow)
       Nothing   -> pure ()
     ) visibleCells
-  -- Active sensory line (if any) one row under its parent cell.
-  -- Each character's alpha is determined by its position relative to
-  -- the sweep: during fade-in, chars the beam has already passed read
-  -- bright, chars still ahead of it stay dark; during fade-out, the
-  -- relationship inverts.  The soft feather around the sweep gives
-  -- the effect of a light glow rather than a hard edge.
-  --
-  -- Right-edge clamp: if a fragment anchored to its cell's column
-  -- would overflow the screen, nudge its starting column left just
-  -- enough that the last character fits, leaving a small right
-  -- margin.  Cell-to-fragment visual tie loosens slightly for these
-  -- edge cases, but the alternative (clipping off the tail) is
-  -- strictly worse to read.
-  mapM_ (\(cell, sweep, darkening, fragment) ->
-    unless (null fragment) $ do
-      let baseRow    = spatialTopRow + fromIntegral (hudRow cell) + 1
-          naturalCol = spatialLeft   + fromIntegral (hudCol cell)
-          rightEdge  = fromIntegral totalCols - 1 :: CInt
-          maxStart   = max 0 (rightEdge - fromIntegral (length fragment))
-          startCol   = max 0 (min naturalCol maxStart)
-          py         = baseRow * cellHeight fc
-          baseX      = startCol * cellWidth fc
-          cw         = cellWidth fc
-      mapM_ (\(i, ch) -> do
-        let a = charSweepAlpha i sweep darkening
-        when (a > 0.01) $
-          renderTextAtPixel fc [ch] (applyAlpha a thoughtColor)
-            (baseX + fromIntegral i * cw, py)
-        ) (zip [0 :: Int ..] fragment)
-    ) (rfActiveSenses frame)
-  -- Sparkles.  Only rendered for cells that have been revealed.
-  mapM_ (\(cell, level, glyph) -> do
-    let row = spatialTopRow + fromIntegral (hudRow cell)
-        col = spatialLeft   + fromIntegral (hudCol cell)
-        gCol = max 0 (col - fromIntegral (length glyph) - 1)
-    renderText fc glyph (sparkleColor level) (gCol, row)
-    ) (cellSparkles sparkleFn visibleCells)
+  -- Sparkles.  Rendered for every sparkle-worthy cell, independent
+  -- of the cell-label reveal fade — the particles are ambient hints
+  -- and should animate continuously even when the label itself is
+  -- typewriting in or fading up (a 'hiddenReveal' frame would
+  -- otherwise suppress them for the whole typewriter pass).  A
+  -- pixel-particle cluster sits just to the left of the label —
+  -- renders reliably on every font (the old Unicode-sparkle glyph
+  -- showed as tofu when JetBrainsMono was missing U+2726) and
+  -- scales its spread + density with level so a level-3 hint reads
+  -- as a bright spray, not just a brighter dot.
+  mapM_ (\(cell, level, _glyph) -> do
+    let row        = spatialTopRow + fromIntegral (hudRow cell)
+        col        = spatialLeft   + fromIntegral (hudCol cell)
+        -- Land the cluster one cell to the left of the label so the
+        -- label itself never overlaps the particles.
+        centreCol  = max 0 (col - 1)
+        px         = centreCol * cellWidth fc + cellWidth fc `div` 2
+        py         = row       * cellHeight fc + cellHeight fc `div` 2
+        -- Seed the cluster position-stably so the same cell always
+        -- sparkles the same way — but different cells get a visibly
+        -- different arrangement.
+        seed       = hudRow cell * 31 + hudCol cell * 7
+    drawSparkleParticles fc (px, py) level seed 1.0 (sparkleColor level)
+    ) (cellSparkles sparkleFn (shSpatialCells hud))
   -- Trail marks: breadcrumbs at neighbor cells the player recently
   -- departed.  Age fades the alpha so the freshest step reads strongest
   -- and anything more than a few moves old dissolves into the scatter.
@@ -831,9 +874,14 @@ journalPages = go []
       | otherwise                        = go (e : acc) rest
 
 -- | Render the journal overlay on the given tab.  The caller cycles
--- tabs with 1/2/3 and dismisses with any other key.
-renderJournalOverlay :: SDLContext -> ScenarioDisplay -> GameWorld -> JournalTab -> IO ()
-renderJournalOverlay ctx display world tab = do
+-- tabs with 1/2/3, scrolls with up/down/pgup/pgdn, and dismisses
+-- with any other key.  @scroll@ is a line offset — larger values
+-- scroll toward older content on bottom-anchored tabs (Today /
+-- Past) and toward later content on top-anchored tabs (Catalog).
+-- The caller clamps it to a sensible range.
+renderJournalOverlay
+  :: SDLContext -> ScenarioDisplay -> GameWorld -> JournalTab -> Int -> IO ()
+renderJournalOverlay ctx display world tab scroll = do
   clearSDL ctx
   let fc        = sdlFont ctx
       cols      = gridCols ctx
@@ -843,11 +891,11 @@ renderJournalOverlay ctx display world tab = do
       lastRow   = rows - 2
   drawJournalHeader fc cols headerRow tab
   case tab of
-    TabToday   -> drawToday   fc display cols rows firstRow lastRow world
-    TabPast    -> drawPast    fc display cols      firstRow lastRow world
-    TabCatalog -> drawCatalog fc cols              firstRow lastRow display world
-  renderText fc "1 today  2 earlier  3 index   s share   any other: close" greyText
-    (marginLeft, fromIntegral lastRow)
+    TabToday   -> drawToday   fc display cols rows firstRow lastRow scroll world
+    TabPast    -> drawPast    fc display cols      firstRow lastRow scroll world
+    TabCatalog -> drawCatalog fc cols              firstRow lastRow scroll display world
+  renderText fc "1 today  2 earlier  3 index   s share   \x2191/\x2193 scroll   any other: close"
+    greyText (marginLeft, fromIntegral lastRow)
   presentSDL ctx
 
 drawJournalHeader :: FontContext -> Int -> Int -> JournalTab -> IO ()
@@ -882,16 +930,20 @@ notebookTextWidth :: Int -> Int
 notebookTextWidth cols = max 10 (cols - fromIntegral notebookEntryCol - 4)
 
 -- | Draw a vertical slice of notebook lines between @firstRow@ and
--- @lastRow@ (inclusive).  If @anchorBottom@ is True, the *last* N
--- lines that fit are shown (useful for live-feeling scroll); if
--- False, the *first* N are shown (useful for an index that grows
--- from the top).
-drawJournalLines :: FontContext -> Int -> Int -> Bool -> [JournalLine] -> IO ()
-drawJournalLines fc firstRow lastRow anchorBottom lines_ =
+-- @lastRow@ (inclusive).  If @anchorBottom@ is True, the last N
+-- lines are shown by default and @scroll@ shifts the window toward
+-- older content; if False, the first N are shown and @scroll@
+-- shifts toward later content.  @scroll@ is clamped to the list
+-- size so scrolling past the edge is a no-op rather than an error.
+drawJournalLines :: FontContext -> Int -> Int -> Bool -> Int -> [JournalLine] -> IO ()
+drawJournalLines fc firstRow lastRow anchorBottom scroll lines_ =
   let budget  = max 0 (lastRow - firstRow)
+      total   = length lines_
+      maxOff  = max 0 (total - budget)
+      off     = max 0 (min scroll maxOff)
       visible = if anchorBottom
-                  then takeLast budget lines_
-                  else take budget lines_
+                  then takeLast budget (take (total - off) lines_)
+                  else take budget (drop off lines_)
   in mapM_ draw (zip [0 :: Int ..] visible)
   where
     draw (_, Nothing) = pure ()
@@ -933,8 +985,8 @@ pageLabelAndEntries fallback page = case page of
 -- the weather as a dim subtitle.  Entries follow in paragraph form.
 -- Scrolls from the bottom so the newest entry is always visible at
 -- the edge of the page.
-drawToday :: FontContext -> ScenarioDisplay -> Int -> Int -> Int -> Int -> GameWorld -> IO ()
-drawToday fc display cols _rows firstRow lastRow world =
+drawToday :: FontContext -> ScenarioDisplay -> Int -> Int -> Int -> Int -> Int -> GameWorld -> IO ()
+drawToday fc display cols _rows firstRow lastRow scroll world =
   let pages   = journalPages (worldJournal world)
       dayNum  = max 1 (length pages)
       fallback = sdDayLabel display dayNum
@@ -947,14 +999,14 @@ drawToday fc display cols _rows firstRow lastRow world =
   in case todayEntries of
        [] -> renderText fc "Nothing written yet today."
                greyText (notebookHeaderCol, fromIntegral firstRow)
-       _  -> drawJournalLines fc firstRow lastRow True lines_
+       _  -> drawJournalLines fc firstRow lastRow True scroll lines_
 
 -- | Earlier days: every completed day's notebook block stacked in
 -- chronological order.  Label is read from each page's leading
 -- marker, falling back to the scenario's own day formatter for the
 -- initial day (written without a marker).
-drawPast :: FontContext -> ScenarioDisplay -> Int -> Int -> Int -> GameWorld -> IO ()
-drawPast fc display cols firstRow lastRow world =
+drawPast :: FontContext -> ScenarioDisplay -> Int -> Int -> Int -> Int -> GameWorld -> IO ()
+drawPast fc display cols firstRow lastRow scroll world =
   let pages = journalPages (worldJournal world)
       past  = if null pages then [] else init pages
       textW = notebookTextWidth cols
@@ -969,22 +1021,22 @@ drawPast fc display cols firstRow lastRow world =
   in case past of
        [] -> renderText fc "No earlier days yet."
                greyText (notebookHeaderCol, fromIntegral firstRow)
-       _  -> drawJournalLines fc firstRow lastRow True lines_
+       _  -> drawJournalLines fc firstRow lastRow True scroll lines_
 
 -- | Index: things noticed on this hunt, as diary paragraphs rather
 -- than a ledger.  Each scenario emits pre-formatted prose (day,
 -- sighting, short factoid), and the renderer just wraps and spaces
 -- them out — no counts, no grouping, no checklist texture.  Empty
 -- catalog reads as one dim line so the page doesn't go blank.
-drawCatalog :: FontContext -> Int -> Int -> Int -> ScenarioDisplay -> GameWorld -> IO ()
-drawCatalog fc cols firstRow lastRow display world =
+drawCatalog :: FontContext -> Int -> Int -> Int -> Int -> ScenarioDisplay -> GameWorld -> IO ()
+drawCatalog fc cols firstRow lastRow scroll display world =
   let entries = sdCatalog display world
       textW   = notebookTextWidth cols
       lines_  = intercalate [Nothing] (map (entryLines textW) entries)
   in case entries of
        [] -> renderText fc "Nothing kept in this ledger yet."
                greyText (notebookHeaderCol, fromIntegral firstRow)
-       _  -> drawJournalLines fc firstRow lastRow False lines_
+       _  -> drawJournalLines fc firstRow lastRow False scroll lines_
   where
     entryLines textW paragraph =
       case wrapWords textW paragraph of

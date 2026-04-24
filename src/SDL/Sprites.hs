@@ -10,6 +10,7 @@ module SDL.Sprites
   , spritesForClass
   , spriteByName
   , drawSprite
+  , drawSparkleParticles
   ) where
 
 import           Foreign.C.Types (CInt)
@@ -54,6 +55,77 @@ drawSprite fc (ox, oy) alpha sprite = do
     SDL.rendererDrawColor ren SDL.$= SDL.V4 r g b effA
     SDL.fillRect ren (Just rect)
     ) (spritePixels sprite)
+
+-- | Draw an animated particle-style sparkle cluster at a pixel
+-- origin.  Replaces the old single-glyph sparkle (which rendered as
+-- tofu in fonts that lacked U+2726).  Intensity in 1-3 scales the
+-- particle count, the drift amplitude, and the cluster spread; the
+-- @seed@ deterministically positions each particle so the same cell
+-- always sparkles the same way, and adjacent sparkling cells don't
+-- perfectly mirror each other.
+--
+-- Motion: each particle orbits its seeded base position along a
+-- Lissajous-ish path (different x/y frequencies + phases per
+-- particle) scaled by a small drift amplitude, so the cluster
+-- reads as a handful of things gently floating near the label
+-- rather than static pixel scatter.  Alpha also pulses slowly per
+-- particle so the cluster breathes.  Wall-clock time is sourced
+-- from 'SDL.ticks' — no tick-advance needed for animation.
+drawSparkleParticles :: FontContext -> (CInt, CInt) -> Int -> Int -> Double -> Color -> IO ()
+drawSparkleParticles fc (ox, oy) level seed alphaMod (Color r g b baseA) = do
+  ms <- SDL.ticks
+  let ren      = fcRenderer fc
+      t        = fromIntegral ms / 1000.0 :: Double     -- seconds since init
+      count    = case level of
+                   1 -> 3
+                   2 -> 6
+                   _ -> 10
+      spread   = case level of
+                   1 -> 4 :: Int
+                   2 -> 6
+                   _ -> 9
+      driftAmp = case level of
+                   1 -> 2.0 :: Double
+                   2 -> 3.0
+                   _ -> 4.0
+      dotSize  = 2 :: CInt
+      -- Cheap LCG stream seeded per-cell.  We need reproducible
+      -- spread + phases across cells and levels, not real random.
+      step s   = s * 1103515245 + 12345
+      stream   = iterate step (abs seed + 1)
+      -- Each particle: a seeded base offset, two motion phases, two
+      -- slightly different frequencies (so x and y don't lock into
+      -- a perfect circle — the path traces a soft Lissajous), and
+      -- a slow alpha pulse phase so the cluster shimmers.
+      particles = take count
+        [ let baseX  = fromIntegral ((s `div` 7)  `mod` spread - spread `div` 2) :: Double
+              baseY  = fromIntegral ((s `div` 13) `mod` spread - spread `div` 2) :: Double
+              -- Phases and freqs in radians / Hz respectively,
+              -- derived from non-overlapping hash buckets so the
+              -- particles don't lock-step.
+              phX    = fromIntegral ((s `div` 29) `mod` 628) / 100.0 :: Double   -- 0..2π
+              phY    = fromIntegral ((s `div` 53) `mod` 628) / 100.0 :: Double
+              fX     = 0.35 + fromIntegral ((s `div` 71) `mod` 40) / 100.0 :: Double
+              fY     = 0.30 + fromIntegral ((s `div` 83) `mod` 40) / 100.0 :: Double
+              phAlpha= fromIntegral ((s `div` 97) `mod` 628) / 100.0 :: Double
+              twopi  = 2 * pi
+              dx     = round (baseX + sin (t * fX * twopi + phX) * driftAmp) :: Int
+              dy     = round (baseY + cos (t * fY * twopi + phY) * driftAmp) :: Int
+              -- Alpha oscillates between ~0.5 and 1.0 of the base
+              -- (cluster-level alphaMod from the reveal fade).
+              pulse  = 0.75 + 0.25 * sin (t * 0.7 * twopi + phAlpha)
+              aRaw   = fromIntegral baseA * alphaMod * pulse
+              a      = max 0 (min 255 (round aRaw))
+          in (dx, dy, a :: Int)
+        | s <- stream
+        ]
+  SDL.rendererDrawBlendMode ren SDL.$= SDL.BlendAlphaBlend
+  mapM_ (\(dx, dy, a) -> do
+    let rect = SDL.Rectangle (SDL.P (SDL.V2 (ox + fromIntegral dx) (oy + fromIntegral dy)))
+                             (SDL.V2 dotSize dotSize)
+    SDL.rendererDrawColor ren SDL.$= SDL.V4 r g b (fromIntegral a)
+    SDL.fillRect ren (Just rect)
+    ) particles
 
 -- ---------------------------------------------------------------------------
 -- Sprite vocabulary per terrain class
@@ -400,26 +472,107 @@ skullSprite = Sprite "skull"
   , Pixel 2 2 colBone
   ]
 
+-- ---------------------------------------------------------------------------
+-- Signature-find sprites
+-- ---------------------------------------------------------------------------
+--
+-- Signatures are the Tier 1 per-hunt unique finds.  Each archetype gets
+-- a distinguishing sprite — bigger/denser than the ambient scatter so
+-- the player's eye lands on them.  Names match
+-- 'Scenarios.DeerHunt.Signature.signatureSpriteName'.
+
+-- | A non-typical shed antler — longer, heavier rack than 'shedAntler'.
+signatureAntler :: Sprite
+signatureAntler = Sprite "signature-antler"
+  [ Pixel 0 3 colBone
+  , Pixel 1 3 colBone
+  , Pixel 2 3 colBone
+  , Pixel 3 2 colBone
+  , Pixel 4 2 colBone
+  , Pixel 5 1 colBone
+  , Pixel 6 0 colBone
+  , Pixel 4 1 colBone
+  , Pixel 3 1 colBone      -- drop tine
+  , Pixel 3 0 colBone
+  , Pixel 5 2 colBone
+  ]
+
+-- | Stone cairn — three-high stacked stones.
+signatureCairn :: Sprite
+signatureCairn = Sprite "signature-cairn"
+  [ Pixel 1 2 colRock
+  , Pixel 2 2 colRock
+  , Pixel 3 2 colRock
+  , Pixel 1 1 colRock
+  , Pixel 2 1 colRock
+  , Pixel 3 1 colRock
+  , Pixel 2 0 colRock
+  ]
+
+-- | Carved trunk — trunk with a notch mark where the carving is.
+signatureCarving :: Sprite
+signatureCarving = Sprite "signature-carving"
+  [ Pixel 1 0 colBark
+  , Pixel 1 1 colBark
+  , Pixel 1 2 colBark
+  , Pixel 1 3 colBark
+  , Pixel 1 4 colBark
+  , Pixel 2 2 colMud       -- the carved mark
+  , Pixel 0 2 colMud
+  ]
+
+-- | Signature skull — denser than 'skullSprite', with the telltale
+-- bullet hole.
+signatureSkull :: Sprite
+signatureSkull = Sprite "signature-skull"
+  [ Pixel 1 0 colBone
+  , Pixel 2 0 colBone
+  , Pixel 3 0 colBone
+  , Pixel 0 1 colBone
+  , Pixel 1 1 colBone
+  , Pixel 2 1 colFeather   -- bullet hole
+  , Pixel 3 1 colBone
+  , Pixel 4 1 colBone
+  , Pixel 1 2 colBone
+  , Pixel 2 2 colBone
+  , Pixel 3 2 colBone
+  ]
+
 -- | Look up a sprite by its name.  Returns 'Nothing' when the name
 -- isn't in the vocabulary — callers that need a guaranteed sprite
 -- should fall back to a terrain scatter pool.
+--
+-- Signature-find names are seeded descriptors (\"shed — seven-point
+-- non-typical\", \"cairn — tin of matches\", ...) so we match by the
+-- archetype's common-noun prefix rather than the full variant string.
 spriteByName :: String -> Maybe Sprite
-spriteByName n = case n of
-  "raven"           -> Just ravenSprite
-  "ruffed grouse"   -> Just grouseSprite
-  "snowshoe hare"   -> Just hareSprite
-  "jackrabbit"      -> Just hareSprite
-  "coyote"          -> Just coyoteSprite
-  "great horned owl"-> Just owlSprite
-  "red-tailed hawk" -> Just owlSprite
-  "whitetail buck"  -> Just buckBedded
-  "rusty 50s car"   -> Just rustyCar
-  "shed antler"     -> Just shedAntler
-  "abandoned stand" -> Just abandonedStand
-  "survey stake"    -> Just surveyStake
-  "beaver stump"    -> Just beaverStump
-  "skull"           -> Just skullSprite
-  _                 -> Nothing
+spriteByName n
+  | startsWith "shed — "    = Just signatureAntler
+  | startsWith "cairn — "   = Just signatureCairn
+  | startsWith "carving — " = Just signatureCarving
+  | startsWith "skull — "   = Just signatureSkull
+  | otherwise = case n of
+      "raven"           -> Just ravenSprite
+      "ruffed grouse"   -> Just grouseSprite
+      "snowshoe hare"   -> Just hareSprite
+      "jackrabbit"      -> Just hareSprite
+      "coyote"          -> Just coyoteSprite
+      "great horned owl"-> Just owlSprite
+      "red-tailed hawk" -> Just owlSprite
+      "whitetail buck"  -> Just buckBedded
+      "rusty 50s car"   -> Just rustyCar
+      "shed antler"     -> Just shedAntler
+      "abandoned stand" -> Just abandonedStand
+      "survey stake"    -> Just surveyStake
+      "beaver stump"    -> Just beaverStump
+      "skull"           -> Just skullSprite
+      "signature-antler"  -> Just signatureAntler
+      "signature-cairn"   -> Just signatureCairn
+      "signature-carving" -> Just signatureCarving
+      "signature-skull"   -> Just signatureSkull
+      _                 -> Nothing
+  where
+    startsWith p = take (length p) n == p
 
 -- ---------------------------------------------------------------------------
 -- Per-class sprite pools

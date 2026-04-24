@@ -35,6 +35,8 @@ import           GameTypes       (Location(..), LocationGraph(..), Region(..))
 
 import           Scenarios.DeerHunt.Generation
 import           Scenarios.DeerHunt.Section
+import           Scenarios.DeerHunt.Signature  (SignatureFind, buildSignature,
+                                                placeSignature)
 
 -- | Where a location sits inside its zone.  'Edge' locations touch a
 -- cross-zone boundary (at least one neighbor is a different class);
@@ -73,6 +75,16 @@ data HuntWorld = HuntWorld
     -- entry and the 'spriteByName' key).  Each find is independently
     -- rolled; many hunts will have none of a given find.  Populated
     -- by 'Scenarios.DeerHunt.Finds.placeFinds'.
+  , hwSignature    :: !SignatureFind
+    -- ^ The hunt's signature find — seeded once from 'hwSeed',
+    -- guaranteed to exist but not guaranteed to be discovered.  See
+    -- 'Scenarios.DeerHunt.Signature'.
+  , hwSignatureLoc :: !(Maybe Location)
+    -- ^ Where 'hwSignature' sits.  'Nothing' only if the map had no
+    -- eligible locations for the signature's terrain class (extreme
+    -- edge case — 'placeSignature' already falls back through multiple
+    -- classes).  When 'Nothing', the signature is effectively unseen
+    -- for this hunt.
   }
 
 -- | Build the complete 'HuntWorld' from a seed.  Uses the canonical
@@ -97,6 +109,8 @@ huntWorld seed =
                           Nothing -> False ]
       deerStart = seededPickDef start (seed * 71 + 13) deerCover
       finds     = placeFinds seed byCls
+      sig       = buildSignature seed
+      sigLoc    = placeSignature seed sig byCls
   in HuntWorld
        { hwMap          = gmap
        , hwSeed         = seed
@@ -107,6 +121,8 @@ huntWorld seed =
        , hwStartLoc     = start
        , hwDeerStartLoc = deerStart
        , hwFinds        = finds
+       , hwSignature    = sig
+       , hwSignatureLoc = sigLoc
        }
 
 -- | Look up a location's terrain class.  Unknown locations are

@@ -10,6 +10,7 @@ import           Engine.CRDT.ORSet           (orToList)
 import           GameTypes
 import           Scenarios.DeerHunt.Constants
 import           Scenarios.DeerHunt.Discoveries (arrivalDiscoveryAxiom, findDiscoveryAxiom)
+import           Scenarios.DeerHunt.Lore        (loreDropAxiom)
 import           Scenarios.DeerHunt.Rack        (currentRack, describeRack)
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
 import           Scenarios.DeerHunt.Probability
@@ -50,6 +51,7 @@ allAxioms hw you =
   , dayRolloverAxiom hw you
   , arrivalDiscoveryAxiom hw you
   , findDiscoveryAxiom hw you
+  , loreDropAxiom hw you
   , handFeelAxiom
   , rareEventAxiom
   ]

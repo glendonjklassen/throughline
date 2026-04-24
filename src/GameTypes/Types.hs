@@ -10,6 +10,7 @@ import           Control.DeepSeq (NFData(rnf))
 import           Data.List.NonEmpty (NonEmpty)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
+import           Data.Time.Clock (UTCTime)
 import           GHC.Generics    (Generic)
 import qualified Data.ByteString as BS
 import           Data.UUID       (UUID)
@@ -533,7 +534,22 @@ data Scenario = Scenario
   , scenarioTerminal     :: Condition
   , scenarioDebugDefault :: DebugMode
   , scenarioPlayerCharId :: CharId
+  , scenarioTombstoneGC  :: Maybe TombstoneGCRule
+    -- ^ Optional per-scenario cleanup rule for ORSet tombstones.
+    -- 'Nothing' keeps every tombstone forever (the conservative
+    -- default — a scenario with no opinion on lifetime state should
+    -- never surprise the player by \"forgetting\" something).  Set
+    -- this to @Just (olderThanDays 365)@ (or any 'TombstoneGCRule')
+    -- to let the runtime drop old tombstones at merge/snapshot
+    -- boundaries.  See 'Engine.CRDT.TombstoneGC'.
   }
+
+-- | A cleanup rule for ORSet tombstones.  First argument is the
+-- current wall-clock time; second is the tombstone's minted-at
+-- time.  Returning 'True' drops the tombstone on the next GC sweep.
+-- Defined here (rather than in 'Engine.CRDT.TombstoneGC') so the
+-- 'Scenario' record can reference it without a module cycle.
+type TombstoneGCRule = UTCTime -> UTCTime -> Bool
 
 -- ---------------------------------------------------------------------------
 -- NFData instances (via Generic, for benchmarking)

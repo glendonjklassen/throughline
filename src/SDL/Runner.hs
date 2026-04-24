@@ -375,36 +375,46 @@ dayEndOverlay ctx dayLabel summary = do
 journalOverlayLoop
   :: SDLContext -> String -> PlayerId -> ScenarioDisplay
   -> GameWorld -> JournalTab -> IO ()
-journalOverlayLoop ctx scenName playerId display world tab = do
-  renderJournalOverlay ctx display world tab
-  let fc = sdlFont ctx
-      rows = gridRows ctx
-      footerRow = rows - 2
-      -- Layout of the footer text "1 today  2 past  3 catalog   s share …"
-      -- Column positions are stable because marginLeft and the label
-      -- strings are fixed.
-      todayRect   = journalRect fc footerRow 0  7 '1'
-      pastRect    = journalRect fc footerRow 9  8 '2'
-      catalogRect = journalRect fc footerRow 19 11 '3'
-      shareRect   = journalRect fc footerRow 33 9 's'
-      cm = [todayRect, pastRect, catalogRect, shareRect]
-  me <- awaitInputSDL (sdlWindow ctx)
-  case me of
-    Nothing -> pure ()
-    Just (KeyPress c)    -> dispatch c
-    Just (ClickAt px py) ->
-      -- Click outside the tab row dismisses the overlay.
-      for_ (hitTest cm px py) dispatch
+journalOverlayLoop ctx scenName playerId display world tab =
+  loop tab 0
   where
-    dispatch c
-      | c == currentTabKey tab = pure ()
-      | c == '1'               = journalOverlayLoop ctx scenName playerId display world TabToday
-      | c == '2'               = journalOverlayLoop ctx scenName playerId display world TabPast
-      | c == '3'               = journalOverlayLoop ctx scenName playerId display world TabCatalog
+    loop t scroll = do
+      renderJournalOverlay ctx display world t scroll
+      let fc = sdlFont ctx
+          rows = gridRows ctx
+          footerRow = rows - 2
+          -- Layout of the footer text "1 today  2 past  3 catalog   s share …"
+          -- Column positions are stable because marginLeft and the label
+          -- strings are fixed.
+          todayRect   = journalRect fc footerRow 0  7 '1'
+          pastRect    = journalRect fc footerRow 9  8 '2'
+          catalogRect = journalRect fc footerRow 19 11 '3'
+          shareRect   = journalRect fc footerRow 33 9 's'
+          cm = [todayRect, pastRect, catalogRect, shareRect]
+          -- One page of scroll is half the visible notebook height.
+          -- Keeps PgUp/PgDn responsive without flipping past the
+          -- content in one step.
+          pageStep = max 1 ((rows - 6) `div` 2)
+      me <- awaitInputSDL (sdlWindow ctx)
+      case me of
+        Nothing -> pure ()
+        Just (KeyPress c)    -> dispatch t scroll pageStep c
+        Just (ClickAt px py) -> for_ (hitTest cm px py) (dispatch t scroll pageStep)
+
+    dispatch t scroll pageStep c
+      | c == '1'               = loop TabToday   0
+      | c == '2'               = loop TabPast    0
+      | c == '3'               = loop TabCatalog 0
       | c == 's' || c == 'S'   = do
           shareWithFriends ctx scenName playerId
-          journalOverlayLoop ctx scenName playerId display world tab
+          loop t scroll
+      | c == scrollUpKeyChar   = loop t (scroll + 1)
+      | c == scrollDownKeyChar = loop t (max 0 (scroll - 1))
+      | c == pageUpKeyChar     = loop t (scroll + pageStep)
+      | c == pageDownKeyChar   = loop t (max 0 (scroll - pageStep))
+      | c == currentTabKey t   = pure ()
       | otherwise              = pure ()
+
     currentTabKey TabToday   = '1'
     currentTabKey TabPast    = '2'
     currentTabKey TabCatalog = '3'

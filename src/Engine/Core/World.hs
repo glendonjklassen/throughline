@@ -26,7 +26,12 @@ narrate msg = do
       tension = getTension w
   liftIO $ do
     existing <- readIORef logRef
-    let prevLabel = case existing of
+    -- Compare against the most recent *non-empty* label rather than
+    -- the literal previous entry's label.  Previously an empty label
+    -- (suppressed as a duplicate of the hour before it) would reset
+    -- the comparison so the same "3:00 PM" would re-appear a few
+    -- entries later, giving the illusion of stopped time.
+    let prevLabel = case dropWhile (null . neTimeLabel) existing of
           (e:_) -> neTimeLabel e
           _     -> ""
         shownLabel = if label == prevLabel then "" else label

@@ -19,6 +19,10 @@ module SDL.InputHandler
   , safeOptionIndexIn
   , quitKeyChar
   , debugKeyChar
+  , scrollUpKeyChar
+  , scrollDownKeyChar
+  , pageUpKeyChar
+  , pageDownKeyChar
   ) where
 
 import           Control.Applicative ((<|>))
@@ -126,6 +130,10 @@ keycodeToChar kc = lookup kc letterCodes <|> lookup kc digitCodes
       , (KC.KeycodeReturn,  '\n')
       , (KC.KeycodeReturn2, '\n')
       , (KC.KeycodeKPEnter, '\n')
+      , (KC.KeycodeUp,       scrollUpKeyChar)
+      , (KC.KeycodeDown,     scrollDownKeyChar)
+      , (KC.KeycodePageUp,   pageUpKeyChar)
+      , (KC.KeycodePageDown, pageDownKeyChar)
       ]
 
 -- | Check if a quit event is pending (non-blocking).
@@ -262,6 +270,15 @@ quitKeyChar = '\x1B'  -- ASCII ESC
 -- | Placeholder for F3 (debug cycle), same rationale as 'quitKeyChar'.
 debugKeyChar :: Char
 debugKeyChar = '\x7F'  -- ASCII DEL, not emitted by any text key
+
+-- | Navigation key placeholders.  Outside printable ASCII so they
+-- never collide with option-key selections.  Consumers match the
+-- raw 'Char' returned by 'awaitInputSDL' against these constants.
+scrollUpKeyChar, scrollDownKeyChar, pageUpKeyChar, pageDownKeyChar :: Char
+scrollUpKeyChar   = '\x01'  -- ASCII SOH — unused by any text key
+scrollDownKeyChar = '\x02'  -- ASCII STX
+pageUpKeyChar     = '\x03'  -- ASCII ETX
+pageDownKeyChar   = '\x04'  -- ASCII EOT
 
 -- | Option-key character for the @n@'th (1-based) entry of the pool.
 -- Falls back to the decimal representation of @n@ only if @n@
