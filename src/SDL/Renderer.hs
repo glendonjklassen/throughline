@@ -563,6 +563,62 @@ drawSpatialHUD fc totalCols sparkleFn zoneTintFn frame you world hud spatialLeft
             halo   = hudTarget cell >>= zoneTintFn
         in cell { hudTint = tint, hudHalo = halo }
       visibleCells = filter (\c -> rfCellAlpha frame c > 0.01) (shSpatialCells hud)
+      -- For each HUD row, the set of HUD columns currently occupied
+      -- by some cell's label.  Sensory fragments below consult this
+      -- so they can skip any character-position that would scribble
+      -- through a neighboring label.  Built from every HUD cell,
+      -- not just 'visibleCells' — a label fading in on the
+      -- fragment's row still owns its column space.
+      labelCols :: Map.Map Int (Set.Set CInt)
+      labelCols =
+        let addCell c acc =
+              let row    = hudRow c
+                  startC = spatialLeft + fromIntegral (hudCol c)
+                  cols   = [startC .. startC + fromIntegral (length (hudLabel c)) - 1]
+              in Map.insertWith Set.union row (Set.fromList cols) acc
+        in foldr addCell Map.empty (shSpatialCells hud)
+  -- Render the active sensory fragments FIRST (below the labels in
+  -- z-order) so any collision between a fragment and a neighboring
+  -- label is resolved in the label's favour — the label over-draws
+  -- the fragment char and stays readable.
+  --
+  -- Right-edge clamp: if a fragment anchored to its cell's column
+  -- would overflow the screen, nudge its starting column left just
+  -- enough that the last character fits, leaving a small right
+  -- margin.  Cell-to-fragment visual tie loosens slightly for these
+  -- edge cases, but the alternative (clipping off the tail) is
+  -- strictly worse to read.
+  --
+  -- Per-char label-column exclusion: even with label-overdraw, a
+  -- fragment char whose target column is occupied by a neighbouring
+  -- cell's label is skipped outright.  Over-drawing the *same*
+  -- glyph twice isn't the issue — it's that anti-aliased fragment
+  -- text under a label produces fringe artifacts during the sweep.
+  mapM_ (\(cell, sweep, darkening, fragment) ->
+    unless (null fragment) $ do
+      let fragRow    = hudRow cell + 1
+          baseRow    = spatialTopRow + fromIntegral fragRow
+          naturalCol = spatialLeft   + fromIntegral (hudCol cell)
+          rightEdge  = fromIntegral totalCols - 1 :: CInt
+          maxStart   = max 0 (rightEdge - fromIntegral (length fragment))
+          startCol   = max 0 (min naturalCol maxStart)
+          py         = baseRow * cellHeight fc
+          baseX      = startCol * cellWidth fc
+          cw         = cellWidth fc
+          occupied   = Map.findWithDefault Set.empty fragRow labelCols
+      mapM_ (\(i, ch) -> do
+        let a      = charSweepAlpha i sweep darkening
+            col    = startCol + fromIntegral i
+            clash  = Set.member col occupied
+        when (a > 0.01 && not clash) $
+          renderTextAtPixel fc [ch] (applyAlpha a thoughtColor)
+            (baseX + fromIntegral i * cw, py)
+        ) (zip [0 :: Int ..] fragment)
+    ) (rfActiveSenses frame)
+  -- Then draw the labels ON TOP.  Any fragment char that squeaked
+  -- past the occupied-column check above but still happens to sit
+  -- under a label (e.g. diagonal anti-aliasing from the previous
+  -- row) gets over-drawn cleanly here.
   mapM_ (\cell0 -> do
     let cell  = enrich cell0
         alpha = rfCellAlpha frame cell0
@@ -583,36 +639,6 @@ drawSpatialHUD fc totalCols sparkleFn zoneTintFn frame you world hud spatialLeft
                      (fromIntegral baseCol, fromIntegral baseRow)
       Nothing   -> pure ()
     ) visibleCells
-  -- Active sensory line (if any) one row under its parent cell.
-  -- Each character's alpha is determined by its position relative to
-  -- the sweep: during fade-in, chars the beam has already passed read
-  -- bright, chars still ahead of it stay dark; during fade-out, the
-  -- relationship inverts.  The soft feather around the sweep gives
-  -- the effect of a light glow rather than a hard edge.
-  --
-  -- Right-edge clamp: if a fragment anchored to its cell's column
-  -- would overflow the screen, nudge its starting column left just
-  -- enough that the last character fits, leaving a small right
-  -- margin.  Cell-to-fragment visual tie loosens slightly for these
-  -- edge cases, but the alternative (clipping off the tail) is
-  -- strictly worse to read.
-  mapM_ (\(cell, sweep, darkening, fragment) ->
-    unless (null fragment) $ do
-      let baseRow    = spatialTopRow + fromIntegral (hudRow cell) + 1
-          naturalCol = spatialLeft   + fromIntegral (hudCol cell)
-          rightEdge  = fromIntegral totalCols - 1 :: CInt
-          maxStart   = max 0 (rightEdge - fromIntegral (length fragment))
-          startCol   = max 0 (min naturalCol maxStart)
-          py         = baseRow * cellHeight fc
-          baseX      = startCol * cellWidth fc
-          cw         = cellWidth fc
-      mapM_ (\(i, ch) -> do
-        let a = charSweepAlpha i sweep darkening
-        when (a > 0.01) $
-          renderTextAtPixel fc [ch] (applyAlpha a thoughtColor)
-            (baseX + fromIntegral i * cw, py)
-        ) (zip [0 :: Int ..] fragment)
-    ) (rfActiveSenses frame)
   -- Sparkles.  Rendered for every sparkle-worthy cell, independent
   -- of the cell-label reveal fade — the particles are ambient hints
   -- and should animate continuously even when the label itself is
