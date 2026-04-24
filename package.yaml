@@ -197,6 +197,8 @@ tests:
     - Engine.Sync.EventLogSpec
     - Engine.Sync.IdentitySpec
     - Engine.Sync.ProgressSpec
+    - Engine.Sync.Relic.ShamirSpec
+    - Engine.Sync.RelicSpec
     - SDL.AchievementsSpec
     - SDL.AudioBackendSpec
     - SDL.ClickMapSpec
