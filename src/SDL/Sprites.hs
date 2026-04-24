@@ -56,48 +56,72 @@ drawSprite fc (ox, oy) alpha sprite = do
     SDL.fillRect ren (Just rect)
     ) (spritePixels sprite)
 
--- | Draw a particle-style sparkle cluster at a pixel origin.  Replaces
--- the old single-glyph sparkle (which rendered as tofu in fonts that
--- lacked U+2726).  Intensity in 1-3 scales the particle count and the
--- spread radius; the @seed@ deterministically positions the cluster
--- so the same cell always sparkles the same way, and so two adjacent
--- sparkling cells don't perfectly mirror each other.
+-- | Draw an animated particle-style sparkle cluster at a pixel
+-- origin.  Replaces the old single-glyph sparkle (which rendered as
+-- tofu in fonts that lacked U+2726).  Intensity in 1-3 scales the
+-- particle count, the drift amplitude, and the cluster spread; the
+-- @seed@ deterministically positions each particle so the same cell
+-- always sparkles the same way, and adjacent sparkling cells don't
+-- perfectly mirror each other.
 --
--- Each particle is a 2×2 filled rect at a slightly offset position,
--- with a tiny alpha variation so the cluster has visual texture
--- instead of reading as a flat gradient of uniform dots.  Sized
--- small enough that it never drowns the adjacent label.
+-- Motion: each particle orbits its seeded base position along a
+-- Lissajous-ish path (different x/y frequencies + phases per
+-- particle) scaled by a small drift amplitude, so the cluster
+-- reads as a handful of things gently floating near the label
+-- rather than static pixel scatter.  Alpha also pulses slowly per
+-- particle so the cluster breathes.  Wall-clock time is sourced
+-- from 'SDL.ticks' — no tick-advance needed for animation.
 drawSparkleParticles :: FontContext -> (CInt, CInt) -> Int -> Int -> Double -> Color -> IO ()
 drawSparkleParticles fc (ox, oy) level seed alphaMod (Color r g b baseA) = do
-  let ren       = fcRenderer fc
-      count     = case level of
-                    1 -> 3
-                    2 -> 6
-                    _ -> 10
-      spread    = case level of
-                    1 -> 6
-                    2 -> 8
-                    _ -> 11
-      dotSize   = 2 :: CInt
-      -- A cheap LCG stream seeded per-cell.  We don't need real random
-      -- — we need reproducible spread across cells and levels.
-      step s    = s * 1103515245 + 12345
-      stream    = iterate step (abs seed + 1)
-      -- Split each stream element into two biased offsets plus a
-      -- brightness nudge.  Modulo the spread range gives (x, y)
-      -- offsets in [-spread/2, spread/2]; the brightness bit tweaks
-      -- the particle alpha so the cluster doesn't read uniform.
+  ms <- SDL.ticks
+  let ren      = fcRenderer fc
+      t        = fromIntegral ms / 1000.0 :: Double     -- seconds since init
+      count    = case level of
+                   1 -> 3
+                   2 -> 6
+                   _ -> 10
+      spread   = case level of
+                   1 -> 4 :: Int
+                   2 -> 6
+                   _ -> 9
+      driftAmp = case level of
+                   1 -> 2.0 :: Double
+                   2 -> 3.0
+                   _ -> 4.0
+      dotSize  = 2 :: CInt
+      -- Cheap LCG stream seeded per-cell.  We need reproducible
+      -- spread + phases across cells and levels, not real random.
+      step s   = s * 1103515245 + 12345
+      stream   = iterate step (abs seed + 1)
+      -- Each particle: a seeded base offset, two motion phases, two
+      -- slightly different frequencies (so x and y don't lock into
+      -- a perfect circle — the path traces a soft Lissajous), and
+      -- a slow alpha pulse phase so the cluster shimmers.
       particles = take count
-        [ let ox'  = fromIntegral ((s `div` 7) `mod` spread - spread `div` 2) :: CInt
-              oy'  = fromIntegral ((s `div` 13) `mod` spread - spread `div` 2) :: CInt
-              dim  = (s `div` 29) `mod` 4            -- 0..3
-              a    = round (fromIntegral baseA * (alphaMod :: Double)) - dim * 18
-          in (ox', oy', max 0 a)
+        [ let baseX  = fromIntegral ((s `div` 7)  `mod` spread - spread `div` 2) :: Double
+              baseY  = fromIntegral ((s `div` 13) `mod` spread - spread `div` 2) :: Double
+              -- Phases and freqs in radians / Hz respectively,
+              -- derived from non-overlapping hash buckets so the
+              -- particles don't lock-step.
+              phX    = fromIntegral ((s `div` 29) `mod` 628) / 100.0 :: Double   -- 0..2π
+              phY    = fromIntegral ((s `div` 53) `mod` 628) / 100.0 :: Double
+              fX     = 0.35 + fromIntegral ((s `div` 71) `mod` 40) / 100.0 :: Double
+              fY     = 0.30 + fromIntegral ((s `div` 83) `mod` 40) / 100.0 :: Double
+              phAlpha= fromIntegral ((s `div` 97) `mod` 628) / 100.0 :: Double
+              twopi  = 2 * pi
+              dx     = round (baseX + sin (t * fX * twopi + phX) * driftAmp) :: Int
+              dy     = round (baseY + cos (t * fY * twopi + phY) * driftAmp) :: Int
+              -- Alpha oscillates between ~0.5 and 1.0 of the base
+              -- (cluster-level alphaMod from the reveal fade).
+              pulse  = 0.75 + 0.25 * sin (t * 0.7 * twopi + phAlpha)
+              aRaw   = fromIntegral baseA * alphaMod * pulse
+              a      = max 0 (min 255 (round aRaw))
+          in (dx, dy, a :: Int)
         | s <- stream
         ]
   SDL.rendererDrawBlendMode ren SDL.$= SDL.BlendAlphaBlend
   mapM_ (\(dx, dy, a) -> do
-    let rect = SDL.Rectangle (SDL.P (SDL.V2 (ox + dx) (oy + dy)))
+    let rect = SDL.Rectangle (SDL.P (SDL.V2 (ox + fromIntegral dx) (oy + fromIntegral dy)))
                              (SDL.V2 dotSize dotSize)
     SDL.rendererDrawColor ren SDL.$= SDL.V4 r g b (fromIntegral a)
     SDL.fillRect ren (Just rect)

@@ -16,7 +16,7 @@ module Scenarios.DeerHunt.Discoveries
   , discoveryCatalog
   ) where
 
-import           Data.List       (isPrefixOf)
+import           Data.List       (isPrefixOf, sortOn)
 import qualified Data.Map.Strict as Map
 import           Text.Read       (readMaybe)
 
@@ -252,14 +252,16 @@ discoveredEntries world =
 -- in the hunter's voice: the day it was first seen, a terse phrasing
 -- of the sighting, and a short factoid.  Order follows the journal
 -- (chronological) so the index reads as a running log instead of an
--- alphabetised list.
+-- alphabetised list — 'discoveredEntries' hands us Map-key order
+-- (alphabetical by 'Show Discovery'), so we re-sort by first-seen
+-- day and tiebreak on the discovery key to keep same-day entries
+-- stable across redraws.
 discoveryCatalog :: GameWorld -> [String]
 discoveryCatalog world =
-  let entries = discoveredEntries world
-      dayMap  = discoveryDays (worldJournal world)
-      line d  =
-        let day = Map.findWithDefault 1 (discoveryKey d) dayMap
-        in diaryLine day d
+  let dayMap    = discoveryDays (worldJournal world)
+      dayOf d   = Map.findWithDefault 1 (discoveryKey d) dayMap
+      entries   = sortOn (\d -> (dayOf d, discoveryKey d)) (discoveredEntries world)
+      line d    = diaryLine (dayOf d) d
   in map line entries
 
 -- | Key used to look up a discovery's first-seen day in the journal
