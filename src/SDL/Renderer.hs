@@ -613,12 +613,16 @@ drawSpatialHUD fc totalCols sparkleFn zoneTintFn frame you world hud spatialLeft
             (baseX + fromIntegral i * cw, py)
         ) (zip [0 :: Int ..] fragment)
     ) (rfActiveSenses frame)
-  -- Sparkles.  Only rendered for cells that have been revealed.  A
-  -- pixel-particle cluster sits just to the left of the label — it
+  -- Sparkles.  Rendered for every sparkle-worthy cell, independent
+  -- of the cell-label reveal fade — the particles are ambient hints
+  -- and should animate continuously even when the label itself is
+  -- typewriting in or fading up (a 'hiddenReveal' frame would
+  -- otherwise suppress them for the whole typewriter pass).  A
+  -- pixel-particle cluster sits just to the left of the label —
   -- renders reliably on every font (the old Unicode-sparkle glyph
-  -- showed as tofu when JetBrainsMono was missing U+2726) and scales
-  -- its spread + density with level so a level-3 hint reads as a
-  -- bright spray, not just a brighter dot.
+  -- showed as tofu when JetBrainsMono was missing U+2726) and
+  -- scales its spread + density with level so a level-3 hint reads
+  -- as a bright spray, not just a brighter dot.
   mapM_ (\(cell, level, _glyph) -> do
     let row        = spatialTopRow + fromIntegral (hudRow cell)
         col        = spatialLeft   + fromIntegral (hudCol cell)
@@ -631,9 +635,8 @@ drawSpatialHUD fc totalCols sparkleFn zoneTintFn frame you world hud spatialLeft
         -- sparkles the same way — but different cells get a visibly
         -- different arrangement.
         seed       = hudRow cell * 31 + hudCol cell * 7
-        alphaMod   = rfCellAlpha frame cell
-    drawSparkleParticles fc (px, py) level seed alphaMod (sparkleColor level)
-    ) (cellSparkles sparkleFn visibleCells)
+    drawSparkleParticles fc (px, py) level seed 1.0 (sparkleColor level)
+    ) (cellSparkles sparkleFn (shSpatialCells hud))
   -- Trail marks: breadcrumbs at neighbor cells the player recently
   -- departed.  Age fades the alpha so the freshest step reads strongest
   -- and anything more than a few moves old dissolves into the scatter.
