@@ -13,6 +13,8 @@ import qualified Engine.Core.EffectsSpec
 import qualified Engine.Sync.EventLogSpec
 import qualified Engine.Sync.IdentitySpec
 import qualified Engine.Sync.ProgressSpec
+import qualified Engine.Sync.RelicSpec
+import qualified Engine.Sync.Relic.ShamirSpec
 import qualified Engine.Author.NarrativeSpec
 import qualified Engine.CRDT.ORSetSpec
 import qualified Engine.CRDT.PNCounterSpec
@@ -61,6 +63,8 @@ main = hspec $ do
   Engine.Sync.EventLogSpec.spec
   Engine.Sync.IdentitySpec.spec
   Engine.Sync.ProgressSpec.spec
+  Engine.Sync.RelicSpec.spec
+  Engine.Sync.Relic.ShamirSpec.spec
   Engine.CRDT.ORSetSpec.spec
   Engine.CRDT.PNCounterSpec.spec
   Engine.CRDT.TombstoneGCSpec.spec
