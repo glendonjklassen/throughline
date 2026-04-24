@@ -874,9 +874,14 @@ journalPages = go []
       | otherwise                        = go (e : acc) rest
 
 -- | Render the journal overlay on the given tab.  The caller cycles
--- tabs with 1/2/3 and dismisses with any other key.
-renderJournalOverlay :: SDLContext -> ScenarioDisplay -> GameWorld -> JournalTab -> IO ()
-renderJournalOverlay ctx display world tab = do
+-- tabs with 1/2/3, scrolls with up/down/pgup/pgdn, and dismisses
+-- with any other key.  @scroll@ is a line offset — larger values
+-- scroll toward older content on bottom-anchored tabs (Today /
+-- Past) and toward later content on top-anchored tabs (Catalog).
+-- The caller clamps it to a sensible range.
+renderJournalOverlay
+  :: SDLContext -> ScenarioDisplay -> GameWorld -> JournalTab -> Int -> IO ()
+renderJournalOverlay ctx display world tab scroll = do
   clearSDL ctx
   let fc        = sdlFont ctx
       cols      = gridCols ctx
@@ -886,11 +891,11 @@ renderJournalOverlay ctx display world tab = do
       lastRow   = rows - 2
   drawJournalHeader fc cols headerRow tab
   case tab of
-    TabToday   -> drawToday   fc display cols rows firstRow lastRow world
-    TabPast    -> drawPast    fc display cols      firstRow lastRow world
-    TabCatalog -> drawCatalog fc cols              firstRow lastRow display world
-  renderText fc "1 today  2 earlier  3 index   s share   any other: close" greyText
-    (marginLeft, fromIntegral lastRow)
+    TabToday   -> drawToday   fc display cols rows firstRow lastRow scroll world
+    TabPast    -> drawPast    fc display cols      firstRow lastRow scroll world
+    TabCatalog -> drawCatalog fc cols              firstRow lastRow scroll display world
+  renderText fc "1 today  2 earlier  3 index   s share   \x2191/\x2193 scroll   any other: close"
+    greyText (marginLeft, fromIntegral lastRow)
   presentSDL ctx
 
 drawJournalHeader :: FontContext -> Int -> Int -> JournalTab -> IO ()
@@ -925,16 +930,20 @@ notebookTextWidth :: Int -> Int
 notebookTextWidth cols = max 10 (cols - fromIntegral notebookEntryCol - 4)
 
 -- | Draw a vertical slice of notebook lines between @firstRow@ and
--- @lastRow@ (inclusive).  If @anchorBottom@ is True, the *last* N
--- lines that fit are shown (useful for live-feeling scroll); if
--- False, the *first* N are shown (useful for an index that grows
--- from the top).
-drawJournalLines :: FontContext -> Int -> Int -> Bool -> [JournalLine] -> IO ()
-drawJournalLines fc firstRow lastRow anchorBottom lines_ =
+-- @lastRow@ (inclusive).  If @anchorBottom@ is True, the last N
+-- lines are shown by default and @scroll@ shifts the window toward
+-- older content; if False, the first N are shown and @scroll@
+-- shifts toward later content.  @scroll@ is clamped to the list
+-- size so scrolling past the edge is a no-op rather than an error.
+drawJournalLines :: FontContext -> Int -> Int -> Bool -> Int -> [JournalLine] -> IO ()
+drawJournalLines fc firstRow lastRow anchorBottom scroll lines_ =
   let budget  = max 0 (lastRow - firstRow)
+      total   = length lines_
+      maxOff  = max 0 (total - budget)
+      off     = max 0 (min scroll maxOff)
       visible = if anchorBottom
-                  then takeLast budget lines_
-                  else take budget lines_
+                  then takeLast budget (take (total - off) lines_)
+                  else take budget (drop off lines_)
   in mapM_ draw (zip [0 :: Int ..] visible)
   where
     draw (_, Nothing) = pure ()
@@ -976,8 +985,8 @@ pageLabelAndEntries fallback page = case page of
 -- the weather as a dim subtitle.  Entries follow in paragraph form.
 -- Scrolls from the bottom so the newest entry is always visible at
 -- the edge of the page.
-drawToday :: FontContext -> ScenarioDisplay -> Int -> Int -> Int -> Int -> GameWorld -> IO ()
-drawToday fc display cols _rows firstRow lastRow world =
+drawToday :: FontContext -> ScenarioDisplay -> Int -> Int -> Int -> Int -> Int -> GameWorld -> IO ()
+drawToday fc display cols _rows firstRow lastRow scroll world =
   let pages   = journalPages (worldJournal world)
       dayNum  = max 1 (length pages)
       fallback = sdDayLabel display dayNum
@@ -990,14 +999,14 @@ drawToday fc display cols _rows firstRow lastRow world =
   in case todayEntries of
        [] -> renderText fc "Nothing written yet today."
                greyText (notebookHeaderCol, fromIntegral firstRow)
-       _  -> drawJournalLines fc firstRow lastRow True lines_
+       _  -> drawJournalLines fc firstRow lastRow True scroll lines_
 
 -- | Earlier days: every completed day's notebook block stacked in
 -- chronological order.  Label is read from each page's leading
 -- marker, falling back to the scenario's own day formatter for the
 -- initial day (written without a marker).
-drawPast :: FontContext -> ScenarioDisplay -> Int -> Int -> Int -> GameWorld -> IO ()
-drawPast fc display cols firstRow lastRow world =
+drawPast :: FontContext -> ScenarioDisplay -> Int -> Int -> Int -> Int -> GameWorld -> IO ()
+drawPast fc display cols firstRow lastRow scroll world =
   let pages = journalPages (worldJournal world)
       past  = if null pages then [] else init pages
       textW = notebookTextWidth cols
@@ -1012,22 +1021,22 @@ drawPast fc display cols firstRow lastRow world =
   in case past of
        [] -> renderText fc "No earlier days yet."
                greyText (notebookHeaderCol, fromIntegral firstRow)
-       _  -> drawJournalLines fc firstRow lastRow True lines_
+       _  -> drawJournalLines fc firstRow lastRow True scroll lines_
 
 -- | Index: things noticed on this hunt, as diary paragraphs rather
 -- than a ledger.  Each scenario emits pre-formatted prose (day,
 -- sighting, short factoid), and the renderer just wraps and spaces
 -- them out — no counts, no grouping, no checklist texture.  Empty
 -- catalog reads as one dim line so the page doesn't go blank.
-drawCatalog :: FontContext -> Int -> Int -> Int -> ScenarioDisplay -> GameWorld -> IO ()
-drawCatalog fc cols firstRow lastRow display world =
+drawCatalog :: FontContext -> Int -> Int -> Int -> Int -> ScenarioDisplay -> GameWorld -> IO ()
+drawCatalog fc cols firstRow lastRow scroll display world =
   let entries = sdCatalog display world
       textW   = notebookTextWidth cols
       lines_  = intercalate [Nothing] (map (entryLines textW) entries)
   in case entries of
        [] -> renderText fc "Nothing kept in this ledger yet."
                greyText (notebookHeaderCol, fromIntegral firstRow)
-       _  -> drawJournalLines fc firstRow lastRow False lines_
+       _  -> drawJournalLines fc firstRow lastRow False scroll lines_
   where
     entryLines textW paragraph =
       case wrapWords textW paragraph of

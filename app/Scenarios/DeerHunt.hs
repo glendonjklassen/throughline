@@ -56,7 +56,7 @@ deerHunt seed you =
 deerHuntDisplay :: ScenarioDisplay
 deerHuntDisplay = ScenarioDisplay
   { sdEndScreen       = endScreen
-  , sdStatusLine      = const Nothing
+  , sdStatusLine      = deerHuntStatusLine
   , sdLayout          = defaultLayout
   , sdLocationSparkle = locationSparkle
   , sdZoneTintFor     = deerHuntZoneTint
@@ -64,6 +64,28 @@ deerHuntDisplay = ScenarioDisplay
   , sdCatalog         = discoveryCatalog
   , sdDayLabel        = formatHuntDate
   }
+
+-- | Current time line for the top status bar.  Shows the
+-- scenario's day label plus HH:MM AM/PM with minute resolution —
+-- the engine's per-entry time prefix only updates on the hour, so
+-- without this the player sees 12 consecutive actions all labeled
+-- the same way and can't tell time is advancing.  Every tick is
+-- 5 minutes (ticksPerHour = 12); minutes are computed from the
+-- world's Lamport tick modulo that.
+deerHuntStatusLine :: GameWorld -> Maybe String
+deerHuntStatusLine world =
+  case currentHour world of
+    Nothing -> Nothing
+    Just h  ->
+      let tick    = lcTick (worldClock world)
+          minute  = (tick `mod` ticksPerHour) * (60 `div` ticksPerHour)
+          hour12  | h == 0    = 12
+                  | h > 12    = h - 12
+                  | otherwise = h
+          suffix  = if h < 12 then "AM" else "PM"
+          mPad    = if minute < 10 then '0' : show minute else show minute
+          dayLbl  = formatHuntDate (worldDayNumber world)
+      in Just (dayLbl <> "  ·  " <> show hour12 <> ":" <> mPad <> " " <> suffix)
 
 
 -- | Pick a fleeting sensory fragment for a neighbor label during the
