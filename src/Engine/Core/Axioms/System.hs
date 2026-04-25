@@ -28,6 +28,7 @@ import           Data.Maybe          (fromMaybe)
 
 import           Engine.Author.DSL
 import           Engine.Core.World
+import           Engine.Core.World.Internal
 import           GameTypes
 
 import           Engine.Core.Axioms.Shared (charIsSleeping)

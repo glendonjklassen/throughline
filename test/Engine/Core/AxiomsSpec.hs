@@ -28,7 +28,8 @@ import qualified Data.Map.Strict as Map
 import           Engine.Core.Axioms
 import           Engine.Core.Conditions
 import           Engine.Author.DSL
-import           Engine.Core.World        (setCharacterStat, setRelStat)
+import           Engine.Core.World          (setCharacterStat)
+import           Engine.Core.World.Internal (setRelStat)
 import           Engine.CRDT.ORSet
 import           GameTypes
 import           GameTypes.Types (Action(..))

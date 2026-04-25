@@ -16,7 +16,7 @@ import           Engine.Author.Narrative
 import           Engine.Author.Random   (scenarioSeed)
 import           Engine.Core.Axioms
 import           Engine.Core.Conditions
-import           Engine.Core.World
+import           Engine.Core.World.Internal
 import           Engine.CRDT.ORSet
 import           Engine.CRDT.PNCounter
 import           Engine.Core.NarrativeMessage

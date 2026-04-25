@@ -48,7 +48,8 @@ import           SDL.SpatialHUD (SpatialHUD(..), HUDCell(..),
                                  TrailMark(..), SpritePlacement(..),
                                  layoutHUD, hudGenRowCount,
                                  terrainSpriteScatter, trailMarks)
-import           Engine.Core.World (playerLocationName, engineTimeStatus, exitBearings, getWeather)
+import           Engine.Core.World          (getWeather)
+import           Engine.Core.World.Internal (playerLocationName, engineTimeStatus, exitBearings)
 import           Engine.Core.NarrativeMessage
 import           SDL.Layout (LayoutConfig(..), ScenarioDisplay(..))
 import           SDL.Debug (learningModeLines)

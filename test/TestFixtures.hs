@@ -25,7 +25,8 @@ import qualified Data.Map.Strict as Map
 
 import           Engine.Core.Conditions (checkCondition)
 import           Engine.Core.Effects
-import           Engine.Core.World    (setRelStat, setCharacterStat)
+import           Engine.Core.World          (setCharacterStat)
+import           Engine.Core.World.Internal (setRelStat)
 import           Engine.CRDT.ORSet
 import           Engine.Sync.EventLog  (nullLogStore)
 import           GameTypes
