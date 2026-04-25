@@ -1,4 +1,8 @@
--- | Reusable scenario-level axiom builders for weather narration, stat influence, and mood drift.
+-- | Drop-in axioms that scenarios opt into rather than reinvent.
+-- Each builder takes the scenario's parameters (prose tables,
+-- thresholds) and returns an 'Axiom' to add to the scenario's axiom
+-- list.  Skip a given axiom and the engine simply does not run the
+-- corresponding behaviour — there is no global default.
 module Engine.Author.CommonAxioms
   ( weatherNarrationAxiom
   , weatherInfluenceAxiom

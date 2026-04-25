@@ -1,5 +1,14 @@
 {-# LANGUAGE DataKinds #-}
--- | Scene graph construction: locations, edges, and action gating by scene.
+-- | The spatial layer.  A 'SceneGraph' is a list of 'Scene's (a
+-- location plus the actions available there) plus a list of
+-- 'SceneEdge's (traversable connections with their movement
+-- narration).  'buildActions' compiles the graph into the flat
+-- @[AnyAction]@ list a scenario hands to the engine.
+--
+-- Build edges with 'edge' \/ 'biEdge' for ad-hoc connections, or
+-- 'biEdgeWith' when narration is derived per-direction (e.g. from a
+-- terrain classifier).  Lift a 'LocationGraph' into a full scene
+-- graph in one call with 'sceneGraphFromLocations'.
 module Engine.Author.Scene
   ( Scene(..)
   , SceneEdge(..)

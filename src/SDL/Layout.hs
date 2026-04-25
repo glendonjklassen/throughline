@@ -1,4 +1,8 @@
--- | Layout configuration: panel sizing and scenario display options.
+-- | Per-scenario rendering hooks.  'ScenarioDisplay' lets a
+-- scenario customize spatial-HUD slots and status-line cells;
+-- 'defaultDisplay' supplies engine defaults that scenarios pass
+-- through if they have no opinion.  'LayoutConfig' controls panel
+-- sizing.
 module SDL.Layout
   ( LayoutConfig (..)
   , defaultLayout

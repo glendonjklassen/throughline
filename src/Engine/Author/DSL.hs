@@ -1,4 +1,24 @@
 {-# LANGUAGE DataKinds #-}
+-- | The scenario author's workshop.  Builders for effects, actions,
+-- conditions, tag sets, and the relationship graph — plus the small
+-- handful of axiom-side helpers ('hasTag', 'playerArrivals',
+-- 'whenTagAdded') a scenario typically reaches for inside an
+-- @axiomEvaluate@ body.
+--
+-- Conventions:
+--
+-- * Effect builders come in lifetime variants: 'immediate' fires
+--   once, 'timed' for @n@ ticks, 'eternal' forever.  Each has a
+--   @-When@ counterpart that adds a 'Condition' guard.
+-- * Action builders distinguish 'Once' from 'Repeatable' at the type
+--   level; lift them into the uniform 'AnyAction' list with
+--   'anyAction'.  Use 'togglePair' for paired enter\/exit actions.
+-- * Tag helpers ('emptyTags', 'tagsFromList', 'worldTagList',
+--   'hasTag') keep the CRDT internals out of scenario code.
+--
+-- This module re-exports 'Engine.Author.Dialogue' and
+-- 'Engine.Author.MergeHelpers' so a single @import Engine.Author.DSL@
+-- gives a scenario most of what it needs.
 module Engine.Author.DSL
   ( module Engine.Author.DSL
   , module Engine.Author.Dialogue
