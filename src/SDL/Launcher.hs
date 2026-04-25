@@ -20,7 +20,9 @@ import           Control.Exception      (SomeException, try)
 import           Data.Maybe             (fromMaybe)
 import qualified Data.Version           as Version
 
-import           Engine
+import           Engine.Runtime         (runScenarioWith)
+import           Engine.Sync.Identity   (defaultIdentityPath, loadOrCreate, playerIdOf)
+import           Engine.Sync.Progress   (Progress, defaultProgressPath, recordHunt)
 import           GameTypes              (CharId(..), PlayerId, Scenario, scenarioName)
 import           Paths_throughline      (version)
 import           SDL.ClickMap           (ClickMap, gridRowRect, hitTest)

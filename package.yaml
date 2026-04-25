@@ -53,14 +53,45 @@ ghc-options:
 - -Wredundant-constraints
 - -Wno-missing-export-lists
 
+# The full engine source.  Tests, executables, and benchmarks that
+# need access to engine internals depend on this library.  Scenario
+# authors should depend on the curated `throughline` library below
+# instead — its surface is intentionally small.
+internal-libraries:
+  throughline-internal:
+    source-dirs: src
+    # When the 'release' flag is on, define RELEASE_BUILD so CPP
+    # guards in SDL.Runner (and anywhere else dev-only tooling hides)
+    # can branch on it.
+    when:
+    - condition: flag(release)
+      cpp-options: -DRELEASE_BUILD
+
+# The curated public API for scenario authors.  Re-exports the engine
+# modules a scenario typically needs and nothing else.  When a real
+# scenario reaches for something not exposed here, that's the signal
+# to either add a DSL helper or open up the module.
 library:
-  source-dirs: src
-  # When the 'release' flag is on, define RELEASE_BUILD so CPP guards
-  # in SDL.Runner (and anywhere else dev-only tooling hides) can
-  # branch on it.
-  when:
-  - condition: flag(release)
-    cpp-options: -DRELEASE_BUILD
+  reexported-modules:
+    - GameTypes
+    - Engine.Author.Calendar
+    - Engine.Author.CommonAxioms
+    - Engine.Author.Discovery
+    - Engine.Author.DSL
+    - Engine.Author.Help
+    - Engine.Author.Random
+    - Engine.Author.Rumor
+    - Engine.Author.Scene
+    - Engine.Author.Transition
+    - Engine.Core.Conditions
+    - Engine.Core.Time
+    - Engine.Core.World
+    - SDL.Launcher
+    - SDL.Layout
+    - SDL.Palette
+    - SDL.Text
+  dependencies:
+    - throughline-internal
 
 executables:
   # Multi-scenario dev launcher.  Sees every scenario under app/Scenarios/.
@@ -120,7 +151,7 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - throughline
+    - throughline-internal
     - hspec
     - QuickCheck
     other-modules:
@@ -221,7 +252,7 @@ benchmarks:
     - -with-rtsopts=-N
     - -O2
     dependencies:
-    - throughline
+    - throughline-internal
     - tasty-bench
     - tasty
     other-modules:
@@ -251,6 +282,7 @@ benchmarks:
     - Scenarios.DeerHunt.Constants
     - Scenarios.DeerHunt.Discoveries
     - Scenarios.DeerHunt.Generation
+    - Scenarios.DeerHunt.Lore
     - Scenarios.DeerHunt.Narration
     - Scenarios.DeerHunt.Probability
     - Scenarios.DeerHunt.Rack

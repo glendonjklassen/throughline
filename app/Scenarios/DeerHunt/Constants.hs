@@ -10,7 +10,6 @@ import           Engine.Author.Calendar (formatShortDate)
 import           Engine.Author.DSL
 import           Engine.Author.Random   (rollChoice)
 import           System.Random          (mkStdGen, randomR)
-import           Engine.CRDT.ORSet
 import           Engine.Core.Time       (currentHour)
 import           Engine.Core.World      (charLocation, setCharacterStat)
 import           GameTypes
@@ -264,14 +263,14 @@ codeToType _           = Nothing
 -- | All sign types present at a location in the world right now.
 signsAt :: GameWorld -> Location -> [SignType]
 signsAt world loc =
-  nub [ t | tag <- orToList (worldTags world)
+  nub [ t | tag <- worldTagList world
           , Just (t, l) <- [parseSignTag tag]
           , l == loc ]
 
 -- | All sign types the player has *discovered* at a location.
 foundSignsAt :: GameWorld -> Location -> [SignType]
 foundSignsAt world loc =
-  nub [ t | tag <- orToList (worldTags world)
+  nub [ t | tag <- worldTagList world
           , Just (t, l) <- [parseFoundTag tag]
           , l == loc ]
 
@@ -281,7 +280,7 @@ hasDiscoveredAnySign world =
   any (\tag -> case parseFoundTag tag of
          Just _ -> True
          Nothing -> False)
-      (orToList (worldTags world))
+      (worldTagList world)
 
 -- | How strong is the evidence the player *has noticed* at a location?
 -- 0 = none; higher with more distinct sign types and rarer types.
@@ -406,7 +405,7 @@ isWindStrengthTag _ = False
 -- | Read the current wind angle (degrees) from world tags.
 getWindAngle :: GameWorld -> Double
 getWindAngle world =
-  let tags = orToList (worldTags world)
+  let tags = worldTagList world
   in case [ n | ScenarioTag (MkScenarioTag s) <- tags
               , take 10 s == "WindAngle "
               , (n, _) <- reads (drop 10 s) :: [(Int, String)] ] of
@@ -416,7 +415,7 @@ getWindAngle world =
 -- | Read the current wind strength (0.0–1.0) from world tags.
 getWindStrength :: GameWorld -> Double
 getWindStrength world =
-  let tags = orToList (worldTags world)
+  let tags = worldTagList world
   in case [ n | ScenarioTag (MkScenarioTag s) <- tags
               , take 13 s == "WindStrength "
               , (n, _) <- reads (drop 13 s) :: [(Int, String)] ] of
@@ -549,8 +548,8 @@ initialGraph you
 initialWorld :: HuntWorld -> CharId -> GameWorld
 initialWorld hw you = GameWorld
   { worldCharacters = Map.fromList
-      [ (you,  Character you  "You"      [] orEmpty)
-      , (deer, Character deer "The Deer" [] orEmpty)
+      [ (you,  Character you  "You"      [] emptyTags)
+      , (deer, Character deer "The Deer" [] emptyTags)
       ]
   , worldGraph         = initialGraph you
   , worldLocations     = Map.fromList
@@ -559,7 +558,7 @@ initialWorld hw you = GameWorld
       ]
   , worldActiveEffects = map staticLive [timeCycle, weatherCycle]
   , worldClock         = LamportClock 0 (PlayerId "init")
-  , worldTags          = orFromList
+  , worldTags          = tagsFromList
       (
         [ weatherTag  (WeatherDesc "Clear and Cold")
         , seasonTag   3

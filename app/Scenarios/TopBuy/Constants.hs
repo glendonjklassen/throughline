@@ -3,7 +3,6 @@ module Scenarios.TopBuy.Constants where
 import qualified Data.Map.Strict as Map
 import           Data.List.NonEmpty (NonEmpty(..))
 import           Engine.Author.DSL
-import           Engine.CRDT.ORSet
 import           Engine.Core.World    (addRelationship, mkRelationship, setCharacterStat)
 import           GameTypes
 import           Scenarios.TopBuy.Locations
@@ -175,9 +174,9 @@ initialGraph you
 initialWorld :: Int -> CharId -> GameWorld
 initialWorld seed you = GameWorld
   { worldCharacters = Map.fromList
-      [ (you,     Character you     "You"     [] orEmpty)
-      , (bradley, Character bradley "Bradley" [] orEmpty)
-      , (kyle,    Character kyle    "Kyle"    [] orEmpty)
+      [ (you,     Character you     "You"     [] emptyTags)
+      , (bradley, Character bradley "Bradley" [] emptyTags)
+      , (kyle,    Character kyle    "Kyle"    [] emptyTags)
       ]
   , worldGraph         = initialGraph you
   , worldLocations     = Map.fromList
@@ -187,7 +186,7 @@ initialWorld seed you = GameWorld
       ]
   , worldActiveEffects = map staticLive [timeCycle, weatherCycle]
   , worldClock         = LamportClock 0 (PlayerId "init")
-  , worldTags          = orFromList
+  , worldTags          = tagsFromList
       [ weatherTag  (WeatherDesc "Clear")   -- initial weather
       , seasonTag   0         -- Spring
       , dayOfWeekTag 0        -- Monday

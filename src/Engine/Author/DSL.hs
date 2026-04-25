@@ -6,7 +6,9 @@ module Engine.Author.DSL
   ) where
 
 import           Data.List.NonEmpty (NonEmpty(..))
-import           Engine.CRDT.ORSet (initToken)
+import qualified Engine.CRDT.ORSet      as ORSet
+import           Engine.CRDT.ORSet      (ORSet, initToken)
+import qualified Engine.CRDT.TombstoneGC as TombstoneGC
 import           Engine.Core.Conditions (checkCondition)
 import           GameTypes
 import           GameTypes.Types (Action(..))
@@ -147,6 +149,27 @@ removeTags = map (immediate . RemoveWorldTag)
 -- | Check whether a world tag is present. Shorthand for checkCondition + HasWorldTag.
 hasTag :: GameWorld -> Tag -> Bool
 hasTag w t = checkCondition w (HasWorldTag t)
+
+-- | Empty tag set.  Use for initial 'Character' tags or empty
+-- 'worldTags' in scenario init.
+emptyTags :: ORSet Tag
+emptyTags = ORSet.orEmpty
+
+-- | Build an initial tag set from a list.  Use for 'worldTags' at
+-- scenario init.
+tagsFromList :: [Tag] -> ORSet Tag
+tagsFromList = ORSet.orFromList
+
+-- | All world tags currently present, as a plain list.  Use this
+-- instead of reaching into the ORSet directly when iterating over
+-- tags in axioms or scenario logic.
+worldTagList :: GameWorld -> [Tag]
+worldTagList = ORSet.orToList . worldTags
+
+-- | Tombstone GC schedule that drops entries older than @n@ days.
+-- Pass to @scenarioTombstoneGC = Just (olderThanDays 365)@.
+olderThanDays :: Integer -> TombstoneGCRule
+olderThanDays = TombstoneGC.olderThanDays
 
 -- ---------------------------------------------------------------------------
 -- Relationship helpers (DSL aliases for the generalized relation effects)

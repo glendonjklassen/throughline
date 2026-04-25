@@ -21,7 +21,6 @@ import           Text.Read       (readMaybe)
 import           Engine.Author.DSL
 import qualified Engine.Author.Discovery       as ED
 import           Engine.Author.Discovery       (Discovery (..), discoveryTag, firstFind)
-import           Engine.CRDT.ORSet       (orToList)
 import           GameTypes
 import           Scenarios.DeerHunt.Constants  (formatHuntDate)
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
@@ -197,7 +196,7 @@ handleFindArrival hw loc
 discoveredEntries :: GameWorld -> [HuntDiscovery]
 discoveredEntries world =
   [ d
-  | ScenarioTag (MkScenarioTag s) <- orToList (worldTags world)
+  | ScenarioTag (MkScenarioTag s) <- worldTagList world
   , Just d <- [readMaybe s :: Maybe HuntDiscovery]
   ]
 

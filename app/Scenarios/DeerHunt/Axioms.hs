@@ -7,7 +7,6 @@ import           Engine.Author.DSL
 import           Engine.Core.Time            (TimePhase(..), currentHour)
 import           Engine.Core.World           (charLocation)
 import           Engine.Author.Random        (rollCheck, rollChoice, rollD)
-import           Engine.CRDT.ORSet           (orToList)
 import           GameTypes
 import           Scenarios.DeerHunt.Constants
 import           Scenarios.DeerHunt.Discoveries (arrivalDiscoveryAxiom, findDiscoveryAxiom)
@@ -228,7 +227,7 @@ windAxiom = Axiom
           newStrength   = max 0.0 (min 1.0 (oldStrength + strengthDrift + randomNudge))
           -- Remove old wind tags and add new ones
           removeOld = [ immediate (RemoveWorldTag t)
-                      | t <- orToList (worldTags world)
+                      | t <- worldTagList world
                       , isWindAngleTag t || isWindStrengthTag t ]
           addNew    = [ immediate (AddWorldTag (windAngleTag newAngle))
                       , immediate (AddWorldTag (windStrengthTag newStrength))
@@ -239,7 +238,7 @@ windAxiom = Axiom
 -- | Weather-based target for wind strength.
 weatherStrengthBias :: GameWorld -> Double
 weatherStrengthBias world =
-  case [ w | EngineTag (Weather w) <- orToList (worldTags world) ] of
+  case [ w | EngineTag (Weather w) <- worldTagList world ] of
     (WeatherDesc "Windy" : _)          -> 0.85
     (WeatherDesc "Light Snow" : _)     -> 0.40
     (WeatherDesc "Overcast" : _)       -> 0.50
@@ -416,7 +415,7 @@ signPlacementAxiom you = Axiom
                 || Just (locationDeltaTo ld)   == playerLoc
             ]
           isSnow = weatherTag (WeatherDesc "Light Snow")
-                     `elem` orToList (worldTags world)
+                     `elem` worldTagList world
           trackDuration  = if isSnow then 12 else 24
           scrapeDuration = 12
       in concatMap (const

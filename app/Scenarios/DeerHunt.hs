@@ -3,8 +3,7 @@ module Scenarios.DeerHunt (deerHunt, deerHuntDisplay) where
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 
-import           Engine.CRDT.ORSet      (orMember, orToList)
-import           Engine.CRDT.TombstoneGC (olderThanDays)
+import           Engine.Author.DSL      (hasTag, olderThanDays, worldTagList)
 import           Engine.Core.Conditions (checkCondition)
 import           Engine.Core.Time       (currentHour)
 import           SDL.Layout
@@ -119,10 +118,9 @@ situationalOverride world loc salt base
   | spotted && roll < 0.6 = pickFrom sightingFragments
   | otherwise             = base
   where
-    tags          = worldTags world
-    inZone        = orMember freshSign tags
-    spotted       = orMember deerSpotted tags
-    alreadyFound  = orMember signatureFoundTag tags
+    inZone        = hasTag world freshSign
+    spotted       = hasTag world deerSpotted
+    alreadyFound  = hasTag world signatureFoundTag
     -- The signature hint only fires if this label is the signature's
     -- cell *and* the player hasn't already discovered it.  Checking
     -- "this label is that cell" rather than "player is adjacent" is
@@ -130,7 +128,7 @@ situationalOverride world loc salt base
     -- label — so "the cell you're about to step into" carries the
     -- hint, not the one you're standing on.
     nearSignature = not alreadyFound && signatureLoc == Just loc
-    signatureLoc  = firstJust (map parseSignatureLocTag (orToList tags))
+    signatureLoc  = firstJust (map parseSignatureLocTag (worldTagList world))
     roll          = let r = abs salt `mod` 1000 in fromIntegral r / 1000 :: Double
     pickFrom xs
       | null xs   = base
@@ -143,7 +141,7 @@ situationalOverride world loc salt base
 archetypeHintsFor :: GameWorld -> [String]
 archetypeHintsFor world =
   maybe [] archetypeHint
-    (firstJust (map parseSignatureArchetypeTag (orToList (worldTags world))))
+    (firstJust (map parseSignatureArchetypeTag (worldTagList world)))
 
 -- | Find the first 'Just' in a list of 'Maybe's.
 firstJust :: [Maybe a] -> Maybe a
@@ -345,7 +343,7 @@ endScreen w
 -- default if the tag is missing for any reason.
 signatureLineFor :: GameWorld -> String
 signatureLineFor w =
-  case firstJust (map parseSignatureArchetypeTag (orToList (worldTags w))) of
+  case firstJust (map parseSignatureArchetypeTag (worldTagList w)) of
     Just arch -> case arch of
       SigAntler  -> "An antler. Not one you'll forget the shape of."
       SigCairn   -> "A cairn nobody but you will visit this winter."
