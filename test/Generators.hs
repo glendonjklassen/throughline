@@ -9,7 +9,7 @@ import qualified Data.UUID.V5    as UUID.V5
 import qualified Data.UUID       as UUID
 import           Test.QuickCheck
 
-import           Engine.Author.DSL      (staticLive)
+import           Engine.Author.DSL      (staticInitEffect)
 import           Engine.CRDT.ORSet
 import           GameTypes
 import           GameTypes.Types         (Action(..))
@@ -26,7 +26,7 @@ arbUUID n = UUID.V5.generateNamed UUID.nil (map (fromIntegral . fromEnum) (show 
 -- Arbitrary instances (orphans suppressed by OPTIONS_GHC above)
 -- ---------------------------------------------------------------------------
 
-instance Arbitrary CharId where
+instance Arbitrary CharacterId where
   arbitrary = oneof
     [ Named <$> elements ["player", "npc", "bradley", "you"]
     , pure Truth
@@ -211,7 +211,7 @@ instance Arbitrary Effect where
     <*> pure Nothing
 
 instance Arbitrary LiveEffect where
-  arbitrary = staticLive <$> arbitrary
+  arbitrary = staticInitEffect <$> arbitrary
 
 instance Arbitrary AnyAction where
   arbitrary = AnyAction <$> (Action

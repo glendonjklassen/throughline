@@ -10,7 +10,7 @@ module SDL.Layout
   , defaultDisplay
   ) where
 
-import GameTypes.Types (CharId, GameWorld, Location)
+import GameTypes.Types (CharacterId, GameWorld, Location)
 import qualified SDL.Palette
 
 data LayoutConfig = LayoutConfig
@@ -33,7 +33,7 @@ data ScenarioDisplay = ScenarioDisplay
   { sdEndScreen       :: GameWorld -> [String]
   , sdStatusLine      :: GameWorld -> Maybe String
   , sdLayout          :: LayoutConfig
-  , sdLocationSparkle :: GameWorld -> CharId -> Location -> Int
+  , sdLocationSparkle :: GameWorld -> CharacterId -> Location -> Int
     -- ^ "shiny-sense" level for a location, shown on the spatial HUD.
     -- 0 = no sparkle, 1 = faint hint, 2 = clear sign, 3 = strong pull.
     -- Scenarios use this to hint at deer presence or other points of

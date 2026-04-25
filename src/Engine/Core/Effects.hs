@@ -156,7 +156,7 @@ executeBody (Cycle {})                  = error "executeBody: compound body reac
 -- count for the destination.  No-op moves (already at 'loc') leave
 -- everything untouched so axioms that redundantly re-assert a location
 -- don't pollute the trail or inflate visit counts.
-moveCharacter :: CharId -> Location -> GameWorld -> GameWorld
+moveCharacter :: CharacterId -> Location -> GameWorld -> GameWorld
 moveCharacter cid loc w =
   let prev        = Map.lookup cid (worldLocations w)
       sameSpot    = prev == Just loc
@@ -260,7 +260,7 @@ mergeActiveEffects as bs = nubBy (\x y -> liveId x == liveId y) (as ++ bs)
 -- Stats: PN-Counter merge (per-player buckets, high-water mark per player).
 -- Active effects: OR-Set merge by liveId.
 -- Clock: take the later Lamport value.
--- Locations: left-biased union. In practice, each player's CharId is
+-- Locations: left-biased union. In practice, each player's CharacterId is
 -- cryptographically unique (derived from Ed25519 keypair), so location
 -- conflicts only arise for shared NPCs like the deer — where left-bias
 -- is acceptable since log replay is the authoritative merge path for

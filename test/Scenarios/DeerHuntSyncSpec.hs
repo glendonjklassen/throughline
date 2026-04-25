@@ -45,7 +45,7 @@ pidA, pidB :: PlayerId
 pidA = PlayerId "hunter-alpha"
 pidB = PlayerId "hunter-bravo"
 
-youA, youB :: CharId
+youA, youB :: CharacterId
 youA = Named (take 12 "hunter-alpha")  -- Named "hunter-alph"
 youB = Named (take 12 "hunter-bravo")  -- Named "hunter-brav"
 
@@ -100,7 +100,7 @@ logMerge scriptA scriptB = do
   replayFrom scenA base divergent
 
 -- | Check if the wave action is available for a given hunter in the world.
-canWave :: CharId -> GameWorld -> Bool
+canWave :: CharacterId -> GameWorld -> Bool
 canWave you world =
   let scen    = deerHunt fixtureSeed you
       actions = scenarioActions scen
@@ -112,7 +112,7 @@ canWave you world =
 -- stays at fieldEnd and doesn't bolt when a hunter arrives.
 -- ---------------------------------------------------------------------------
 
-pinnedDeerHunt :: CharId -> Scenario
+pinnedDeerHunt :: CharacterId -> Scenario
 pinnedDeerHunt you =
   let base = deerHunt fixtureSeed you
       pinned = filter (\a -> axiomId a `notElem`
@@ -141,7 +141,7 @@ pinnedLogMerge scriptA scriptB = do
   replayFrom scenA base divergent
 
 -- | Find a clock tick where the shot hits for a given player.
-findHitTick :: CharId -> Int -> Int
+findHitTick :: CharacterId -> Int -> Int
 findHitTick you offset =
   case [ t | t <- [0..5000]
            , let w = GameWorld
@@ -239,7 +239,7 @@ spec = describe "DeerHunt multiplayer merge" $ do
         killScript = walkToField ++ [ActionId "look", ActionId "takeTheShot"]
         bystander  = walkToBush
 
-        pinnedKillHunt :: CharId -> Scenario
+        pinnedKillHunt :: CharacterId -> Scenario
         pinnedKillHunt you =
           let base = pinnedDeerHunt you
               w0   = scenarioInitial base
@@ -284,7 +284,7 @@ spec = describe "DeerHunt multiplayer merge" $ do
         killScript   = walkToField ++ [ActionId "look", ActionId "takeTheShot"]
         nearbyScript = walkToField ++ [ActionId "look"]
 
-        pinnedKillHunt :: CharId -> Scenario
+        pinnedKillHunt :: CharacterId -> Scenario
         pinnedKillHunt you =
           let base = pinnedDeerHunt you
               w0   = scenarioInitial base

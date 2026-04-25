@@ -5,7 +5,7 @@
 -- "Engine.Core.World.Internal".
 module Engine.Core.World
   ( -- * Character location
-    charLocation
+    characterLocation
     -- * Environment queries
   , getWeather
   , getHour
@@ -32,8 +32,8 @@ import           GameTypes
 
 -- | Look up a character's current location.  Returns 'Nothing' if
 -- the character has not been placed.
-charLocation :: CharId -> GameWorld -> Maybe Location
-charLocation cid world = Map.lookup cid (worldLocations world)
+characterLocation :: CharacterId -> GameWorld -> Maybe Location
+characterLocation cid world = Map.lookup cid (worldLocations world)
 
 -- ---------------------------------------------------------------------------
 -- Environment queries
@@ -88,7 +88,7 @@ getDayNumber w = foldr check Nothing (orToList (worldTags w))
 -- | Set a character's ground-truth stat value in the relationship
 -- graph.  Truth is the canonical stat owner; per-character
 -- perceptions branch off from there.
-setCharacterStat :: CharId -> StatType -> Int -> RelationshipGraph -> RelationshipGraph
+setCharacterStat :: CharacterId -> StatType -> Int -> RelationshipGraph -> RelationshipGraph
 setCharacterStat = setRelStat Truth
 
 -- | Build a 'Relationship' carrying a single stat value; all other
@@ -99,6 +99,6 @@ mkRelationship stat val = Relationship (Map.singleton stat (pnZero val))
 -- | Insert a bidirectional pair of relationship edges between two
 -- characters.  Use at scenario init to seed initial trust /
 -- familiarity / etc.
-addRelationship :: CharId -> CharId -> Relationship -> Relationship -> RelationshipGraph -> RelationshipGraph
+addRelationship :: CharacterId -> CharacterId -> Relationship -> Relationship -> RelationshipGraph -> RelationshipGraph
 addRelationship a b relAtoB relBtoA graph =
   Map.alter (addEdge b relAtoB) a (Map.alter (addEdge a relBtoA) b graph)

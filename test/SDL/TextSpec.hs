@@ -11,10 +11,10 @@ spec = describe "SDL.Text" $ do
   -- -------------------------------------------------------------------------
 
   describe "colour wrappers" $ do
-    it "yellow wraps and strips cleanly" $
-      stripAnsi (yellow "warning") `shouldBe` "warning"
-    it "red wraps and strips cleanly" $
-      stripAnsi (red "error") `shouldBe` "error"
+    it "ansiYellow wraps and strips cleanly" $
+      stripAnsi (ansiYellow "warning") `shouldBe` "warning"
+    it "ansiRed wraps and strips cleanly" $
+      stripAnsi (ansiRed "error") `shouldBe` "error"
 
   -- -------------------------------------------------------------------------
   -- visibleLength
@@ -24,7 +24,7 @@ spec = describe "SDL.Text" $ do
     it "plain string" $
       visibleLength "hello" `shouldBe` 5
     it "ANSI-wrapped string counts only visible chars" $
-      visibleLength (bold "hi") `shouldBe` 2
+      visibleLength (ansiBold "hi") `shouldBe` 2
     it "empty string" $
       visibleLength "" `shouldBe` 0
 
@@ -91,7 +91,7 @@ spec = describe "SDL.Text" $ do
       visibleLength result `shouldBe` 5
       stripAnsi result `shouldBe` "hello"
     it "ANSI-wrapped string is measured by visible length" $ do
-      let result = fitToWidth 10 (bold "hi")
+      let result = fitToWidth 10 (ansiBold "hi")
       visibleLength result `shouldBe` 10
 
   -- -------------------------------------------------------------------------
@@ -104,7 +104,7 @@ spec = describe "SDL.Text" $ do
       result `shouldBe` "abc       "
       length result `shouldBe` 10
     it "ANSI string is padded by visible length" $ do
-      let input  = green "abc"
+      let input  = ansiGreen "abc"
           result = padRight 10 input
       visibleLength result `shouldBe` 10
       stripAnsi result `shouldBe` "abc       "
@@ -118,11 +118,11 @@ spec = describe "SDL.Text" $ do
   -- -------------------------------------------------------------------------
 
   describe "remaining colour wrappers" $ do
-    let wrappers = [ ("grey",  grey)
-                   , ("green", green)
-                   , ("cyan",  cyan)
-                   , ("bold",  bold)
-                   , ("dim",   dim)
+    let wrappers = [ ("ansiGrey",  ansiGrey)
+                   , ("ansiGreen", ansiGreen)
+                   , ("ansiCyan",  ansiCyan)
+                   , ("ansiBold",  ansiBold)
+                   , ("ansiDim",   ansiDim)
                    ]
         testText = "sample"
     mapM_ (\(name, fn) -> do

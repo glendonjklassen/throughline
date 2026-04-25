@@ -5,24 +5,24 @@ import           Engine.Author.DSL
 import           GameTypes
 import           Scenarios.Diner.Constants
 
-outsideActions :: CharId -> [AnyAction]
+outsideActions :: CharacterId -> [AnyAction]
 outsideActions you =
   [ anyAction (standInRain you)
   , anyAction (watchStreet you)
   , anyAction (watchStarsClearing you)
   ]
 
-standInRain :: CharId -> Action 'Once
+standInRain :: CharacterId -> Action 'Once
 standInRain you = onceAction (ActionId "standInRain")
   "Stand in the rain for a moment."
   (HasWorldTag (weatherTag (WeatherDesc "Rainy")))
   [ immediate (Narrate "The rain is cold and real. It hits your face and your shoulders. For a second you're just a body in weather, not a person with thoughts.")
   , immediate (think you "This is the first thing that's felt right all day.")
   , immediate (RemoveWorldTag restless)
-  , modifyCharacterStatEffect you (Capacity Strength) (-1)
+  , modifyStat you (Capacity Strength) (-1)
   ]
 
-watchStreet :: CharId -> Action 'Once
+watchStreet :: CharacterId -> Action 'Once
 watchStreet you = onceAction (ActionId "watchStreet")
   "Watch the empty street."
   unconditional
@@ -30,7 +30,7 @@ watchStreet you = onceAction (ActionId "watchStreet")
   , immediate (think you "The world is so quiet at this hour. Like it's taking a breath.")
   ]
 
-watchStarsClearing :: CharId -> Action 'Once
+watchStarsClearing :: CharacterId -> Action 'Once
 watchStarsClearing you = onceAction (ActionId "watchStarsClearing")
   "Look up at the sky."
   (HasWorldTag (weatherTag (WeatherDesc "Clearing")))

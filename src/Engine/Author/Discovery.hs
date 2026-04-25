@@ -53,7 +53,7 @@ firstFind opener d@(Discovery kind name) =
 arrivalDiscoveryAxiom
   :: Show k
   => AxiomId
-  -> CharId
+  -> CharacterId
   -> (Location -> [Discovery k])   -- ^ pool at a location
   -> (k -> String -> String)       -- ^ opening-line voice
   -> (Location -> Int)             -- ^ per-location salt for 'Chance'
@@ -63,7 +63,7 @@ arrivalDiscoveryAxiom aid you poolOf opener salt chance = Axiom
   { axiomId       = aid
   , axiomPriority = 4
   , axiomEvaluate = \world _avail diff ->
-      concatMap (atArrival world) (playerArrivals you diff)
+      concatMap (atArrival world) (characterArrivals you diff)
   }
   where
     atArrival world loc =

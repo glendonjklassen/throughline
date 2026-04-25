@@ -10,22 +10,22 @@ spec = describe "SDL.Palette" $ do
   describe "remapColor" $ do
 
     it "Autumn mode is identity" $ do
-      remapColor Autumn defaultText `shouldBe` defaultText
-      remapColor Autumn dimText     `shouldBe` dimText
-      remapColor Autumn greyText    `shouldBe` greyText
+      remapColor Autumn textColor `shouldBe` textColor
+      remapColor Autumn dimTextColor     `shouldBe` dimTextColor
+      remapColor Autumn chromeColor    `shouldBe` chromeColor
 
     -- HighContrast should brighten every opaque foreground; a
     -- regression here would quietly make the accessibility mode
     -- render no differently from the default palette.
     it "HighContrast brightens opaque foregrounds" $ do
-      let Color r  g  b  _ = defaultText
-          Color r' g' b' _ = remapColor HighContrast defaultText
+      let Color r  g  b  _ = textColor
+          Color r' g' b' _ = remapColor HighContrast textColor
       (r' >= r && g' >= g && b' >= b) `shouldBe` True
       -- At least one channel actually moved — otherwise we didn't
       -- lift anything.
       (r' > r || g' > g || b' > b) `shouldBe` True
 
-    it "HighContrast lifts very dim foregrounds to a visible grey" $ do
+    it "HighContrast lifts very ansiDim foregrounds to a visible ansiGrey" $ do
       -- separatorColor is near-black; remapped it should be bright
       -- enough to read.
       let Color r g b _ = remapColor HighContrast separatorColor

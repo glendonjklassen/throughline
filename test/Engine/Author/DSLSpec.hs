@@ -230,19 +230,14 @@ spec = describe "Engine.Author.DSL" $ do
     it "is RelationAbove from to Trust" $
       trustAbove player npc 5 `shouldBe` RelationAbove player npc Trust 5
 
-  describe "trueStatAbove" $
+  describe "statAbove" $
     it "is RelationAbove Truth for the given character and stat" $
-      trueStatAbove player (Capacity Intelligence) 4
+      statAbove player (Capacity Intelligence) 4
         `shouldBe` RelationAbove Truth player (Capacity Intelligence) 4
 
-  describe "statAbove" $
-    it "is an alias for trueStatAbove" $
-      statAbove player (Capacity Intelligence) 4
-        `shouldBe` trueStatAbove player (Capacity Intelligence) 4
-
-  describe "modifyCharacterStatEffect" $
+  describe "modifyStat" $
     it "produces a ModifyRelation Truth effect for the given stat" $
-      effectBody (modifyCharacterStatEffect player (Capacity Strength) (-1))
+      effectBody (modifyStat player (Capacity Strength) (-1))
         `shouldBe` ModifyRelation Truth player (Capacity Strength) (-1)
 
   describe "atLocation" $
@@ -265,14 +260,14 @@ spec = describe "Engine.Author.DSL" $ do
         _       -> expectationFailure "expected exactly one gated action"
 
   -- -------------------------------------------------------------------------
-  -- whenTagAdded
+  -- effectsIfTagAdded
   -- -------------------------------------------------------------------------
 
-  describe "whenTagAdded" $ do
+  describe "effectsIfTagAdded" $ do
     let diff = emptyDiff { diffWorldTagsAdded = [testTag] }
     it "returns the effects when the tag was added this tick" $
-      whenTagAdded testTag diff [immediate DoNothing]
+      effectsIfTagAdded testTag diff [immediate DoNothing]
         `shouldBe` [immediate DoNothing]
     it "returns empty when the tag was not added" $
-      whenTagAdded testTag emptyDiff [immediate DoNothing]
+      effectsIfTagAdded testTag emptyDiff [immediate DoNothing]
         `shouldBe` []

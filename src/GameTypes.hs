@@ -12,7 +12,7 @@ module GameTypes
   , CausalFrontier
   , LogEntry(..)
     -- * Identifiers & Tags
-  , CharId(..)
+  , CharacterId(..)
   , Entity(..)
   , Tag(..)
   , ScenarioTagValue(..)

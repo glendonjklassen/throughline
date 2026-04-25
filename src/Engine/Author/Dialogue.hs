@@ -24,7 +24,7 @@ timed' n body = Effect { effectBody = body, effectLifetime = Just n, effectCondi
 -- The action disappears permanently after playing (gated on actionTaken).
 -- For sequences that should re-trigger or have a custom follow-up,
 -- compose dialogueChain directly.
-dialogueAction :: ActionId -> String -> NonEmpty (CharId, [CharId], String) -> Action 'Once
+dialogueAction :: ActionId -> String -> NonEmpty (CharacterId, [CharacterId], String) -> Action 'Once
 dialogueAction aid label ls = Action
   { actionId        = aid
   , actionLabel     = label
@@ -36,14 +36,14 @@ dialogueAction aid label ls = Action
 -- | Chain a sequence of (speaker, listener, line) triples into a timed
 -- effect sequence. Pushes ActionTaken did to world tags while the dialogue
 -- is in play and removes it when the last line expires.
-dialogueChain :: ActionId -> NonEmpty (CharId, [CharId], String) -> [Effect]
+dialogueChain :: ActionId -> NonEmpty (CharacterId, [CharacterId], String) -> [Effect]
 dialogueChain did ls =
   [ immediate' (AddWorldTag (actionTaken did))
   , immediate' (AddWorldTag dialogueInProgress)
   , dialogueChainThen ls (immediate' (RemoveWorldTag dialogueInProgress))
   ]
 
-dialogueChainThen :: NonEmpty (CharId, [CharId], String) -> Effect -> Effect
+dialogueChainThen :: NonEmpty (CharacterId, [CharacterId], String) -> Effect -> Effect
 dialogueChainThen ((c, l, w) :| [])   after = timed' 1 (OnExpire (Say c l w) after)
 dialogueChainThen ((c, l, w) :| rest) after = timed' 1 (OnExpire (Say c l w) (dialogueChainThen (NE.fromList rest) after))
 
@@ -51,14 +51,14 @@ dialogueChainThen ((c, l, w) :| rest) after = timed' 1 (OnExpire (Say c l w) (di
 -- continueAction appears while lines are playing.
 -- For dialogue that chains into specific follow-up effects after the
 -- last line, use dialogueChainThen directly.
-dialogue :: NonEmpty (CharId, [CharId], String) -> [Effect]
+dialogue :: NonEmpty (CharacterId, [CharacterId], String) -> [Effect]
 dialogue ls =
   [ immediate' (AddWorldTag dialogueInProgress)
   , dialogueChainThen ls (immediate' (RemoveWorldTag dialogueInProgress))
   ]
 
 -- | Immediate dialogue: all lines fire on a single tick, no interleaving.
-immediateDialogue :: ActionId -> NonEmpty (CharId, [CharId], String) -> [Effect]
+immediateDialogue :: ActionId -> NonEmpty (CharacterId, [CharacterId], String) -> [Effect]
 immediateDialogue did ls =
   [ immediate' (AddWorldTag (actionTaken did))
   , immediate' (AddWorldTag dialogueInProgress)
@@ -70,14 +70,14 @@ immediateDialogue did ls =
 -- other. Takes simple (speaker, text) pairs and fills in listeners.
 -- Use this for the common case; use dialogue directly for group scenes
 -- or undirected speech.
-conversation :: CharId -> CharId -> NonEmpty (CharId, String) -> [Effect]
+conversation :: CharacterId -> CharacterId -> NonEmpty (CharacterId, String) -> [Effect]
 conversation a b ls = dialogue (fmap addListener ls)
   where addListener (speaker, text)
           | speaker == a = (speaker, [b], text)
           | otherwise    = (speaker, [a], text)
 
 -- | Like conversation but chains into a follow-up effect after the last line.
-conversationThen :: CharId -> CharId -> NonEmpty (CharId, String) -> Effect -> Effect
+conversationThen :: CharacterId -> CharacterId -> NonEmpty (CharacterId, String) -> Effect -> Effect
 conversationThen a b ls = dialogueChainThen (fmap addListener ls)
   where addListener (speaker, text)
           | speaker == a = (speaker, [b], text)
@@ -99,7 +99,7 @@ continueAction = Action
 -- ---------------------------------------------------------------------------
 
 -- | Like dialogueAction but directed at a specific entity (the conversation partner).
-targetedDialogueAction :: ActionId -> String -> Entity -> NonEmpty (CharId, [CharId], String) -> Action 'Once
+targetedDialogueAction :: ActionId -> String -> Entity -> NonEmpty (CharacterId, [CharacterId], String) -> Action 'Once
 targetedDialogueAction aid label target ls = Action
   { actionId        = aid
   , actionLabel     = label

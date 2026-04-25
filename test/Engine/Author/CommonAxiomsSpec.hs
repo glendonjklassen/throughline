@@ -35,7 +35,7 @@ weatherDiff :: WeatherDesc -> WorldDiff
 weatherDiff w = emptyDiff { diffWorldTagsAdded = [weatherTag w] }
 
 -- | Diff that signals a Strength stat drop.
-strengthDropDiff :: CharId -> Int -> Int -> WorldDiff
+strengthDropDiff :: CharacterId -> Int -> Int -> WorldDiff
 strengthDropDiff cid old new = emptyDiff
   { diffStats = [StatDelta cid (Capacity Strength) old new (PlayerId "test")] }
 

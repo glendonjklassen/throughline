@@ -13,7 +13,7 @@ module Engine.Author.CommonAxioms
 import           Data.Maybe             (mapMaybe)
 
 import           Engine.Author.DSL
-import           Engine.Core.Conditions (getCharStat)
+import           Engine.Core.Conditions (getCharacterStat)
 import           Engine.Core.Time       (TimePhase, timeOfDayPhase)
 import           Engine.Core.World      (getWeather)
 import           GameTypes
@@ -43,7 +43,7 @@ weatherNarrationAxiom weatherDesc = Axiom
 -- | Applies stat effects when the weather changes.
 -- The scenario provides a function mapping weather to a list of
 -- (stat, delta) pairs. Effects are immediate and fire once per change.
-weatherInfluenceAxiom :: CharId -> (WeatherDesc -> [(StatType, Int)]) -> Axiom
+weatherInfluenceAxiom :: CharacterId -> (WeatherDesc -> [(StatType, Int)]) -> Axiom
 weatherInfluenceAxiom cid influence = Axiom
   { axiomId       = ScenarioAxiom "weatherInfluence"
   , axiomPriority = 2
@@ -52,7 +52,7 @@ weatherInfluenceAxiom cid influence = Axiom
       in if not changed then [] else
            case getWeather world of
              Nothing -> []
-             Just w  -> map (uncurry (modifyCharacterStatEffect cid))
+             Just w  -> map (uncurry (modifyStat cid))
                             (influence w)
   }
 
@@ -95,7 +95,7 @@ timeOfDayNarrationAxiom phaseProse = Axiom
 -- | Each hour, moves the given stats toward their baseline values by one step.
 -- If the stat is already at baseline, no effect is emitted.
 -- Use this to model emotions, tension, or alertness that settle over time.
-moodDriftAxiom :: CharId -> [(StatType, Int)] -> Axiom
+moodDriftAxiom :: CharacterId -> [(StatType, Int)] -> Axiom
 moodDriftAxiom cid baselines = Axiom
   { axiomId       = ScenarioAxiom "moodDrift"
   , axiomPriority = 8     -- after gameplay axioms, before tension
@@ -106,9 +106,9 @@ moodDriftAxiom cid baselines = Axiom
   }
   where
     driftOne world (stat, baseline) =
-      case getCharStat cid stat world of
+      case getCharacterStat cid stat world of
         Nothing  -> []
         Just cur
           | cur == baseline -> []
-          | cur > baseline  -> [modifyCharacterStatEffect cid stat (-1)]
-          | otherwise       -> [modifyCharacterStatEffect cid stat 1]
+          | cur > baseline  -> [modifyStat cid stat (-1)]
+          | otherwise       -> [modifyStat cid stat 1]

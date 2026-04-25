@@ -7,7 +7,7 @@ import qualified Data.Map.Strict as Map
 import           Test.Hspec
 
 import           Engine.CRDT.ORSet              (orMember, orToList)
-import           GameTypes                      (CharId(..), Location(..), worldTags)
+import           GameTypes                      (CharacterId(..), Location(..), worldTags)
 
 import           Engine.Author.Discovery        (Discovery(..), discoveryTag)
 import           Scenarios.DeerHunt.Constants   (initialWorld)

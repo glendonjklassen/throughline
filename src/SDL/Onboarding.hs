@@ -16,7 +16,7 @@ module SDL.Onboarding
 
 import           SDL.FontContext  (renderText)
 import           SDL.InputHandler (awaitInputSDL)
-import           SDL.Palette      (defaultText, dimText, greyText)
+import           SDL.Palette      (textColor, dimTextColor, chromeColor)
 import           SDL.Renderer     (SDLContext(..), clearSDL, presentSDL)
 
 -- | The baseline how-to-play text used when a 'ScenarioEntry' doesn't
@@ -50,12 +50,12 @@ renderHowToPlay :: SDLContext -> String -> [String] -> IO ()
 renderHowToPlay ctx title pages = do
   clearSDL ctx
   let fc = sdlFont ctx
-  renderText fc ("— " <> title <> " —") defaultText (3, 2)
-  renderText fc ""                      dimText     (3, 3)
+  renderText fc ("— " <> title <> " —") textColor (3, 2)
+  renderText fc ""                      dimTextColor     (3, 3)
   mapM_ (renderLine fc) (zip [0 :: Int ..] pages)
-  renderText fc "press any key or click to return" greyText
+  renderText fc "press any key or click to return" chromeColor
     (3, fromIntegral (5 + length pages + 1))
   presentSDL ctx
   where
     renderLine fc (i, line) =
-      renderText fc line defaultText (3, fromIntegral (5 + i))
+      renderText fc line textColor (3, fromIntegral (5 + i))

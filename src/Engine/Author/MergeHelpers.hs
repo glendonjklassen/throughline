@@ -32,7 +32,7 @@ hasAnyUnaware md =
   where isU d = mdProvenance d == Unaware
 
 -- | Did any relation change for a specific character pair arrive unaware?
-hasUnawareRelation :: CharId -> CharId -> StatType -> MergeDiff -> Bool
+hasUnawareRelation :: CharacterId -> CharacterId -> StatType -> MergeDiff -> Bool
 hasUnawareRelation from to stat md = any matches (mergeRelations md)
   where
     matches d = mdProvenance d == Unaware
@@ -41,7 +41,7 @@ hasUnawareRelation from to stat md = any matches (mergeRelations md)
              && relationDeltaStat (mdValue d) == stat
 
 -- | Did any character arrive at a location from an unaware source?
-hasUnawareArrival :: CharId -> Location -> MergeDiff -> Bool
+hasUnawareArrival :: CharacterId -> Location -> MergeDiff -> Bool
 hasUnawareArrival cid loc md = any matches (mergeLocations md)
   where
     matches d = mdProvenance d == Unaware

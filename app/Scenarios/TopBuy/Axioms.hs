@@ -10,7 +10,7 @@ module Scenarios.TopBuy.Axioms
 import           Data.Maybe                 (fromMaybe)
 import           Engine.Author.CommonAxioms        (weatherNarrationAxiom,
                                              weatherInfluenceAxiom, moodDriftAxiom)
-import           Engine.Core.Conditions          (checkCondition, getCharStat)
+import           Engine.Core.Conditions          (checkCondition, getCharacterStat)
 import           Engine.Author.DSL
 import           GameTypes
 import           Scenarios.TopBuy.Constants
@@ -18,7 +18,7 @@ import           Scenarios.TopBuy.Locations
 
 -- | When Bradley first forms an opinion of you (Understanding set from 0),
 -- narrate it. Perceptive players get the full read; others notice something is different.
-perceptionAxiom :: CharId -> Axiom
+perceptionAxiom :: CharacterId -> Axiom
 perceptionAxiom you = Axiom
   { axiomId       = ScenarioAxiom "perception"
   , axiomPriority = 5
@@ -39,7 +39,7 @@ perceptionAxiom you = Axiom
 
 -- | When Bradley witnesses you handle a customer situation or read him directly,
 -- he revises his assessment of you upward.
-bradleyWatchingAxiom :: CharId -> Axiom
+bradleyWatchingAxiom :: CharacterId -> Axiom
 bradleyWatchingAxiom you = Axiom
   { axiomId       = ScenarioAxiom "bradleyWatching"
   , axiomPriority = 5
@@ -56,12 +56,12 @@ bradleyWatchingAxiom you = Axiom
   }
 
 -- | When the player covers the floor, Bradley steals. Start Kyle's clock.
-accompliceAxiom :: CharId -> Axiom
+accompliceAxiom :: CharacterId -> Axiom
 accompliceAxiom you = Axiom
   { axiomId       = ScenarioAxiom "accomplice"
   , axiomPriority = 5
   , axiomEvaluate = \world _actions diff ->
-      whenTagAdded coveredForBradley diff $
+      effectsIfTagAdded coveredForBradley diff $
         let hint =
               [ immediateNarrated
                   "He doesn't seem relieved to be done with the count. He seems relieved to be done with something else."
@@ -116,7 +116,7 @@ earlyReportRule = AxiomRule
 
 -- | Manages the work shift: narrates end of shift at 5 PM and start at 9 AM,
 -- restores Strength and clears tiredness tags for a new day.
-shiftAxiom :: CharId -> Axiom
+shiftAxiom :: CharacterId -> Axiom
 shiftAxiom you = Axiom
   { axiomId       = ScenarioAxiom "shift"
   , axiomPriority = 2
@@ -124,8 +124,8 @@ shiftAxiom you = Axiom
       let endOfShift   = timeTag 17 `elem` diffWorldTagsAdded diff
           startOfShift = timeTag 9  `elem` diffWorldTagsAdded diff
                       && not (checkCondition world (AtLocation you salesFloor))
-          strDelta     = 5 - fromMaybe 0 (getCharStat you (Capacity Strength) world)
-          hunDelta     = 8 - fromMaybe 0 (getCharStat you (Capacity Hunger)   world)
+          strDelta     = 5 - fromMaybe 0 (getCharacterStat you (Capacity Strength) world)
+          hunDelta     = 8 - fromMaybe 0 (getCharacterStat you (Capacity Hunger)   world)
       in if endOfShift then
            [ immediate (Narrate "Your shift ends. You clock out and head for the door.")
            , immediate (SetLocation you home)
@@ -137,8 +137,8 @@ shiftAxiom you = Axiom
            [ immediate (Narrate "Morning. You badge in and take your spot on the floor.")
            , immediate (SetLocation you salesFloor)
            , immediate (RemoveTag you sleepingTag)
-           , modifyCharacterStatEffect you (Capacity Strength) strDelta
-           , modifyCharacterStatEffect you (Capacity Hunger)   hunDelta
+           , modifyStat you (Capacity Strength) strDelta
+           , modifyStat you (Capacity Hunger)   hunDelta
            , immediate (RemoveTag you (fatigueTag Tired))
            , immediate (RemoveTag you (fatigueTag Exhausted))
            , immediate (RemoveTag you (hungerStateTag Peckish))
@@ -149,13 +149,13 @@ shiftAxiom you = Axiom
 
 -- | Centrally models the physical cost of player actions.
 -- All effort drains live here rather than scattered across action definitions.
-effortAxiom :: CharId -> Axiom
+effortAxiom :: CharacterId -> Axiom
 effortAxiom you = Axiom
   { axiomId       = ScenarioAxiom "effort"
   , axiomPriority = 2
   , axiomEvaluate = \_world _actions diff ->
       let took aid = actionTaken aid `elem` diffWorldTagsAdded diff
-          drain n  = [modifyCharacterStatEffect you (Capacity Strength) (-n)]
+          drain n  = [modifyStat you (Capacity Strength) (-n)]
           costs    = [ (ActionId "helpCustomer",        1)
                      , (ActionId "checkStockroom",      2)
                      , (ActionId "logReturnForBradley", 1)
@@ -167,7 +167,7 @@ effortAxiom you = Axiom
 weatherDesc :: WeatherDesc -> String
 weatherDesc (WeatherDesc "Clear")         = "You glance at the storefront. Clear skies, hard light."
 weatherDesc (WeatherDesc "Partly Cloudy") = "The light through the entrance has gone soft. Clouds moving in."
-weatherDesc (WeatherDesc "Overcast")      = "Outside has gone grey. The parking lot looks flat and muted."
+weatherDesc (WeatherDesc "Overcast")      = "Outside has gone ansiGrey. The parking lot looks flat and muted."
 weatherDesc (WeatherDesc "Light Rain")    = "Rain taps the glass doors at the entrance. A few customers shake off their coats."
 weatherDesc (WeatherDesc "Windy")         = "Someone comes in and the automatic doors don't close fast enough. Cold air hits the floor."
 weatherDesc (WeatherDesc "Stormy")        = "You can hear the wind from here. Rain against the windows. The automatic doors keep triggering."
@@ -203,7 +203,7 @@ tensionAxiom = Axiom
       in [setTension target | target /= current]
   }
 
-allAxioms :: CharId -> [Axiom]
+allAxioms :: CharacterId -> [Axiom]
 allAxioms you =
   [ shiftAxiom         you
   , effortAxiom        you

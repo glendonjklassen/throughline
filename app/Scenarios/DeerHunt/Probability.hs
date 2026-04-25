@@ -21,7 +21,7 @@ import qualified Data.Map.Strict as Map
 import           Data.Maybe              (fromMaybe)
 import           Engine.Author.DSL         (hasTag)
 import           Engine.Author.Random      (rollCheck)
-import           Engine.Core.Conditions    (getCharStat)
+import           Engine.Core.Conditions    (getCharacterStat)
 import           Engine.Core.World         (getWeather)
 import           GameTypes
 import           Scenarios.DeerHunt.Constants (movingFast, saltSpook, saltShot, saltFriendlyFire)
@@ -34,11 +34,11 @@ import           Scenarios.DeerHunt.World      (HuntWorld, hwClass)
 -- ---------------------------------------------------------------------------
 
 -- | Experience is the Understanding stat on Truth -> player.
-experience :: CharId -> GameWorld -> Int
-experience cid world = fromMaybe 2 (getCharStat cid (Capacity Understanding) world)
+experience :: CharacterId -> GameWorld -> Int
+experience cid world = fromMaybe 2 (getCharacterStat cid (Capacity Understanding) world)
 
 -- | Spook probability when moving into the deer's node.
-spookChance :: GameWorld -> CharId -> Double
+spookChance :: GameWorld -> CharacterId -> Double
 spookChance world you =
   let exp' = experience you world
       fast = hasTag world movingFast
@@ -48,7 +48,7 @@ spookChance world you =
   in max 0.05 (base - expBonus)
 
 -- | Spook probability when sitting still and the deer walks in.
-spookChanceSitting :: GameWorld -> CharId -> Double
+spookChanceSitting :: GameWorld -> CharacterId -> Double
 spookChanceSitting world you =
   let exp' = experience you world
       base = 0.15
@@ -57,7 +57,7 @@ spookChanceSitting world you =
 
 -- | Shot accuracy: probability of a clean kill.
 -- Modified by stillness: long sitting = cold hands = slightly worse accuracy.
-shotAccuracy :: GameWorld -> CharId -> Double
+shotAccuracy :: GameWorld -> CharacterId -> Double
 shotAccuracy world you =
   let exp' = experience you world
       base = min 0.85 (0.35 + fromIntegral exp' * 0.07)
@@ -69,11 +69,11 @@ friendlyFireChance :: Double
 friendlyFireChance = 0.10
 
 -- | Does the deer spook on this tick?
-doesDeerSpook :: GameWorld -> CharId -> Bool
+doesDeerSpook :: GameWorld -> CharacterId -> Bool
 doesDeerSpook world you = rollCheck world saltSpook (spookChance world you)
 
 -- | Does the shot connect?
-doesShotHit :: GameWorld -> CharId -> Bool
+doesShotHit :: GameWorld -> CharacterId -> Bool
 doesShotHit world you = rollCheck world saltShot (shotAccuracy world you)
 
 -- | Is it friendly fire?
@@ -165,8 +165,8 @@ cardinalLabel deg =
 -- ---------------------------------------------------------------------------
 
 -- | Read the player's current Stillness stat (0–10).
-getStillness :: CharId -> GameWorld -> Int
-getStillness cid world = fromMaybe 0 (getCharStat cid (Capacity Stillness) world)
+getStillness :: CharacterId -> GameWorld -> Int
+getStillness cid world = fromMaybe 0 (getCharacterStat cid (Capacity Stillness) world)
 
 -- | Additive spook modifier from stillness.
 -- Higher stillness = harder to detect when deer walks into your location.

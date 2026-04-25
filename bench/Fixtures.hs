@@ -3,7 +3,7 @@ module Fixtures where
 import qualified Data.Map.Strict     as Map
 import           Data.IORef          (newIORef)
 
-import           Engine.Author.DSL   (staticLive, timed)
+import           Engine.Author.DSL   (staticInitEffect, timed)
 import           Engine.CRDT.ORSet   (orEmpty, orFromList)
 import           Engine.Core.World   (setCharacterStat)
 import           Engine.Sync.EventLog (nullLogStore)
@@ -14,13 +14,13 @@ import           MonadStack
 -- Character IDs
 -- ---------------------------------------------------------------------------
 
-player :: CharId
+player :: CharacterId
 player = Named "player"
 
-npc1 :: CharId
+npc1 :: CharacterId
 npc1 = Named "npc1"
 
-npc2 :: CharId
+npc2 :: CharacterId
 npc2 = Named "npc2"
 
 -- ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ scaledWorldMutated n = w
 -- | World with N active effects (cycled timers).
 worldWithActiveEffects :: Int -> GameWorld
 worldWithActiveEffects n = (scaledWorld 5)
-  { worldActiveEffects = map staticLive effects }
+  { worldActiveEffects = map staticInitEffect effects }
   where
     effects = [ timed (n `div` 2 + 1) (AddWorldTag (ScenarioTag (MkScenarioTag ("fx-" ++ show i))))
               | i <- [1..n]

@@ -39,7 +39,7 @@ data RuntimeUI = RuntimeUI
   , uiPromptMerge :: String -> Int -> IO Bool                -- ^ name, count -> accept?
   }
 
-runScenario :: RuntimeUI -> (Int -> CharId -> Scenario) -> IO ()
+runScenario :: RuntimeUI -> (Int -> CharacterId -> Scenario) -> IO ()
 runScenario ui = runScenarioWith ui (const (pure []))
 
 -- | Like 'runScenario', but also folds an extra foreign-logs source
@@ -50,7 +50,7 @@ runScenario ui = runScenarioWith ui (const (pure []))
 runScenarioWith
   :: RuntimeUI
   -> (String -> IO [(PlayerId, [LogEntry], Maybe Snapshot)])
-  -> (Int -> CharId -> Scenario)
+  -> (Int -> CharacterId -> Scenario)
   -> IO ()
 runScenarioWith ui extraForeign mkScenario = do
   args <- getArgs

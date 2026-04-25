@@ -11,7 +11,7 @@ import           Engine.Author.DSL
 import           Engine.Author.Random   (rollChoice)
 import           System.Random          (mkStdGen, randomR)
 import           Engine.Core.Time       (currentHour)
-import           Engine.Core.World      (charLocation, setCharacterStat)
+import           Engine.Core.World      (characterLocation, setCharacterStat)
 import           GameTypes
 import           Scenarios.DeerHunt.Generation (GeneratedMap(..), TerrainClass(..))
 import           Scenarios.DeerHunt.Signature  (SignatureFind(..),
@@ -46,7 +46,7 @@ formatHuntDate = formatShortDate . huntDayDate
 -- Characters
 -- ---------------------------------------------------------------------------
 
-deer :: CharId
+deer :: CharacterId
 deer = Named "deer"
 
 -- ---------------------------------------------------------------------------
@@ -508,7 +508,7 @@ deerPreferredClass world = case currentHour world of
 -- the class itself (a teleport fallback when the deer is stuck).
 deerNextLocation :: HuntWorld -> GameWorld -> Location
 deerNextLocation hw world =
-  let current   = fromMaybe (hwDeerStart hw) (charLocation deer world)
+  let current   = fromMaybe (hwDeerStart hw) (characterLocation deer world)
       preferred = deerPreferredClass world
       neighbors = neighborsOf (worldLocationGraph world) current
       prefNeighbors = filter (\l -> hwClass hw l == preferred) neighbors
@@ -530,7 +530,7 @@ neighborsOf lg loc =
 -- Initial world
 -- ---------------------------------------------------------------------------
 
-initialGraph :: CharId -> RelationshipGraph
+initialGraph :: CharacterId -> RelationshipGraph
 initialGraph you
   = setCharacterStat you  (Capacity Intelligence)  5
   . setCharacterStat you  (Capacity Strength)      6
@@ -545,7 +545,7 @@ initialGraph you
 -- map, start, and deer-start are all already baked into the
 -- 'HuntWorld'; this function composes them with characters, tags, and
 -- engine-level effects.
-initialWorld :: HuntWorld -> CharId -> GameWorld
+initialWorld :: HuntWorld -> CharacterId -> GameWorld
 initialWorld hw you = GameWorld
   { worldCharacters = Map.fromList
       [ (you,  Character you  "You"      [] emptyTags)
@@ -556,7 +556,7 @@ initialWorld hw you = GameWorld
       [ (you,  hwStart hw)
       , (deer, hwDeerStart hw)
       ]
-  , worldActiveEffects = map staticLive [timeCycle, weatherCycle]
+  , worldActiveEffects = map staticInitEffect [timeCycle, weatherCycle]
   , worldClock         = LamportClock 0 (PlayerId "init")
   , worldTags          = tagsFromList
       (

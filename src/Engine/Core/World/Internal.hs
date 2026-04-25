@@ -81,7 +81,7 @@ logEffect msg = do
 -- Character mutation
 -- ---------------------------------------------------------------------------
 
-modifyCharacter :: CharId -> (Character -> Character) -> App ()
+modifyCharacter :: CharacterId -> (Character -> Character) -> App ()
 modifyCharacter cid f =
   modify (\w -> w { worldCharacters = Map.adjust f cid (worldCharacters w) })
 
@@ -89,10 +89,10 @@ modifyCharacter cid f =
 -- Relationship mutation (low-level building blocks)
 -- ---------------------------------------------------------------------------
 
-setRelStat :: CharId -> CharId -> StatType -> Int -> RelationshipGraph -> RelationshipGraph
+setRelStat :: CharacterId -> CharacterId -> StatType -> Int -> RelationshipGraph -> RelationshipGraph
 setRelStat from to stat val = Map.alter (updateEdge to stat val) from
 
-modifyRelStat :: PlayerId -> CharId -> CharId -> StatType -> Int -> RelationshipGraph -> RelationshipGraph
+modifyRelStat :: PlayerId -> CharacterId -> CharacterId -> StatType -> Int -> RelationshipGraph -> RelationshipGraph
 modifyRelStat pid from to stat delta = Map.alter (Just . applyToEdges) from
   where
     applyToEdges Nothing      = Map.singleton to newRel
@@ -102,7 +102,7 @@ modifyRelStat pid from to stat delta = Map.alter (Just . applyToEdges) from
       Relationship (Map.alter (Just . pnModify pid delta . fromMaybe (pnZero 0)) stat m)
     newRel = Relationship (Map.singleton stat (pnModify pid delta (pnZero 0)))
 
-updateEdge :: CharId -> StatType -> Int -> Maybe (Map.Map CharId Relationship) -> Maybe (Map.Map CharId Relationship)
+updateEdge :: CharacterId -> StatType -> Int -> Maybe (Map.Map CharacterId Relationship) -> Maybe (Map.Map CharacterId Relationship)
 updateEdge target stat val Nothing      = Just (Map.singleton target (mkRel stat val))
 updateEdge target stat val (Just edges) = Just (Map.alter (updateRel stat val) target edges)
 
@@ -110,7 +110,7 @@ updateRel :: StatType -> Int -> Maybe Relationship -> Maybe Relationship
 updateRel stat val Nothing                 = Just (mkRel stat val)
 updateRel stat val (Just (Relationship m)) = Just (Relationship (Map.insert stat (pnZero val) m))
 
-addEdge :: CharId -> Relationship -> Maybe (Map.Map CharId Relationship) -> Maybe (Map.Map CharId Relationship)
+addEdge :: CharacterId -> Relationship -> Maybe (Map.Map CharacterId Relationship) -> Maybe (Map.Map CharacterId Relationship)
 addEdge target rel Nothing      = Just (Map.singleton target rel)
 addEdge target rel (Just edges) = Just (Map.insert target rel edges)
 
@@ -194,7 +194,7 @@ lunarPhaseLabel n
 
 -- | Default engine status line: location, day of week, season, and moon phase.
 -- Returns Nothing only if the player has no location recorded.
-engineStatusLine :: CharId -> GameWorld -> Maybe String
+engineStatusLine :: CharacterId -> GameWorld -> Maybe String
 engineStatusLine you world =
   let loc   = Map.lookup you (worldLocations world)
       dow   = dayOfWeekName  <$> getDayOfWeek  world
@@ -205,7 +205,7 @@ engineStatusLine you world =
        _                                -> locationName <$> loc
 
 -- | Just the player's current location name.
-playerLocationName :: CharId -> GameWorld -> Maybe String
+playerLocationName :: CharacterId -> GameWorld -> Maybe String
 playerLocationName you world = locationName <$> Map.lookup you (worldLocations world)
 
 -- | Calendar status (day of week, season, moon phase) without location.
@@ -238,7 +238,7 @@ snapToCardinal deg =
 
 -- | Given the player's location, return adjacent locations with their cardinal
 -- label and bearing in degrees. Returns [] if coordinates are not populated.
-exitBearings :: CharId -> GameWorld -> [(Location, String, Double)]
+exitBearings :: CharacterId -> GameWorld -> [(Location, String, Double)]
 exitBearings cid world =
   case Map.lookup cid (worldLocations world) of
     Nothing  -> []

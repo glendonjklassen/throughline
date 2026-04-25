@@ -35,7 +35,7 @@ pickRumor seed pool = pool !! (abs seed `mod` length pool)
 -- for an internal voice, @Narrate@ for an external one).
 rumorAxiom
   :: AxiomId
-  -> CharId                      -- ^ player character whose arrivals trigger
+  -> CharacterId                      -- ^ player character whose arrivals trigger
   -> Tag                         -- ^ delivered-guard tag
   -> [Rumor]                     -- ^ scenario's pool
   -> Int                         -- ^ deterministic seed
@@ -46,7 +46,7 @@ rumorAxiom aid you delivered pool seed chance voice = Axiom
   { axiomId       = aid
   , axiomPriority = 4
   , axiomEvaluate = \world _avail diff ->
-      concatMap (drop1 world) (playerArrivals you diff)
+      concatMap (drop1 world) (characterArrivals you diff)
   }
   where
     frag = pickRumor seed pool

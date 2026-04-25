@@ -53,7 +53,7 @@ them = PlayerId "player-them"
 
 -- | Minimal world with one character placed at a location.
 -- Used to create before/after worlds that differ by location.
-worldWithLocation :: CharId -> Location -> GameWorld
+worldWithLocation :: CharacterId -> Location -> GameWorld
 worldWithLocation cid loc = emptyWorld
   { worldLocations = Map.singleton cid loc }
 

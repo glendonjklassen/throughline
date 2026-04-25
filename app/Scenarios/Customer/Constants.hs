@@ -5,7 +5,7 @@ import           Engine.Author.DSL  (emptyTags)
 import           GameTypes
 import           Scenarios.TopBuy.Locations
 
-initialWorld :: Int -> CharId -> GameWorld
+initialWorld :: Int -> CharacterId -> GameWorld
 initialWorld seed you = GameWorld
   { worldCharacters    = Map.fromList
       [ (you, Character you "Customer" [] emptyTags) ]

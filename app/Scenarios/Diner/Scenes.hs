@@ -30,5 +30,5 @@ dinerGraph = SceneGraph
       ]
   }
 
-dinerActions :: CharId -> [AnyAction]
-dinerActions you = anyAction continueAction : buildActions you dinerGraph
+dinerActions :: CharacterId -> [AnyAction]
+dinerActions you = anyAction continueAction : compileSceneGraph you dinerGraph

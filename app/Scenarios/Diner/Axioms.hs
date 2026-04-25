@@ -10,7 +10,7 @@ import           Scenarios.Diner.Constants
 weatherDesc :: WeatherDesc -> String
 weatherDesc (WeatherDesc "Rainy")    = "Rain streaks the windows. The parking lot is a sheet of reflected neon."
 weatherDesc (WeatherDesc "Drizzle")  = "The rain has eased to a drizzle. You can hear it more than see it."
-weatherDesc (WeatherDesc "Overcast") = "The rain has stopped. The sky is low and grey, pressing down."
+weatherDesc (WeatherDesc "Overcast") = "The rain has stopped. The sky is low and ansiGrey, pressing down."
 weatherDesc (WeatherDesc "Clearing") = "The clouds are breaking up. Between them, a few pale stars."
 weatherDesc w                        = "The weather has shifted. " <> weatherName w <> "."
 
@@ -35,7 +35,7 @@ dawnRule completionTag = AxiomRule
                    ]
   }
 
-allAxioms :: CharId -> [Axiom]
+allAxioms :: CharacterId -> [Axiom]
 allAxioms you =
   [ weatherNarrationAxiom weatherDesc
   , weatherInfluenceAxiom you weatherEffect

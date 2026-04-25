@@ -2,7 +2,7 @@
 -- | The spatial layer.  A 'SceneGraph' is a list of 'Scene's (a
 -- location plus the actions available there) plus a list of
 -- 'SceneEdge's (traversable connections with their movement
--- narration).  'buildActions' compiles the graph into the flat
+-- narration).  'compileSceneGraph' compiles the graph into the flat
 -- @[AnyAction]@ list a scenario hands to the engine.
 --
 -- Build edges with 'edge' \/ 'biEdge' for ad-hoc connections, or
@@ -13,7 +13,7 @@ module Engine.Author.Scene
   ( Scene(..)
   , SceneEdge(..)
   , SceneGraph(..)
-  , buildActions
+  , compileSceneGraph
   , edge
   , biEdge
   , biEdgeWith
@@ -33,11 +33,11 @@ import GameTypes
 -- ---------------------------------------------------------------------------
 
 -- | A scene at a specific location with its own actions.
--- Actions provided here should NOT be pre-gated with atScene — buildActions
+-- Actions provided here should NOT be pre-gated with atScene — compileSceneGraph
 -- handles location-gating from the sceneLocation.
 data Scene = Scene
   { sceneLocation :: Location
-  , sceneActions  :: CharId -> [AnyAction]
+  , sceneActions  :: CharacterId -> [AnyAction]
   }
 
 -- | A traversable path between two locations.
@@ -124,7 +124,7 @@ poolNarration variants from to = NarrationPool (edgeSalt from to) (variants from
 sceneGraphFromLocations
   :: [Location]
   -> LocationGraph
-  -> (Location -> CharId -> [AnyAction])
+  -> (Location -> CharacterId -> [AnyAction])
   -> (Location -> Location -> [SceneEdge])
   -> SceneGraph
 sceneGraphFromLocations locs lg mkScene mkEdges = SceneGraph
@@ -139,8 +139,8 @@ sceneGraphFromLocations locs lg mkScene mkEdges = SceneGraph
 -- | Assemble a scene graph into the flat action list a Scenario needs.
 -- Location-gates each scene's actions and generates movement actions
 -- from edges.
-buildActions :: CharId -> SceneGraph -> [AnyAction]
-buildActions cid sg =
+compileSceneGraph :: CharacterId -> SceneGraph -> [AnyAction]
+compileSceneGraph cid sg =
   concatMap sceneToActions (sgScenes sg)
   ++ map edgeToAction (sgEdges sg)
   where

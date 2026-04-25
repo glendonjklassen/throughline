@@ -41,10 +41,10 @@ import           Generators             (arbUUID)
 -- Characters
 -- ---------------------------------------------------------------------------
 
-player :: CharId
+player :: CharacterId
 player = Named "player"
 
-npc :: CharId
+npc :: CharacterId
 npc = Named "npc"
 
 -- ---------------------------------------------------------------------------
@@ -148,7 +148,7 @@ runAppEither world action = do
 
 -- | Build an 'Env' wired to a specific scenario and player character.
 -- Sets all 'Env' fields including 'envMergeAxioms' and 'envFrontier'.
-mkScenarioEnv :: CharId -> Scenario -> IO Env
+mkScenarioEnv :: CharacterId -> Scenario -> IO Env
 mkScenarioEnv cid scenario = do
   debugRef    <- newIORef Off
   msgRef      <- newIORef []

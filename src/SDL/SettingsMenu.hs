@@ -27,7 +27,7 @@ import           Data.IORef         (newIORef, readIORef, writeIORef)
 import           SDL.ClickMap       (ClickMap, gridRect, gridRowRect, hitTest)
 import           SDL.FontContext    (renderText)
 import           SDL.InputHandler   (InputEvent(..), awaitInputSDL)
-import           SDL.Palette        (defaultText, dimText, greyText, warningColor)
+import           SDL.Palette        (textColor, dimTextColor, chromeColor, warningColor)
 import           SDL.Renderer       (SDLContext(..), clearSDL, presentSDL)
 import           SDL.Settings       (DisplayMode(..), Settings(..), ViewportPreset,
                                      allViewportPresets, loadSettings,
@@ -218,16 +218,16 @@ renderMenu :: SDLContext -> Settings -> Int -> IO ClickMap
 renderMenu ctx s sel = do
   clearSDL ctx
   let fc = sdlFont ctx
-  renderText fc "— settings —"                       defaultText (3, 2)
-  renderText fc ""                                   dimText     (3, 3)
+  renderText fc "— settings —"                       textColor (3, 2)
+  renderText fc ""                                   dimTextColor     (3, 3)
   mapM_ (renderRow fc) (zip [0 :: Int ..] rowLabels)
   let footerRowStart = 5 + length rowLabels * 2 + 1 :: Int
       footerStart    = fromIntegral footerRowStart
-  renderText fc "j / k       select row"             greyText (3, footerStart)
-  renderText fc "h / l       adjust value (< / >)"   greyText (3, footerStart + 1)
-  renderText fc "enter       save and close"         greyText (3, footerStart + 2)
-  renderText fc "esc         cancel"                 greyText (3, footerStart + 3)
-  renderText fc ""                                   dimText  (3, footerStart + 4)
+  renderText fc "j / k       select row"             chromeColor (3, footerStart)
+  renderText fc "h / l       adjust value (< / >)"   chromeColor (3, footerStart + 1)
+  renderText fc "enter       save and close"         chromeColor (3, footerStart + 2)
+  renderText fc "esc         cancel"                 chromeColor (3, footerStart + 3)
+  renderText fc ""                                   dimTextColor  (3, footerStart + 4)
   renderText fc "display / contrast take effect on next launch"
                                                      warningColor (3, footerStart + 5)
   presentSDL ctx
@@ -250,9 +250,9 @@ renderMenu ctx s sel = do
     renderRow fc (i, label) = do
       let row       = fromIntegral (5 + i * 2)
           marker    = if i == sel then "> " else "  "
-          labelCol  = defaultText
-          valueCol  = if i == sel then defaultText else dimText
+          labelCol  = textColor
+          valueCol  = if i == sel then textColor else dimTextColor
       renderText fc (marker <> label) labelCol (3, row)
-      renderText fc "<"               greyText (26, row)
+      renderText fc "<"               chromeColor (26, row)
       renderText fc (valueOf i s)     valueCol (28, row)
-      renderText fc ">"               greyText (45, row)
+      renderText fc ">"               chromeColor (45, row)

@@ -142,7 +142,7 @@ descriptorsFor SigAntler =
 descriptorsFor SigCairn =
   [ ( "cairn — brass cartridge inside"
     , [ "Stacked stones, three high, the way someone marked something."
-      , "A brass .30-30 in the gap. Corroded green. You leave it."
+      , "A brass .30-30 in the gap. Corroded ansiGreen. You leave it."
       ]
     )
   , ( "cairn — tin of matches, dry"

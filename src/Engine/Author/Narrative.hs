@@ -5,7 +5,7 @@ import qualified Data.Map.Strict as Map
 
 import           GameTypes
 
-narrateEffect :: CharId -> GameWorld -> EffectBody -> Maybe String
+narrateEffect :: CharacterId -> GameWorld -> EffectBody -> Maybe String
 narrateEffect you w (ModifyRelation from to Trust n)
   | n > 0     = tiered you w
       (name from w <> " feels something ease between them and " <> name to w <> ".")
@@ -42,7 +42,7 @@ narrateEffect _ _ DoNothing        = Nothing
 -- Mid (>=3): directional but impersonal.
 -- Low (>=1): barely perceptible.
 -- Zero: silence.
-tiered :: CharId -> GameWorld -> String -> String -> String -> Maybe String
+tiered :: CharacterId -> GameWorld -> String -> String -> String -> Maybe String
 tiered you w hi mid lo =
   case playerUnderstanding you w of
     p | p >= 7   -> Just hi
@@ -50,7 +50,7 @@ tiered you w hi mid lo =
       | p >= 1   -> Just lo
       | otherwise -> Nothing
 
-playerUnderstanding :: CharId -> GameWorld -> Int
+playerUnderstanding :: CharacterId -> GameWorld -> Int
 playerUnderstanding you w =
   maybe 0 (getRelStat (Capacity Understanding))
     (Map.lookup Truth (worldGraph w) >>= Map.lookup you)
@@ -59,5 +59,5 @@ playerUnderstanding you w =
 -- Helpers
 -- ---------------------------------------------------------------------------
 
-name :: CharId -> GameWorld -> String
+name :: CharacterId -> GameWorld -> String
 name cid w = maybe (show cid) charName (Map.lookup cid (worldCharacters w))

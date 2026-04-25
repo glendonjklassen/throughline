@@ -17,5 +17,5 @@ topBuyGraph = SceneGraph
   , sgEdges = []   -- transitions are axiom-driven (shift system)
   }
 
-allActions :: CharId -> [AnyAction]
-allActions you = anyAction continueAction : buildActions you topBuyGraph
+allActions :: CharacterId -> [AnyAction]
+allActions you = anyAction continueAction : compileSceneGraph you topBuyGraph

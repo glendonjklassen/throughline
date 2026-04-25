@@ -6,13 +6,13 @@ import           Engine.Author.DSL
 import           GameTypes
 import           Scenarios.Diner.Constants
 
-mayaOutsideActions :: CharId -> [AnyAction]
+mayaOutsideActions :: CharacterId -> [AnyAction]
 mayaOutsideActions mayaId =
   [ anyAction (leanAgainstWall mayaId)
   , anyAction (callBabysitter mayaId)
   ]
 
-leanAgainstWall :: CharId -> Action 'Once
+leanAgainstWall :: CharacterId -> Action 'Once
 leanAgainstWall mayaId = onceAction (ActionId "maya:leanAgainstWall")
   "Lean against the wall and breathe."
   unconditional
@@ -20,7 +20,7 @@ leanAgainstWall mayaId = onceAction (ActionId "maya:leanAgainstWall")
   , immediate (think mayaId "I just need a minute.")
   ]
 
-callBabysitter :: CharId -> Action 'Once
+callBabysitter :: CharacterId -> Action 'Once
 callBabysitter mayaId = onceAction (ActionId "maya:callBabysitter")
   "Call the babysitter."
   (All [HasWorldTag checkedOnKid, HasWorldTag (timeTag 5)])
@@ -30,5 +30,5 @@ callBabysitter mayaId = onceAction (ActionId "maya:callBabysitter")
       , (mayaId, "Okay. Okay, good. Thanks.")
       ])
   ++ [ immediate (think mayaId "She's okay. She's okay.")
-     , modifyCharacterStatEffect mayaId (Capacity Strength) 1
+     , modifyStat mayaId (Capacity Strength) 1
      ]

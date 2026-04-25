@@ -39,7 +39,7 @@ moveNarr hw = poolNarration $ \from to ->
 -- Universal actions (not location-gated)
 -- ---------------------------------------------------------------------------
 
-allActions :: HuntWorld -> CharId -> [AnyAction]
+allActions :: HuntWorld -> CharacterId -> [AnyAction]
 allActions hw you =
   [ anyAction (sitDown you)
   , anyAction (standUp you)
@@ -50,7 +50,7 @@ allActions hw you =
   , anyAction (takeTheShot you)
   , anyAction continueAction
   , anyAction (callItForTheDay hw you)
-  ] ++ buildActions you (huntGraph hw)
+  ] ++ compileSceneGraph you (huntGraph hw)
 
 -- ---------------------------------------------------------------------------
 -- Core actions
@@ -68,7 +68,7 @@ huntNotOver = All [ Not (HasWorldTag deerKilled)
 -- spot's cooked, whatever.  Triggers the same day-rollover montage as
 -- a kill or a miss.  Gated on "not at the truck already" so this is a
 -- choice you make out in the bush, not a button at the start line.
-callItForTheDay :: HuntWorld -> CharId -> Action 'Repeatable
+callItForTheDay :: HuntWorld -> CharacterId -> Action 'Repeatable
 callItForTheDay _hw _you = repeatableAction (ActionId "hunt:callItForTheDay")
   "Call it for the day. Head back to the truck."
   huntNotOver
@@ -80,7 +80,7 @@ callItForTheDay _hw _you = repeatableAction (ActionId "hunt:callItForTheDay")
 -- | Sitting is a toggle: sit down / stand up. While sitting, the stillness
 -- axiom increments each tick. Movement actions automatically clear PlayerSitting
 -- via the stillness axiom (it resets when the player moves).
-sitDown :: CharId -> Action 'Repeatable
+sitDown :: CharacterId -> Action 'Repeatable
 sitDown _you = repeatableAction (ActionId "sit:on")
   "Sit down and wait."
   (All [huntNotOver, Not (HasWorldTag playerSitting)])
@@ -88,7 +88,7 @@ sitDown _you = repeatableAction (ActionId "sit:on")
   , immediate (Narrate "You find a spot and settle in. Wind in the trees. Nothing else.")
   ]
 
-standUp :: CharId -> Action 'Repeatable
+standUp :: CharacterId -> Action 'Repeatable
 standUp _you = repeatableAction (ActionId "sit:off")
   "Stand up and move."
   (All [huntNotOver, HasWorldTag playerSitting])
@@ -102,7 +102,7 @@ standUp _you = repeatableAction (ActionId "sit:off")
 -- Sign types (tracks, scrapes) provide richer information gated by
 -- Understanding level.  Wind information also reported when deer is
 -- nearby.
-lookForDeer :: HuntWorld -> CharId -> Action 'Repeatable
+lookForDeer :: HuntWorld -> CharacterId -> Action 'Repeatable
 lookForDeer _hw you = repeatableAction (ActionId "look")
   "Look for deer."
   huntNotOver
@@ -124,7 +124,7 @@ lookForDeer _hw you = repeatableAction (ActionId "look")
   , immediateWhen (All [sameRegion, inFieldRegion, Not sameLoc, Not (Chance lookFieldSalt 0.34), Chance lookFieldSalt 0.67])
       (Narrate "Stubble shifts out past the middle of the field. A shape, then nothing. You wait. It doesn't come back.")
   , immediateWhen (All [sameRegion, inFieldRegion, Not sameLoc, Not (Chance lookFieldSalt 0.67)])
-      (Narrate "Brown against the grey, a long way out. You hold still. Whatever it was, it doesn't show itself again.")
+      (Narrate "Brown against the ansiGrey, a long way out. You hold still. Whatever it was, it doesn't show itself again.")
 
     -- Tier 3: Same region, sign present — scrape (very recent)
   , immediateWhen (All [sameRegion, Not sameLoc, hasScrape, lowExp])
@@ -182,7 +182,7 @@ fieldRegionNames =
 
 -- | Wave to another hunter when co-located. Only appears after merge
 -- brings another player to the same node.
-waveToHunter :: CharId -> Action 'Repeatable
+waveToHunter :: CharacterId -> Action 'Repeatable
 waveToHunter you = repeatableAction (ActionId "wave")
   "Wave to the other hunter."
   (All [ huntNotOver
@@ -206,7 +206,7 @@ pickUpPace, slowDown :: Action 'Repeatable
 
 -- | Take the shot — available only when DeerSpotted is active.
 -- Outcome determined by clock-seeded PRNG via Chance conditions.
-takeTheShot :: CharId -> Action 'Once
+takeTheShot :: CharacterId -> Action 'Once
 takeTheShot you = targetedOnceAction (ActionId "takeTheShot")
   "Take the shot."
   (ECharacter deer)

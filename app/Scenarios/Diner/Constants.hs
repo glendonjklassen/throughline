@@ -10,13 +10,13 @@ import           GameTypes
 -- Characters
 -- ---------------------------------------------------------------------------
 
-visitor :: CharId
+visitor :: CharacterId
 visitor = Named "visitor"
 
-maya :: CharId
+maya :: CharacterId
 maya = Named "maya"
 
-frank :: CharId
+frank :: CharacterId
 frank = Named "frank"
 
 -- ---------------------------------------------------------------------------
@@ -170,7 +170,7 @@ initialWorld seed = GameWorld
       , (maya,    counter)
       , (frank,   counter)
       ]
-  , worldActiveEffects = map staticLive [timeCycle, weatherCycle]
+  , worldActiveEffects = map staticInitEffect [timeCycle, weatherCycle]
   , worldClock         = LamportClock 0 (PlayerId "init")
   , worldTags          = tagsFromList
       [ weatherTag (WeatherDesc "Rainy")

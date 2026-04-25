@@ -100,10 +100,10 @@ treesOf CBush  = [ Discovery Tree "trembling aspen"
                  ]
 treesOf CRidge = [ Discovery Tree "bur oak"
                  , Discovery Tree "hazel"
-                 , Discovery Tree "green ash"
+                 , Discovery Tree "ansiGreen ash"
                  ]
 treesOf CCreek = [ Discovery Tree "willow"
-                 , Discovery Tree "red osier dogwood"
+                 , Discovery Tree "ansiRed osier dogwood"
                  ]
 treesOf _      = []
 
@@ -113,7 +113,7 @@ animalsOf CBush  = [ Discovery Animal "raven"
                    , Discovery Animal "snowshoe hare"
                    ]
 animalsOf CRidge = [ Discovery Animal "raven"
-                   , Discovery Animal "red-tailed hawk"
+                   , Discovery Animal "ansiRed-tailed hawk"
                    ]
 animalsOf CField = [ Discovery Animal "raven"
                    , Discovery Animal "jackrabbit"
@@ -129,7 +129,7 @@ animalsOf _      = []
 -- | When the player arrives at a new location, roll once to notice
 -- something.  Wraps the engine helper with hunt-specific pool and
 -- voice.
-arrivalDiscoveryAxiom :: HuntWorld -> CharId -> Axiom
+arrivalDiscoveryAxiom :: HuntWorld -> CharacterId -> Axiom
 arrivalDiscoveryAxiom hw you = ED.arrivalDiscoveryAxiom
   (ScenarioAxiom "arrivalDiscovery")
   you
@@ -158,12 +158,12 @@ locHash (Location s) = foldl (\acc c -> acc * 131 + fromEnum c) 7 s
 -- The discovery tag carried on 'Discovery' dedupes repeat visits, so
 -- this axiom is safe to re-run on every arrival.  Triggers off
 -- 'diffLocations' — the arrival event — not a point-in-time read.
-findDiscoveryAxiom :: HuntWorld -> CharId -> Axiom
+findDiscoveryAxiom :: HuntWorld -> CharacterId -> Axiom
 findDiscoveryAxiom hw you = Axiom
   { axiomId       = ScenarioAxiom "findDiscovery"
   , axiomPriority = 4
   , axiomEvaluate = \_world _actions diff ->
-      concatMap (handleFindArrival hw) (playerArrivals you diff)
+      concatMap (handleFindArrival hw) (characterArrivals you diff)
   }
 
 -- | Handle arrival at a find-bearing location.  Signature-slot hits
@@ -289,7 +289,7 @@ factoidFor (Discovery Animal name) = case name of
   "raven"            -> "Clever bird. Pairs stay on a territory for years."
   "ruffed grouse"    -> "Drums from a log in spring — a heartbeat louder than you'd believe."
   "snowshoe hare"    -> "Turns white for winter. Moves at the edges of things."
-  "red-tailed hawk"  -> "Rides the ridge thermals. Always hunting."
+  "ansiRed-tailed hawk"  -> "Rides the ridge thermals. Always hunting."
   "jackrabbit"       -> "Not really a rabbit. Runs flat out; stops dead."
   "great horned owl" -> "Nests in old hawk stick nests. Calls a lot before dawn."
   _                  -> ""
@@ -299,9 +299,9 @@ factoidFor (Discovery Tree name) = case name of
   "chokecherry"        -> "Berries bitter on the tongue, black when ripe."
   "box elder"          -> "Soft wood, quick growth. Breaks in ice storms."
   "hazel"              -> "Short and dense. Brush deer push through head-low."
-  "green ash"          -> "Straight grain; splits clean."
+  "ansiGreen ash"          -> "Straight grain; splits clean."
   "willow"             -> "Bent toward water. Roots holding the bank together."
-  "red osier dogwood"  -> "Bright red bark under the snow."
+  "ansiRed osier dogwood"  -> "Bright ansiRed bark under the snow."
   _                    -> ""
 factoidFor (Discovery Find name) = case name of
   "rusty 50s car"    -> "No plates, no glass. Someone left it here long before your time."

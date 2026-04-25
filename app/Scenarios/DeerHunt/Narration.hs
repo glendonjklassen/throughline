@@ -134,7 +134,7 @@ intraPool = Map.fromList
   , ((CRoad, Bridge),
       [ "Road meets cover. You're conspicuous for the next ten seconds."
       , "Shoulder with a field coming up. You'd want to cross quick."
-      , "The gravel runs into something green. You slow down."
+      , "The gravel runs into something ansiGreen. You slow down."
       , "End of the road's openness. Cover begins across a short margin."
       , "Road gives way to field or bush. You stand at the edge."
       , "A crossing point. You feel watched even if nothing's there."
@@ -153,7 +153,7 @@ intraPool = Map.fromList
       , "The bush encloses you. A stick cracks — your own."
       , "Deep cover. You slow your breathing just from being here."
       , "Tangle on tangle. You duck, weave, set your feet careful."
-      , "You're swallowed by it. Everything is close; everything is green-brown."
+      , "You're swallowed by it. Everything is close; everything is ansiGreen-brown."
       , "Canopy above, deadfall below. The bush keeps its own time."
       , "You move slow. The bush makes you earn every step."
       ])
@@ -487,7 +487,7 @@ sensoryPool = Map.fromList
       , "loose stone, frost under it — footing's bad"
       ])
   , ((CRoad, Bridge),
-      [ "gravel running into green — cover starts just past the shoulder"
+      [ "gravel running into ansiGreen — cover starts just past the shoulder"
       , "brief open stretch; cross it quick"
       , "about ten seconds exposed before you reach cover"
       , "cover close on the far side"

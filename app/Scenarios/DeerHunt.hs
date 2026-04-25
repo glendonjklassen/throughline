@@ -28,7 +28,7 @@ import           Scenarios.DeerHunt.World       (PositionHint(..), huntWorld)
 -- | Build a full DeerHunt scenario from a seed.  The 'HuntWorld' is
 -- constructed once here and captured by every axiom, action, and
 -- display hook that needs to consult the generated map.
-deerHunt :: Int -> CharId -> Scenario
+deerHunt :: Int -> CharacterId -> Scenario
 deerHunt seed you =
   let hw = huntWorld seed
   in Scenario
@@ -166,7 +166,7 @@ huntHintFragments =
 sightingFragments :: [String]
 sightingFragments =
   [ "you can see the breath on his nose"
-  , "brown line of a back against the grey"
+  , "brown line of a back against the ansiGrey"
   , "he hasn't winded you yet"
   , "antlers catching what light there is"
   ]
@@ -223,7 +223,7 @@ deerHuntZoneTint world loc =
 -- Shiny-sense sparkle
 -- ---------------------------------------------------------------------------
 
-locationSparkle :: GameWorld -> CharId -> Location -> Int
+locationSparkle :: GameWorld -> CharacterId -> Location -> Int
 locationSparkle world you loc =
   let exp'     = experience you world
       directEv = discoveredEvidence world loc
@@ -270,13 +270,13 @@ endScreen :: GameWorld -> [String]
 endScreen w
   | checkCondition w (HasWorldTag hunterShot) =
       [ ""
-      , bold "  You shot a man."
+      , ansiBold "  You shot a man."
       , ""
-      , grey "  You hear him before you see what happened. Then you're running."
-      , grey "  The rifle is still in your hands. You don't remember dropping the bolt."
+      , ansiGrey "  You hear him before you see what happened. Then you're running."
+      , ansiGrey "  The rifle is still in your hands. You don't remember dropping the bolt."
       , ""
-      , dim  "  The rest of it — the phone call, the ambulance, the questions —"
-      , dim  "  doesn't feel like something that's happening to you."
+      , ansiDim  "  The rest of it — the phone call, the ambulance, the questions —"
+      , ansiDim  "  doesn't feel like something that's happening to you."
       , ""
       ]
   -- The three positive paths: you got the deer, you got the thing,
@@ -284,52 +284,52 @@ endScreen w
   -- richer variant always wins the guard match.
   | killed && found =
       [ ""
-      , bold "  The best day of the season."
+      , ansiBold "  The best day of the season."
       , ""
-      , grey "  Meat in the freezer and a story you didn't go out looking for."
-      , grey "  " <> signatureLineFor w
+      , ansiGrey "  Meat in the freezer and a story you didn't go out looking for."
+      , ansiGrey "  " <> signatureLineFor w
       , ""
-      , dim  "  You'll be telling this one for a while."
+      , ansiDim  "  You'll be telling this one for a while."
       , ""
       ]
   | killed =
       [ ""
-      , bold "  Clean kill."
+      , ansiBold "  Clean kill."
       , ""
-      , grey "  The buck went down fast. You walk up to it in the stubble"
-      , grey "  and stand there for a minute before doing anything."
-      , grey "  Steam rising off the body in the cold air."
+      , ansiGrey "  The buck went down fast. You walk up to it in the stubble"
+      , ansiGrey "  and stand there for a minute before doing anything."
+      , ansiGrey "  Steam rising off the body in the cold air."
       , ""
-      , dim  "  Meat in the freezer. That's a good fall."
+      , ansiDim  "  Meat in the freezer. That's a good fall."
       , ""
       ]
   | found =
       [ ""
-      , bold "  No deer this year."
+      , ansiBold "  No deer this year."
       , ""
-      , grey "  You came back with something else."
-      , grey "  " <> signatureLineFor w
+      , ansiGrey "  You came back with something else."
+      , ansiGrey "  " <> signatureLineFor w
       , ""
-      , dim  "  Some seasons are like that. You take what the woods give you."
+      , ansiDim  "  Some seasons are like that. You take what the woods give you."
       , ""
       ]
   -- Neither.  Existing misses still differentiate by how the deer
   -- slipped the hunter — shot and lost vs. never seen.
   | checkCondition w (HasWorldTag deerGone) =
       [ ""
-      , bold "  Missed."
+      , ansiBold "  Missed."
       , ""
-      , grey "  The crack echoes off the ridge and then it's quiet."
-      , grey "  You cycle the bolt but there's nothing to shoot at."
-      , grey "  The buck is off the section and gone."
+      , ansiGrey "  The crack echoes off the ridge and then it's quiet."
+      , ansiGrey "  You cycle the bolt but there's nothing to shoot at."
+      , ansiGrey "  The buck is off the section and gone."
       , ""
-      , dim  "  You walk back to the truck in the last of the light."
-      , dim  "  The thermos is still warm."
+      , ansiDim  "  You walk back to the truck in the last of the light."
+      , ansiDim  "  The thermos is still warm."
       , ""
       ]
   | otherwise =
       [ ""
-      , grey "  The hunt is over."
+      , ansiGrey "  The hunt is over."
       , ""
       ]
   where
