@@ -1,7 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 module Scenarios.DeerHunt.Actions (allActions, huntGraph) where
 
-import qualified Data.Set        as Set
 import           Engine.Author.DSL
 import           Engine.Author.Scene
 import           GameTypes
@@ -15,47 +14,26 @@ import           Scenarios.DeerHunt.World      (HuntWorld, hwClass, hwMap, hwPos
 -- ---------------------------------------------------------------------------
 
 -- | The scene graph for this hunt.  Every generated location becomes a
--- 'Scene'; every generated edge becomes a bidirectional pair of
--- 'SceneEdge's with class-keyed narration pools.
+-- 'Scene' with no per-scene actions (hunt actions are universal);
+-- every generated edge becomes a bidirectional pair with class-keyed
+-- narration pools.
 huntGraph :: HuntWorld -> SceneGraph
-huntGraph hw = SceneGraph
-  { sgScenes = [ Scene loc (const []) | loc <- gmLocations (hwMap hw) ]
-  , sgEdges  = concatMap (mkEdgePair hw) (Set.toList (lgEdges (gmGraph (hwMap hw))))
-  }
+huntGraph hw = sceneGraphFromLocations
+  (gmLocations (hwMap hw))
+  (gmGraph (hwMap hw))
+  (\_ _ -> [])
+  (biEdgeWith (moveNarr hw))
 
--- | Generate bidirectional edges with class-appropriate prose.
-mkEdgePair :: HuntWorld -> (Location, Location) -> [SceneEdge]
-mkEdgePair hw (a, b) =
-  [ SceneEdge (edgeActionId a b) a b (moveLabel b) (moveNarr hw a b) unconditional
-  , SceneEdge (edgeActionId b a) b a (moveLabel a) (moveNarr hw b a) unconditional
-  ]
-
--- | Movement-action label.  Just the destination name — the spatial
--- HUD conveys the "go somewhere" intent via the compass layout, and
--- the zone-tint underline cues the destination biome, so this stays
--- terse on purpose.
-moveLabel :: Location -> String
-moveLabel (Location name) = name
-
--- | Build narration for movement between two locations.  If the move
--- stays within the same terrain class we consult the intra-zone pool
--- keyed by (class, position hint); otherwise the cross-zone pool keyed
--- by (from class, to class).  Each edge gets a unique salt derived
--- from its location pair so adjacent edges produce independent PRNG
--- sequences under 'NarrationPool'.
+-- | Pick a class-aware narration pool for an edge.  Same-class moves
+-- consult the intra-zone pool keyed by (class, position hint);
+-- cross-class moves consult the (from class, to class) pool.
 moveNarr :: HuntWorld -> Location -> Location -> Narration
-moveNarr hw from to =
+moveNarr hw = poolNarration $ \from to ->
   let clsFrom = hwClass hw from
       clsTo   = hwClass hw to
-      salt    = edgeSalt from to
-      variants
-        | clsFrom == clsTo = intraNarration clsTo (hwPositionHint hw to)
-        | otherwise        = crossNarration clsFrom clsTo
-  in NarrationPool salt variants
-
--- | Deterministic salt from a location pair for NarrationPool.
-edgeSalt :: Location -> Location -> Int
-edgeSalt (Location a) (Location b) = sum (map fromEnum a) + sum (map fromEnum b) * 31
+  in if clsFrom == clsTo
+       then intraNarration clsTo (hwPositionHint hw to)
+       else crossNarration clsFrom clsTo
 
 -- ---------------------------------------------------------------------------
 -- Universal actions (not location-gated)

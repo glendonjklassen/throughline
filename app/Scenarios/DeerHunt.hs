@@ -6,6 +6,7 @@ import qualified Data.Set        as Set
 import           Engine.CRDT.ORSet      (orMember, orToList)
 import           Engine.CRDT.TombstoneGC (olderThanDays)
 import           Engine.Core.Conditions (checkCondition)
+import           Engine.Core.Time       (currentHour)
 import           SDL.Layout
 import           SDL.Palette  (Color, zoneTintDefault)
 import           SDL.Text

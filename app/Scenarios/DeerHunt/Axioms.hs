@@ -4,7 +4,8 @@ import           Data.Maybe        (fromMaybe)
 import qualified Data.Map.Strict as Map
 import           Engine.Author.CommonAxioms  (timeOfDayNarrationAxiom, weatherNarrationAxiom)
 import           Engine.Author.DSL
-import           Engine.Core.Time            (TimePhase(..))
+import           Engine.Core.Time            (TimePhase(..), currentHour)
+import           Engine.Core.World           (charLocation)
 import           Engine.Author.Random        (rollCheck, rollChoice, rollD)
 import           Engine.CRDT.ORSet           (orToList)
 import           GameTypes

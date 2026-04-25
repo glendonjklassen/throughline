@@ -5,13 +5,14 @@ import           Data.Maybe           (fromMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 import           Data.List.NonEmpty (NonEmpty(..))
-import           Data.Time.Calendar (Day, DayOfWeek(..), addDays, dayOfWeek,
-                                     fromGregorian, toGregorian)
+import           Data.Time.Calendar (Day, addDays, fromGregorian)
+import           Engine.Author.Calendar (formatShortDate)
 import           Engine.Author.DSL
 import           Engine.Author.Random   (rollChoice)
 import           System.Random          (mkStdGen, randomR)
 import           Engine.CRDT.ORSet
-import           Engine.Core.World      (setCharacterStat)
+import           Engine.Core.Time       (currentHour)
+import           Engine.Core.World      (charLocation, setCharacterStat)
 import           GameTypes
 import           Scenarios.DeerHunt.Generation (GeneratedMap(..), TerrainClass(..))
 import           Scenarios.DeerHunt.Signature  (SignatureFind(..),
@@ -38,31 +39,9 @@ huntDayDate n = addDays (fromIntegral (max 0 (n - 1))) huntStartDate
 -- | Short journal-style date label for the @n@'th day — e.g.
 -- \"Thu, Nov 7\".  Used for notebook day headers, the day-end
 -- transition overlay, and each discovery's first-seen stamp in the
--- index.  The weekday makes the passage of time feel lived-in; the
--- terse month abbreviation keeps headers from crowding a narrow
--- viewport.
+-- index.
 formatHuntDate :: Int -> String
-formatHuntDate n =
-  let d = huntDayDate n
-      (_y, m, dom) = toGregorian d
-  in dowShort (dayOfWeek d) <> ", " <> monthShort m <> " " <> show dom
-
-dowShort :: DayOfWeek -> String
-dowShort dow = case dow of
-  Monday    -> "Mon"
-  Tuesday   -> "Tue"
-  Wednesday -> "Wed"
-  Thursday  -> "Thu"
-  Friday    -> "Fri"
-  Saturday  -> "Sat"
-  Sunday    -> "Sun"
-
-monthShort :: Int -> String
-monthShort m = case m of
-  1  -> "Jan"; 2  -> "Feb"; 3  -> "Mar"; 4  -> "Apr"
-  5  -> "May"; 6  -> "Jun"; 7  -> "Jul"; 8  -> "Aug"
-  9  -> "Sep"; 10 -> "Oct"; 11 -> "Nov"; 12 -> "Dec"
-  _  -> "?"
+formatHuntDate = formatShortDate . huntDayDate
 
 -- ---------------------------------------------------------------------------
 -- Characters
@@ -508,30 +487,6 @@ saltSignPlacement = 8
 -- ---------------------------------------------------------------------------
 -- World queries
 -- ---------------------------------------------------------------------------
-
-charLocation :: CharId -> GameWorld -> Maybe Location
-charLocation cid world = Map.lookup cid (worldLocations world)
-
-coLocated :: CharId -> CharId -> GameWorld -> Bool
-coLocated a b world = case (charLocation a world, charLocation b world) of
-  (Just la, Just lb) -> la == lb
-  _                  -> False
-
-coLocatedHunters :: CharId -> GameWorld -> [CharId]
-coLocatedHunters you world =
-  [ cid | (cid, _) <- Map.toList (worldCharacters world)
-        , cid /= you
-        , cid /= deer
-        , cid /= Truth
-        , coLocated you cid world
-        ]
-
-currentHour :: GameWorld -> Maybe Int
-currentHour world =
-  let tags = orToList (worldTags world)
-  in case [ h | EngineTag (Clock (TimeOfDay h)) <- tags ] of
-       (h:_) -> Just h
-       []    -> Nothing
 
 -- | Preferred terrain class for the deer based on time of day.  The
 -- generator no longer gives us a pinned Zone ADT, so we work in

@@ -285,6 +285,18 @@ whenTagAdded t diff effs
   | t `elem` diffWorldTagsAdded diff = effs
   | otherwise                        = []
 
+-- | Locations a character newly arrived at this tick.  No-op moves
+-- (from == to) are dropped: a "resettle" should not surface arrival
+-- beats.  Use inside an axiom's 'axiomEvaluate' body to drive
+-- arrival-keyed effects.
+playerArrivals :: CharId -> WorldDiff -> [Location]
+playerArrivals cid diff =
+  [ locationDeltaTo ld
+  | ld <- diffLocations diff
+  , locationDeltaChar ld == cid
+  , locationDeltaFrom ld /= locationDeltaTo ld
+  ]
+
 -- | Erase the frequency phantom for use in uniform action lists.
 anyAction :: Action f -> AnyAction
 anyAction = AnyAction

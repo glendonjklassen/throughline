@@ -7,10 +7,15 @@ module Engine.Author.Scene
   , buildActions
   , edge
   , biEdge
+  , biEdgeWith
   , edgeActionId
+  , edgeSalt
   , narrationEffects
+  , poolNarration
+  , sceneGraphFromLocations
   ) where
 
+import qualified Data.Set as Set
 import Engine.Author.DSL (atScene, repeatableAction, immediate, immediateWhen, anyAction)
 import GameTypes
 
@@ -78,6 +83,45 @@ biEdge a b labelAB narrAB labelBA narrBA =
   [ edge a b labelAB narrAB
   , edge b a labelBA narrBA
   ]
+
+-- | Bidirectional pair of edges with a derived 'Narration' per direction.
+-- Labels are the destination's location name; for richer labels build
+-- 'SceneEdge' values directly.
+biEdgeWith :: (Location -> Location -> Narration)
+           -> Location -> Location
+           -> [SceneEdge]
+biEdgeWith mkNarr a b =
+  [ SceneEdge (edgeActionId a b) a b (locationName b) (mkNarr a b) unconditional
+  , SceneEdge (edgeActionId b a) b a (locationName a) (mkNarr b a) unconditional
+  ]
+
+-- | Deterministic salt derived from a location pair.  Useful for
+-- per-edge 'NarrationPool' seeds so adjacent edges produce independent
+-- PRNG sequences.
+edgeSalt :: Location -> Location -> Int
+edgeSalt (Location a) (Location b) = sum (map fromEnum a) + sum (map fromEnum b) * 31
+
+-- | Build a 'NarrationPool' for an edge from a per-edge variant
+-- function, salted by the location pair.
+poolNarration :: (Location -> Location -> [String])
+              -> Location -> Location
+              -> Narration
+poolNarration variants from to = NarrationPool (edgeSalt from to) (variants from to)
+
+-- | Lift a 'LocationGraph' into a 'SceneGraph' by attaching per-scene
+-- actions and an edge-builder for each location pair.  Pass
+-- @\\_ _ -> []@ for @mkScene@ when actions are universal rather than
+-- per-scene, and a builder like 'biEdgeWith' for @mkEdges@.
+sceneGraphFromLocations
+  :: [Location]
+  -> LocationGraph
+  -> (Location -> CharId -> [AnyAction])
+  -> (Location -> Location -> [SceneEdge])
+  -> SceneGraph
+sceneGraphFromLocations locs lg mkScene mkEdges = SceneGraph
+  { sgScenes = [ Scene loc (mkScene loc) | loc <- locs ]
+  , sgEdges  = concatMap (uncurry mkEdges) (Set.toList (lgEdges lg))
+  }
 
 -- ---------------------------------------------------------------------------
 -- Assembly

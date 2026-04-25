@@ -9,9 +9,9 @@ import           Test.Hspec
 import           Engine.CRDT.ORSet              (orMember, orToList)
 import           GameTypes                      (CharId(..), Location(..), worldTags)
 
+import           Engine.Author.Discovery        (Discovery(..), discoveryTag)
 import           Scenarios.DeerHunt.Constants   (initialWorld)
-import           Scenarios.DeerHunt.Discoveries (Discovery(..), DiscoveryKind(..),
-                                                 discoveryTag)
+import           Scenarios.DeerHunt.Discoveries (DiscoveryKind(..))
 import           Scenarios.DeerHunt.Signature
 import           Scenarios.DeerHunt.World       (huntWorld, hwSignature,
                                                  hwSignatureLoc, hwByClass)

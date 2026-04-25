@@ -6,7 +6,7 @@ import           Test.Hspec
 
 import           Engine.Author.Validate    (validateScenario, validateSceneGraph)
 import           Engine.Core.Conditions    (checkCondition)
-import           Engine.Core.World         (setCharacterStat)
+import           Engine.Core.World         (charLocation, setCharacterStat)
 import           Engine.Author.Random      (rollD)
 import           Engine.Author.Scene       (SceneGraph(..), SceneEdge(..))
 import           Engine.CRDT.ORSet         (orFromList, orEmpty, orMember)

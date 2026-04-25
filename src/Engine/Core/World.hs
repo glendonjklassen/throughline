@@ -199,6 +199,10 @@ engineStatusLine you world =
 playerLocationName :: CharId -> GameWorld -> Maybe String
 playerLocationName you world = locationName <$> Map.lookup you (worldLocations world)
 
+-- | Look up a character's location in the world.
+charLocation :: CharId -> GameWorld -> Maybe Location
+charLocation cid world = Map.lookup cid (worldLocations world)
+
 -- | Calendar status (day of week, season, moon phase) without location.
 engineTimeStatus :: GameWorld -> Maybe String
 engineTimeStatus world =
