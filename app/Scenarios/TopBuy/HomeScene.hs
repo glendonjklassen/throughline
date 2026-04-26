@@ -4,7 +4,7 @@ module Scenarios.TopBuy.HomeScene where
 import           Engine.Author.DSL
 import           GameTypes
 
-homeActions :: CharId -> [AnyAction]
+homeActions :: CharacterId -> [AnyAction]
 homeActions _you =
   [ anyAction sleepAction
   ]

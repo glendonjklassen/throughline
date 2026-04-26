@@ -97,7 +97,7 @@ spec = describe "Engine.Author.Narrative" $ do
     it "returns the character's name when the character exists" $
       narrateEffect player highWorld (ModifyRelation player npc Trust 1)
         `shouldBe` Just "Player feels something ease between them and NPC."
-    it "falls back to the CharId when the character does not exist" $
+    it "falls back to the CharacterId when the character does not exist" $
       narrateEffect player highWorld (ModifyRelation (Named "ghost") npc Trust 1)
         `shouldBe` Just "ghost feels something ease between them and NPC."
 

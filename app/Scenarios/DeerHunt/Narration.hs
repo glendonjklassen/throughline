@@ -10,10 +10,7 @@
 -- identity.  This lets the generator pick whatever name it likes
 -- without prose rotting as vocabularies change.
 module Scenarios.DeerHunt.Narration
-  ( intraPool
-  , crossPool
-  , fallbackPool
-  , intraNarration
+  ( intraNarration
   , crossNarration
   , sensoryFragment
   ) where
@@ -21,19 +18,25 @@ module Scenarios.DeerHunt.Narration
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 
+import           Engine.Author.Transition (TransitionPool (..), crossVariants)
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
 import           Scenarios.DeerHunt.World      (PositionHint(..))
 
--- | Intra-zone arrival pool: you stayed in the same class but moved to
--- a new location inside it.  Keys: (class, position hint).
-type IntraPool = Map (TerrainClass, PositionHint) [String]
+-- | The hunt's transition narration table.  Used by 'huntGraph' via
+-- 'transitionNarration'; intra/cross lookups go through the engine
+-- helpers, with one hunt-specific quirk preserved by 'intraNarration'
+-- below (fall back to the class's Interior pool when the specific
+-- @(class, hint)@ cell is empty).
+huntTransitionPool :: TransitionPool TerrainClass PositionHint
+huntTransitionPool = TransitionPool
+  { tpIntra    = intraPool
+  , tpCross    = crossPool
+  , tpFallback = fallbackPool
+  }
 
--- | Cross-zone arrival pool: you crossed into a new terrain class.
--- Keys: (from class, to class).
-type CrossPool = Map (TerrainClass, TerrainClass) [String]
-
--- | Look up intra-zone narration, falling back to the class's Interior
--- pool and finally to the neutral 'fallbackPool'.
+-- | Look up intra-zone narration, falling back through the class's
+-- Interior pool before yielding to the table's neutral fallback.
+-- Engine's 'intraVariants' would skip the Interior step.
 intraNarration :: TerrainClass -> PositionHint -> [String]
 intraNarration cls hint =
   case Map.lookup (cls, hint) intraPool of
@@ -43,12 +46,9 @@ intraNarration cls hint =
         Just xs@(_:_) -> xs
         _             -> fallbackPool
 
--- | Look up cross-zone narration, falling back to the 'fallbackPool'.
+-- | Look up cross-zone narration via the engine helper.
 crossNarration :: TerrainClass -> TerrainClass -> [String]
-crossNarration from to =
-  case Map.lookup (from, to) crossPool of
-    Just xs@(_:_) -> xs
-    _             -> fallbackPool
+crossNarration = crossVariants huntTransitionPool
 
 -- | Neutral variants used when a specific pool is empty.  Should never
 -- actually appear in play with the full pools below, but keeps
@@ -62,10 +62,11 @@ fallbackPool =
   ]
 
 -- ---------------------------------------------------------------------------
--- Intra-zone pool — 10 variants per (class, hint) cell
+-- Intra-zone pool — 10 variants per (class, hint) cell.  Keys:
+-- (class, position hint).
 -- ---------------------------------------------------------------------------
 
-intraPool :: IntraPool
+intraPool :: Map (TerrainClass, PositionHint) [String]
 intraPool = Map.fromList
   [ -- ========== FIELD ==========
     ((CField, Interior),
@@ -133,7 +134,7 @@ intraPool = Map.fromList
   , ((CRoad, Bridge),
       [ "Road meets cover. You're conspicuous for the next ten seconds."
       , "Shoulder with a field coming up. You'd want to cross quick."
-      , "The gravel runs into something green. You slow down."
+      , "The gravel runs into something ansiGreen. You slow down."
       , "End of the road's openness. Cover begins across a short margin."
       , "Road gives way to field or bush. You stand at the edge."
       , "A crossing point. You feel watched even if nothing's there."
@@ -152,7 +153,7 @@ intraPool = Map.fromList
       , "The bush encloses you. A stick cracks — your own."
       , "Deep cover. You slow your breathing just from being here."
       , "Tangle on tangle. You duck, weave, set your feet careful."
-      , "You're swallowed by it. Everything is close; everything is green-brown."
+      , "You're swallowed by it. Everything is close; everything is ansiGreen-brown."
       , "Canopy above, deadfall below. The bush keeps its own time."
       , "You move slow. The bush makes you earn every step."
       ])
@@ -262,7 +263,7 @@ intraPool = Map.fromList
 -- Cross-zone pool — 6 variants per ordered (from, to) pair
 -- ---------------------------------------------------------------------------
 
-crossPool :: CrossPool
+crossPool :: Map (TerrainClass, TerrainClass) [String]
 crossPool = Map.fromList (crossPairs ++ autoPairs)
 
 -- | All ordered class-pair arrivals.  Twelve of the 30 non-identity
@@ -486,7 +487,7 @@ sensoryPool = Map.fromList
       , "loose stone, frost under it — footing's bad"
       ])
   , ((CRoad, Bridge),
-      [ "gravel running into green — cover starts just past the shoulder"
+      [ "gravel running into ansiGreen — cover starts just past the shoulder"
       , "brief open stretch; cross it quick"
       , "about ten seconds exposed before you reach cover"
       , "cover close on the far side"

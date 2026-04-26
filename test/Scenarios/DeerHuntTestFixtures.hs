@@ -116,7 +116,7 @@ anyEdgeActionId =
 -- | Override a world's location map so @(player, deer)@ are both at
 -- the same location of the given class.  Used by shot-outcome tests
 -- that need to place both characters at a known co-located spot.
-coLocateAtClass :: TerrainClass -> CharId -> CharId -> GameWorld -> GameWorld
+coLocateAtClass :: TerrainClass -> CharacterId -> CharacterId -> GameWorld -> GameWorld
 coLocateAtClass cls player deerId w =
   let loc = pickByClass cls
   in w { worldLocations = Map.insert player loc

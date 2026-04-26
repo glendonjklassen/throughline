@@ -1,4 +1,24 @@
 {-# LANGUAGE DataKinds #-}
+-- | The scenario author's workshop.  Builders for effects, actions,
+-- conditions, tag sets, and the relationship graph — plus the small
+-- handful of axiom-side helpers ('hasTag', 'characterArrivals',
+-- 'effectsIfTagAdded') a scenario typically reaches for inside an
+-- @axiomEvaluate@ body.
+--
+-- Conventions:
+--
+-- * Effect builders come in lifetime variants: 'immediate' fires
+--   once, 'timed' for @n@ ticks, 'eternal' forever.  Each has a
+--   @-When@ counterpart that adds a 'Condition' guard.
+-- * Action builders distinguish 'Once' from 'Repeatable' at the type
+--   level; lift them into the uniform 'AnyAction' list with
+--   'anyAction'.  Use 'togglePair' for paired enter\/exit actions.
+-- * Tag helpers ('emptyTags', 'tagsFromList', 'worldTagList',
+--   'hasTag') keep the CRDT internals out of scenario code.
+--
+-- This module re-exports 'Engine.Author.Dialogue' and
+-- 'Engine.Author.MergeHelpers' so a single @import Engine.Author.DSL@
+-- gives a scenario most of what it needs.
 module Engine.Author.DSL
   ( module Engine.Author.DSL
   , module Engine.Author.Dialogue
@@ -6,7 +26,9 @@ module Engine.Author.DSL
   ) where
 
 import           Data.List.NonEmpty (NonEmpty(..))
-import           Engine.CRDT.ORSet (initToken)
+import qualified Engine.CRDT.ORSet      as ORSet
+import           Engine.CRDT.ORSet      (ORSet, initToken)
+import qualified Engine.CRDT.TombstoneGC as TombstoneGC
 import           Engine.Core.Conditions (checkCondition)
 import           GameTypes
 import           GameTypes.Types (Action(..))
@@ -19,23 +41,23 @@ import           Engine.Author.MergeHelpers
 -- ---------------------------------------------------------------------------
 
 -- | Directed speech: one character says something to another.
-sayTo :: CharId -> CharId -> String -> EffectBody
+sayTo :: CharacterId -> CharacterId -> String -> EffectBody
 sayTo speaker listener = Say speaker [listener]
 
 -- | Speech addressed to multiple listeners (e.g. addressing an audience).
-sayToMany :: CharId -> [CharId] -> String -> EffectBody
+sayToMany :: CharacterId -> [CharacterId] -> String -> EffectBody
 sayToMany = Say
 
 -- | Undirected speech: said to the room, no specific listener.
-sayToRoom :: CharId -> String -> EffectBody
+sayToRoom :: CharacterId -> String -> EffectBody
 sayToRoom speaker = Say speaker []
 
 -- | Internal thought. No audience by definition.
-think :: CharId -> String -> EffectBody
+think :: CharacterId -> String -> EffectBody
 think = Think
 
 -- | Move a character to a location.
-moveTo :: CharId -> Location -> EffectBody
+moveTo :: CharacterId -> Location -> EffectBody
 moveTo = SetLocation
 
 -- | Append a line to the player's journal.  Renders no prose — the
@@ -148,45 +170,59 @@ removeTags = map (immediate . RemoveWorldTag)
 hasTag :: GameWorld -> Tag -> Bool
 hasTag w t = checkCondition w (HasWorldTag t)
 
+-- | Empty tag set.  Use for initial 'Character' tags or empty
+-- 'worldTags' in scenario init.
+emptyTags :: ORSet Tag
+emptyTags = ORSet.orEmpty
+
+-- | Build an initial tag set from a list.  Use for 'worldTags' at
+-- scenario init.
+tagsFromList :: [Tag] -> ORSet Tag
+tagsFromList = ORSet.orFromList
+
+-- | All world tags currently present, as a plain list.  Use this
+-- instead of reaching into the ORSet directly when iterating over
+-- tags in axioms or scenario logic.
+worldTagList :: GameWorld -> [Tag]
+worldTagList = ORSet.orToList . worldTags
+
+-- | Tombstone GC schedule that drops entries older than @n@ days.
+-- Pass to @scenarioTombstoneGC = Just (olderThanDays 365)@.
+olderThanDays :: Integer -> TombstoneGCRule
+olderThanDays = TombstoneGC.olderThanDays
+
 -- ---------------------------------------------------------------------------
 -- Relationship helpers (DSL aliases for the generalized relation effects)
 -- ---------------------------------------------------------------------------
 
 -- | Modify the Trust relation from one character to another by a delta.
-modifyTrust :: CharId -> CharId -> Int -> Effect
+modifyTrust :: CharacterId -> CharacterId -> Int -> Effect
 modifyTrust from to delta = immediate (ModifyRelation from to Trust delta)
 
--- | Symmetric trust modification — both characters gain the same delta.
-mutualTrust :: CharId -> CharId -> Int -> [Effect]
-mutualTrust a b n = [modifyTrust a b n, modifyTrust b a n]
-
--- | Asymmetric bidirectional trust — each direction gets its own delta.
-bidirectionalTrust :: CharId -> CharId -> Int -> Int -> [Effect]
+-- | Bidirectional trust modification — each direction gets its own
+-- delta.  Pass the same delta twice for a symmetric change.
+bidirectionalTrust :: CharacterId -> CharacterId -> Int -> Int -> [Effect]
 bidirectionalTrust a b ab ba = [modifyTrust a b ab, modifyTrust b a ba]
 
--- | Condition: a character's ground truth stat exceeds a threshold.
-trueStatAbove :: CharId -> StatType -> Int -> Condition
-trueStatAbove = RelationAbove Truth
-
--- | Alias for trueStatAbove.
-statAbove :: CharId -> StatType -> Int -> Condition
-statAbove = trueStatAbove
+-- | Condition: a character's ground-truth stat exceeds a threshold.
+statAbove :: CharacterId -> StatType -> Int -> Condition
+statAbove = RelationAbove Truth
 
 -- | Effect: modify a character's ground truth stat by a delta.
-modifyCharacterStatEffect :: CharId -> StatType -> Int -> Effect
-modifyCharacterStatEffect cid stat n = immediate (ModifyRelation Truth cid stat n)
+modifyStat :: CharacterId -> StatType -> Int -> Effect
+modifyStat cid stat n = immediate (ModifyRelation Truth cid stat n)
 
 -- | Condition: Trust from one character to another exceeds a threshold.
-trustAbove :: CharId -> CharId -> Int -> Condition
+trustAbove :: CharacterId -> CharacterId -> Int -> Condition
 trustAbove from to = RelationAbove from to Trust
 
 -- | Condition: a character is at the given location.
-atLocation :: CharId -> Location -> Condition
+atLocation :: CharacterId -> Location -> Condition
 atLocation = AtLocation
 
 -- | Apply a location gate to a list of actions.
 -- The location condition is ANDed with each action's existing condition.
-atScene :: CharId -> Location -> [AnyAction] -> [AnyAction]
+atScene :: CharacterId -> Location -> [AnyAction] -> [AnyAction]
 atScene cid loc = map gate
   where
     gate (AnyAction a) = AnyAction (a { actionCondition = All [AtLocation cid loc, actionCondition a] })
@@ -262,8 +298,8 @@ targetedRepeatableAction aid label target cond effs = Action
 -- | Wrap an Effect as a LiveEffect for static scenario initialization.
 -- Uses birthTick=0 and a deterministic UUID derived from Show.
 -- Only use at scenario setup (initial world); at runtime use toLiveEffect.
-staticLive :: Effect -> LiveEffect
-staticLive e = LiveEffect
+staticInitEffect :: Effect -> LiveEffect
+staticInitEffect e = LiveEffect
   { liveId        = initToken e
   , liveEffect     = e
   , liveBirthClock = LamportClock 0 (PlayerId "init")
@@ -280,10 +316,22 @@ setTension n = immediate (AddWorldTag (tensionTag n))
 
 -- | Return effects only when a world tag was added this tick; otherwise [].
 -- Replaces the verbose: if tag `notElem` diffWorldTagsAdded diff then [] else ...
-whenTagAdded :: Tag -> WorldDiff -> [Effect] -> [Effect]
-whenTagAdded t diff effs
+effectsIfTagAdded :: Tag -> WorldDiff -> [Effect] -> [Effect]
+effectsIfTagAdded t diff effs
   | t `elem` diffWorldTagsAdded diff = effs
   | otherwise                        = []
+
+-- | Locations a character newly arrived at this tick.  No-op moves
+-- (from == to) are dropped: a "resettle" should not surface arrival
+-- beats.  Use inside an axiom's 'axiomEvaluate' body to drive
+-- arrival-keyed effects.
+characterArrivals :: CharacterId -> WorldDiff -> [Location]
+characterArrivals cid diff =
+  [ locationDeltaTo ld
+  | ld <- diffLocations diff
+  , locationDeltaChar ld == cid
+  , locationDeltaFrom ld /= locationDeltaTo ld
+  ]
 
 -- | Erase the frequency phantom for use in uniform action lists.
 anyAction :: Action f -> AnyAction

@@ -17,11 +17,11 @@ import qualified Data.Text       as T
 import qualified Data.Text.Encoding as TE
 import           Text.Read       (readMaybe)
 
--- CharId is used as a Map key; Show gives clean strings ("bradley", "Truth").
-instance ToJSONKey CharId where
+-- CharacterId is used as a Map key; Show gives clean strings ("bradley", "Truth").
+instance ToJSONKey CharacterId where
   toJSONKey = toJSONKeyText (T.pack . show)
 
-instance FromJSONKey CharId where
+instance FromJSONKey CharacterId where
   fromJSONKey = FromJSONKeyTextParser $ \t ->
     pure $ case t of
       "Truth" -> Truth
@@ -37,8 +37,8 @@ instance FromJSONKey StatType where
       Just st -> pure st
       Nothing -> fail ("Unknown StatType: " <> T.unpack t)
 
-instance ToJSON   CharId
-instance FromJSON CharId
+instance ToJSON   CharacterId
+instance FromJSON CharacterId
 instance ToJSON   Entity
 instance FromJSON Entity
 instance ToJSON   ActionId

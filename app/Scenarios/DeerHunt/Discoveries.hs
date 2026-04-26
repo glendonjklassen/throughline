@@ -8,9 +8,7 @@
 -- class, and what the arrival axiom considers eligible to reveal.
 module Scenarios.DeerHunt.Discoveries
   ( DiscoveryKind (..)
-  , Discovery (..)
-  , discoveryTag
-  , firstFind
+  , HuntDiscovery
   , arrivalDiscoveryAxiom
   , findDiscoveryAxiom
   , discoveryCatalog
@@ -21,8 +19,8 @@ import qualified Data.Map.Strict as Map
 import           Text.Read       (readMaybe)
 
 import           Engine.Author.DSL
-import           Engine.CRDT.ORSet       (orToList)
-import           Engine.Core.Conditions  (checkCondition)
+import qualified Engine.Author.Discovery       as ED
+import           Engine.Author.Discovery       (Discovery (..), discoveryTag, firstFind)
 import           GameTypes
 import           Scenarios.DeerHunt.Constants  (formatHuntDate)
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
@@ -47,40 +45,21 @@ data DiscoveryKind
   | Signature
   deriving (Show, Read, Eq, Ord, Enum, Bounded)
 
--- | A discoverable entry: its category plus its name as it appears
--- in-fiction.  The derived 'Show' instance doubles as the scenario-
--- tag key, so 'scenarioTag' handles persistence and merge via the
--- existing tag infrastructure.  'Read' is derived so the catalog
--- view can recover entries from the world-tag strings without an
--- additional registry.
-data Discovery = Discovery DiscoveryKind String
-  deriving (Show, Read, Eq, Ord)
+-- | The hunt's specialization of the engine 'Discovery' type.  Show
+-- output of @Discovery Tree "raven"@ matches the prior unparameterized
+-- shape, so existing world-tag round-trips stay stable.
+type HuntDiscovery = Discovery DiscoveryKind
 
--- | The scenario tag that marks a 'Discovery' as seen.
-discoveryTag :: Discovery -> Tag
-discoveryTag = scenarioTag
-
--- | One-time beat for a 'Discovery'.  Each effect is guarded by the
--- discovery tag not yet being set, so repeat encounters collapse.
-firstFind :: Discovery -> [Effect]
-firstFind d@(Discovery kind name) =
-  let tag   = discoveryTag d
-      guard = Not (HasWorldTag tag)
-  in [ immediateWhen guard (Narrate (openingLine kind name))
-     , immediateWhen guard (JournalEntry ("First " <> show kind <> ": " <> name <> "."))
-     , immediateWhen guard (AddWorldTag tag)
-     ]
-
--- | First-sighting beat for a 'SignatureFind'.  Mirrors 'firstFind'
--- but lays down multiple journal lines so the signature reads as a
--- paragraph — the whole point of the Tier 1 slot is that it matters
--- more than a one-line catalog entry.  Every effect shares the same
--- guard so repeat arrivals collapse as usual.
+-- | First-sighting beat for a 'SignatureFind'.  Lays down multiple
+-- journal lines so the signature reads as a paragraph — the whole
+-- point of the Tier 1 slot is that it matters more than a one-line
+-- catalog entry.  Every effect shares the same guard so repeat
+-- arrivals collapse as usual.
 firstSignature :: SignatureFind -> [Effect]
 firstSignature sig =
-  let d     = Discovery Signature (sigName sig)
-      tag   = discoveryTag d
-      guard = Not (HasWorldTag tag)
+  let d      = Discovery Signature (sigName sig) :: HuntDiscovery
+      tag    = discoveryTag d
+      guard  = Not (HasWorldTag tag)
       detail = signatureDiaryLines sig
       header = "First Signature: " <> sigName sig <> "."
   in [ immediateWhen guard (Narrate (openingLine Signature (sigName sig))) ]
@@ -100,6 +79,10 @@ openingLine Sign      name = name <> ". Recent."
 openingLine Find      name = name <> ". Not something you expected to see out here."
 openingLine Signature name = name <> ". You stop."
 
+-- | One-time beat for a hunt discovery, in this scenario's voice.
+firstHuntFind :: HuntDiscovery -> [Effect]
+firstHuntFind = firstFind openingLine
+
 -- ---------------------------------------------------------------------------
 -- Discovery pools
 -- ---------------------------------------------------------------------------
@@ -109,7 +92,7 @@ openingLine Signature name = name <> ". You stop."
 -- just a line in the relevant list; it becomes part of the catalog
 -- automatically once wired through 'arrivalDiscoveryAxiom'.
 
-treesOf :: TerrainClass -> [Discovery]
+treesOf :: TerrainClass -> [HuntDiscovery]
 treesOf CBush  = [ Discovery Tree "trembling aspen"
                  , Discovery Tree "bur oak"
                  , Discovery Tree "chokecherry"
@@ -117,20 +100,20 @@ treesOf CBush  = [ Discovery Tree "trembling aspen"
                  ]
 treesOf CRidge = [ Discovery Tree "bur oak"
                  , Discovery Tree "hazel"
-                 , Discovery Tree "green ash"
+                 , Discovery Tree "ansiGreen ash"
                  ]
 treesOf CCreek = [ Discovery Tree "willow"
-                 , Discovery Tree "red osier dogwood"
+                 , Discovery Tree "ansiRed osier dogwood"
                  ]
 treesOf _      = []
 
-animalsOf :: TerrainClass -> [Discovery]
+animalsOf :: TerrainClass -> [HuntDiscovery]
 animalsOf CBush  = [ Discovery Animal "raven"
                    , Discovery Animal "ruffed grouse"
                    , Discovery Animal "snowshoe hare"
                    ]
 animalsOf CRidge = [ Discovery Animal "raven"
-                   , Discovery Animal "red-tailed hawk"
+                   , Discovery Animal "ansiRed-tailed hawk"
                    ]
 animalsOf CField = [ Discovery Animal "raven"
                    , Discovery Animal "jackrabbit"
@@ -144,47 +127,16 @@ animalsOf _      = []
 -- ---------------------------------------------------------------------------
 
 -- | When the player arrives at a new location, roll once to notice
--- something.  If the roll lands, the first still-undiscovered entry
--- in that terrain's pool becomes the beat for this tick.  Triggers
--- off 'diffLocations' — the actual arrival event — not a point-in-
--- time read of 'worldLocations'.
-arrivalDiscoveryAxiom :: HuntWorld -> CharId -> Axiom
-arrivalDiscoveryAxiom hw you = Axiom
-  { axiomId       = ScenarioAxiom "arrivalDiscovery"
-  , axiomPriority = 4
-  , axiomEvaluate = \world _actions diff ->
-      concatMap (discoveriesOnArrival hw world) (playerArrivals you diff)
-  }
-
--- | Locations the player newly arrived at this tick.  A no-op move
--- (from == to) is dropped: a "resettle" shouldn't surface new finds.
-playerArrivals :: CharId -> WorldDiff -> [Location]
-playerArrivals you diff =
-  [ locationDeltaTo ld
-  | ld <- diffLocations diff
-  , locationDeltaChar ld == you
-  , locationDeltaFrom ld /= locationDeltaTo ld
-  ]
-
--- | Decide what — if anything — the hunter notices on arrival here.
--- At most one discovery per tick: the first undiscovered entry from
--- the combined tree+animal pool for this terrain class, gated by a
--- per-location Chance roll.
-discoveriesOnArrival :: HuntWorld -> GameWorld -> Location -> [Effect]
-discoveriesOnArrival hw world loc =
-  let cls          = hwClass hw loc
-      pool         = treesOf cls ++ animalsOf cls
-      undiscovered = filter (not . hasDiscovered world) pool
-      locSalt      = locHash loc
-  in case undiscovered of
-       []    -> []
-       (d:_)
-         | checkCondition world (Chance locSalt arrivalNoticeChance) -> firstFind d
-         | otherwise                                                 -> []
-
--- | Has the player already catalogued this entry?
-hasDiscovered :: GameWorld -> Discovery -> Bool
-hasDiscovered world d = hasTag world (discoveryTag d)
+-- something.  Wraps the engine helper with hunt-specific pool and
+-- voice.
+arrivalDiscoveryAxiom :: HuntWorld -> CharacterId -> Axiom
+arrivalDiscoveryAxiom hw you = ED.arrivalDiscoveryAxiom
+  (ScenarioAxiom "arrivalDiscovery")
+  you
+  (\loc -> let cls = hwClass hw loc in treesOf cls ++ animalsOf cls)
+  openingLine
+  locHash
+  arrivalNoticeChance
 
 -- | Probability the hunter notices anything new when entering a cell.
 -- Low enough that a walk doesn't turn into a stream of beats; high
@@ -206,12 +158,12 @@ locHash (Location s) = foldl (\acc c -> acc * 131 + fromEnum c) 7 s
 -- The discovery tag carried on 'Discovery' dedupes repeat visits, so
 -- this axiom is safe to re-run on every arrival.  Triggers off
 -- 'diffLocations' — the arrival event — not a point-in-time read.
-findDiscoveryAxiom :: HuntWorld -> CharId -> Axiom
+findDiscoveryAxiom :: HuntWorld -> CharacterId -> Axiom
 findDiscoveryAxiom hw you = Axiom
   { axiomId       = ScenarioAxiom "findDiscovery"
   , axiomPriority = 4
   , axiomEvaluate = \_world _actions diff ->
-      concatMap (handleFindArrival hw) (playerArrivals you diff)
+      concatMap (handleFindArrival hw) (characterArrivals you diff)
   }
 
 -- | Handle arrival at a find-bearing location.  Signature-slot hits
@@ -225,12 +177,12 @@ handleFindArrival hw loc
       let sig = hwSignature hw
       in firstSignature sig
          <> case Map.lookup loc (hwFinds hw) of
-              Just name | name /= sigName sig -> firstFind (Discovery Find name)
+              Just name | name /= sigName sig -> firstHuntFind (Discovery Find name)
               _                               -> []
   | otherwise =
       case Map.lookup loc (hwFinds hw) of
         Nothing   -> []
-        Just name -> firstFind (Discovery Find name)
+        Just name -> firstHuntFind (Discovery Find name)
 
 -- ---------------------------------------------------------------------------
 -- Catalog view
@@ -241,11 +193,11 @@ handleFindArrival hw loc
 -- tab.  Since 'scenarioTag' writes the 'Show' of a 'Discovery' into
 -- the tag string, 'Read' recovers it — no separate registry to keep
 -- in sync with the tag set.
-discoveredEntries :: GameWorld -> [Discovery]
+discoveredEntries :: GameWorld -> [HuntDiscovery]
 discoveredEntries world =
   [ d
-  | ScenarioTag (MkScenarioTag s) <- orToList (worldTags world)
-  , Just d <- [readMaybe s :: Maybe Discovery]
+  | ScenarioTag (MkScenarioTag s) <- worldTagList world
+  , Just d <- [readMaybe s :: Maybe HuntDiscovery]
   ]
 
 -- | Render each catalogued discovery as a one-paragraph diary entry
@@ -266,7 +218,7 @@ discoveryCatalog world =
 
 -- | Key used to look up a discovery's first-seen day in the journal
 -- scan.  Kind + name is enough: names are unique within a kind.
-discoveryKey :: Discovery -> (DiscoveryKind, String)
+discoveryKey :: HuntDiscovery -> (DiscoveryKind, String)
 discoveryKey (Discovery k n) = (k, n)
 
 -- | Scan the journal once and record the day each discovery was first
@@ -307,7 +259,7 @@ discoveryDays = go 1 Map.empty
 -- authored fact that grounds the entry in something specific rather
 -- than a Pokédex-style stat line.  Missing factoids fall through
 -- to bare sighting prose so unknown species still read cleanly.
-diaryLine :: Int -> Discovery -> String
+diaryLine :: Int -> HuntDiscovery -> String
 diaryLine day d@(Discovery kind name) =
   let sighting = sightingPhrase kind name
       fact     = factoidFor d
@@ -332,12 +284,12 @@ sightingPhrase Signature name = "found " <> name
 -- in a specific habit, range note, or appearance detail rather than
 -- reading as a trivia card.  Empty string = no factoid (the diary
 -- line will still render with just the sighting header).
-factoidFor :: Discovery -> String
+factoidFor :: HuntDiscovery -> String
 factoidFor (Discovery Animal name) = case name of
   "raven"            -> "Clever bird. Pairs stay on a territory for years."
   "ruffed grouse"    -> "Drums from a log in spring — a heartbeat louder than you'd believe."
   "snowshoe hare"    -> "Turns white for winter. Moves at the edges of things."
-  "red-tailed hawk"  -> "Rides the ridge thermals. Always hunting."
+  "ansiRed-tailed hawk"  -> "Rides the ridge thermals. Always hunting."
   "jackrabbit"       -> "Not really a rabbit. Runs flat out; stops dead."
   "great horned owl" -> "Nests in old hawk stick nests. Calls a lot before dawn."
   _                  -> ""
@@ -347,9 +299,9 @@ factoidFor (Discovery Tree name) = case name of
   "chokecherry"        -> "Berries bitter on the tongue, black when ripe."
   "box elder"          -> "Soft wood, quick growth. Breaks in ice storms."
   "hazel"              -> "Short and dense. Brush deer push through head-low."
-  "green ash"          -> "Straight grain; splits clean."
+  "ansiGreen ash"          -> "Straight grain; splits clean."
   "willow"             -> "Bent toward water. Roots holding the bank together."
-  "red osier dogwood"  -> "Bright red bark under the snow."
+  "ansiRed osier dogwood"  -> "Bright ansiRed bark under the snow."
   _                    -> ""
 factoidFor (Discovery Find name) = case name of
   "rusty 50s car"    -> "No plates, no glass. Someone left it here long before your time."

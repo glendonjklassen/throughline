@@ -49,10 +49,10 @@ loadOrCreate path = do
 playerIdOf :: Identity -> PlayerId
 playerIdOf ident = PlayerId (hexEncode (BA.convert (identityPublicKey ident)))
 
--- | Derive the player's self CharId from their Identity.
+-- | Derive the player's self CharacterId from their Identity.
 -- Uses the first 12 hex characters of the public key — unique enough for
 -- local use, readable in debug output.
-playerCharId :: Identity -> CharId
+playerCharId :: Identity -> CharacterId
 playerCharId ident = Named (take 12 (hexEncode (BA.convert (identityPublicKey ident))))
 
 -- | Recover a PublicKey from a PlayerId, if it encodes a valid 32-byte key.

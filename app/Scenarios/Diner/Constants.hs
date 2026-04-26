@@ -3,7 +3,6 @@ module Scenarios.Diner.Constants where
 import qualified Data.Map.Strict as Map
 import           Data.List.NonEmpty (NonEmpty(..))
 import           Engine.Author.DSL
-import           Engine.CRDT.ORSet
 import           Engine.Core.World    (addRelationship, mkRelationship, setCharacterStat)
 import           GameTypes
 
@@ -11,13 +10,13 @@ import           GameTypes
 -- Characters
 -- ---------------------------------------------------------------------------
 
-visitor :: CharId
+visitor :: CharacterId
 visitor = Named "visitor"
 
-maya :: CharId
+maya :: CharacterId
 maya = Named "maya"
 
-frank :: CharId
+frank :: CharacterId
 frank = Named "frank"
 
 -- ---------------------------------------------------------------------------
@@ -161,9 +160,9 @@ initialGraph
 initialWorld :: Int -> GameWorld
 initialWorld seed = GameWorld
   { worldCharacters = Map.fromList
-      [ (visitor, Character visitor "You"   [] orEmpty)
-      , (maya,    Character maya    "Maya"  [] orEmpty)
-      , (frank,   Character frank   "Frank" [] orEmpty)
+      [ (visitor, Character visitor "You"   [] emptyTags)
+      , (maya,    Character maya    "Maya"  [] emptyTags)
+      , (frank,   Character frank   "Frank" [] emptyTags)
       ]
   , worldGraph         = initialGraph
   , worldLocations     = Map.fromList
@@ -171,9 +170,9 @@ initialWorld seed = GameWorld
       , (maya,    counter)
       , (frank,   counter)
       ]
-  , worldActiveEffects = map staticLive [timeCycle, weatherCycle]
+  , worldActiveEffects = map staticInitEffect [timeCycle, weatherCycle]
   , worldClock         = LamportClock 0 (PlayerId "init")
-  , worldTags          = orFromList
+  , worldTags          = tagsFromList
       [ weatherTag (WeatherDesc "Rainy")
       , seasonTag 2              -- Autumn
       , dayOfWeekTag 3           -- Wednesday

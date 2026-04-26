@@ -57,7 +57,7 @@ spec = describe "Diff and merge properties" $ do
         in null (diffTagsAdded diff) && null (diffTagsRemoved diff)
 
     it "locations: no deltas" $ property $
-      \(pairs :: [(CharId, Small Int)]) ->
+      \(pairs :: [(CharacterId, Small Int)]) ->
         let locs = Map.fromList [ (c, Location (show n)) | (c, Small n) <- take 4 pairs ]
             w    = emptyWorld { worldLocations = locs }
             diff = diffWorlds (PlayerId "p") w w
@@ -188,7 +188,7 @@ spec = describe "Diff and merge properties" $ do
           pure (orToSet (worldTags w1') === orToSet (worldTags w2))
 
     it "roundtrips locations" $ property $
-      \(chars :: [CharId]) ->
+      \(chars :: [CharacterId]) ->
         ioProperty $ do
           let uniq  = nub chars
               locs1 = Map.fromList [(c, Location "before") | c <- uniq]

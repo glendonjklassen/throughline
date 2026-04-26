@@ -10,7 +10,7 @@ import           Scenarios.Diner.Constants (initialWorld, visitor,
                                             frankOpened, mayaOpened, settled)
 import           Scenarios.Diner.Scenes    (dinerActions)
 
-diner :: Int -> CharId -> Scenario
+diner :: Int -> CharacterId -> Scenario
 diner seed _you = Scenario
   { scenarioName         = "Late Night Diner"
   , scenarioInitial      = initialWorld seed
@@ -41,32 +41,32 @@ endScreen :: GameWorld -> [String]
 endScreen w
   | connected && checkCondition w (HasWorldTag settled) =
       [ ""
-      , bold "  Morning."
+      , ansiBold "  Morning."
       , ""
-      , grey "  Frank pays his tab. Maya starts the opening prep."
-      , grey "  You leave a good tip and step out into cool air."
+      , ansiGrey "  Frank pays his tab. Maya starts the opening prep."
+      , ansiGrey "  You leave a good tip and step out into cool air."
       , ""
-      , dim  "  You don't feel fixed. But you feel less alone."
+      , ansiDim  "  You don't feel fixed. But you feel less alone."
       , ""
       ]
   | connected =
       [ ""
-      , bold "  The night is over."
+      , ansiBold "  The night is over."
       , ""
-      , grey "  You talked to people. Real people, with real weight."
-      , grey "  The coffee wasn't great. But you'll remember it."
+      , ansiGrey "  You talked to people. Real people, with real weight."
+      , ansiGrey "  The coffee wasn't great. But you'll remember it."
       , ""
-      , dim  "  Sometimes that's what a sleepless night is for."
+      , ansiDim  "  Sometimes that's what a sleepless night is for."
       , ""
       ]
   | otherwise =
       [ ""
-      , bold "  Dawn."
+      , ansiBold "  Dawn."
       , ""
-      , grey "  You finish your coffee and leave cash on the table."
-      , grey "  The server waves. The man at the counter doesn't look up."
+      , ansiGrey "  You finish your coffee and leave cash on the table."
+      , ansiGrey "  The server waves. The man at the counter doesn't look up."
       , ""
-      , dim  "  You came here to not be alone. But you stayed in your head."
+      , ansiDim  "  You came here to not be alone. But you stayed in your head."
       , ""
       ]
   where

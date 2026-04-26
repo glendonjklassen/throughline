@@ -558,7 +558,7 @@ spriteByName n
       "jackrabbit"      -> Just hareSprite
       "coyote"          -> Just coyoteSprite
       "great horned owl"-> Just owlSprite
-      "red-tailed hawk" -> Just owlSprite
+      "ansiRed-tailed hawk" -> Just owlSprite
       "whitetail buck"  -> Just buckBedded
       "rusty 50s car"   -> Just rustyCar
       "shed antler"     -> Just shedAntler

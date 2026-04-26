@@ -6,10 +6,9 @@
 module Engine.Core.Time
   ( TimePhase (..)
   , timeOfDayPhase
+  , currentHour
   , currentTimePhase
   ) where
-
-import           Data.Maybe (mapMaybe)
 
 import           Engine.CRDT.ORSet (orToList)
 import           GameTypes
@@ -43,16 +42,18 @@ timeOfDayPhase h = case h `mod` 24 of
     | n <= 20           -> Dusk
     | otherwise         -> Night
 
+-- | The current hour on the world clock, if the world carries a
+-- TimeOfDay tag.  Returns 'Nothing' for worlds that don't track
+-- hour-of-day.
+currentHour :: GameWorld -> Maybe Int
+currentHour world =
+  case [ h | EngineTag (Clock (TimeOfDay h)) <- orToList (worldTags world) ] of
+    (h:_) -> Just h
+    []    -> Nothing
+
 -- | The phase of the current hour on the world clock, if the world
 -- carries a TimeOfDay tag.  Returns 'Nothing' for worlds that don't
 -- track hour-of-day — scenarios without a diurnal cycle quietly opt
 -- out of phase-based narration that way.
 currentTimePhase :: GameWorld -> Maybe TimePhase
-currentTimePhase world =
-  let hours = mapMaybe hourOf (orToList (worldTags world))
-  in case hours of
-       (h:_) -> Just (timeOfDayPhase h)
-       []    -> Nothing
-  where
-    hourOf (EngineTag (Clock (TimeOfDay h))) = Just h
-    hourOf _                                 = Nothing
+currentTimePhase = fmap timeOfDayPhase . currentHour

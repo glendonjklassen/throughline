@@ -1,7 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 module Scenarios.DeerHunt.Actions (allActions, huntGraph) where
 
-import qualified Data.Set        as Set
 import           Engine.Author.DSL
 import           Engine.Author.Scene
 import           GameTypes
@@ -15,53 +14,32 @@ import           Scenarios.DeerHunt.World      (HuntWorld, hwClass, hwMap, hwPos
 -- ---------------------------------------------------------------------------
 
 -- | The scene graph for this hunt.  Every generated location becomes a
--- 'Scene'; every generated edge becomes a bidirectional pair of
--- 'SceneEdge's with class-keyed narration pools.
+-- 'Scene' with no per-scene actions (hunt actions are universal);
+-- every generated edge becomes a bidirectional pair with class-keyed
+-- narration pools.
 huntGraph :: HuntWorld -> SceneGraph
-huntGraph hw = SceneGraph
-  { sgScenes = [ Scene loc (const []) | loc <- gmLocations (hwMap hw) ]
-  , sgEdges  = concatMap (mkEdgePair hw) (Set.toList (lgEdges (gmGraph (hwMap hw))))
-  }
+huntGraph hw = sceneGraphFromLocations
+  (gmLocations (hwMap hw))
+  (gmGraph (hwMap hw))
+  (\_ _ -> [])
+  (biEdgeWith (moveNarr hw))
 
--- | Generate bidirectional edges with class-appropriate prose.
-mkEdgePair :: HuntWorld -> (Location, Location) -> [SceneEdge]
-mkEdgePair hw (a, b) =
-  [ SceneEdge (edgeActionId a b) a b (moveLabel b) (moveNarr hw a b) unconditional
-  , SceneEdge (edgeActionId b a) b a (moveLabel a) (moveNarr hw b a) unconditional
-  ]
-
--- | Movement-action label.  Just the destination name — the spatial
--- HUD conveys the "go somewhere" intent via the compass layout, and
--- the zone-tint underline cues the destination biome, so this stays
--- terse on purpose.
-moveLabel :: Location -> String
-moveLabel (Location name) = name
-
--- | Build narration for movement between two locations.  If the move
--- stays within the same terrain class we consult the intra-zone pool
--- keyed by (class, position hint); otherwise the cross-zone pool keyed
--- by (from class, to class).  Each edge gets a unique salt derived
--- from its location pair so adjacent edges produce independent PRNG
--- sequences under 'NarrationPool'.
+-- | Pick a class-aware narration pool for an edge.  Same-class moves
+-- consult the intra-zone pool keyed by (class, position hint);
+-- cross-class moves consult the (from class, to class) pool.
 moveNarr :: HuntWorld -> Location -> Location -> Narration
-moveNarr hw from to =
+moveNarr hw = poolNarration $ \from to ->
   let clsFrom = hwClass hw from
       clsTo   = hwClass hw to
-      salt    = edgeSalt from to
-      variants
-        | clsFrom == clsTo = intraNarration clsTo (hwPositionHint hw to)
-        | otherwise        = crossNarration clsFrom clsTo
-  in NarrationPool salt variants
-
--- | Deterministic salt from a location pair for NarrationPool.
-edgeSalt :: Location -> Location -> Int
-edgeSalt (Location a) (Location b) = sum (map fromEnum a) + sum (map fromEnum b) * 31
+  in if clsFrom == clsTo
+       then intraNarration clsTo (hwPositionHint hw to)
+       else crossNarration clsFrom clsTo
 
 -- ---------------------------------------------------------------------------
 -- Universal actions (not location-gated)
 -- ---------------------------------------------------------------------------
 
-allActions :: HuntWorld -> CharId -> [AnyAction]
+allActions :: HuntWorld -> CharacterId -> [AnyAction]
 allActions hw you =
   [ anyAction (sitDown you)
   , anyAction (standUp you)
@@ -72,7 +50,7 @@ allActions hw you =
   , anyAction (takeTheShot you)
   , anyAction continueAction
   , anyAction (callItForTheDay hw you)
-  ] ++ buildActions you (huntGraph hw)
+  ] ++ compileSceneGraph you (huntGraph hw)
 
 -- ---------------------------------------------------------------------------
 -- Core actions
@@ -90,7 +68,7 @@ huntNotOver = All [ Not (HasWorldTag deerKilled)
 -- spot's cooked, whatever.  Triggers the same day-rollover montage as
 -- a kill or a miss.  Gated on "not at the truck already" so this is a
 -- choice you make out in the bush, not a button at the start line.
-callItForTheDay :: HuntWorld -> CharId -> Action 'Repeatable
+callItForTheDay :: HuntWorld -> CharacterId -> Action 'Repeatable
 callItForTheDay _hw _you = repeatableAction (ActionId "hunt:callItForTheDay")
   "Call it for the day. Head back to the truck."
   huntNotOver
@@ -102,7 +80,7 @@ callItForTheDay _hw _you = repeatableAction (ActionId "hunt:callItForTheDay")
 -- | Sitting is a toggle: sit down / stand up. While sitting, the stillness
 -- axiom increments each tick. Movement actions automatically clear PlayerSitting
 -- via the stillness axiom (it resets when the player moves).
-sitDown :: CharId -> Action 'Repeatable
+sitDown :: CharacterId -> Action 'Repeatable
 sitDown _you = repeatableAction (ActionId "sit:on")
   "Sit down and wait."
   (All [huntNotOver, Not (HasWorldTag playerSitting)])
@@ -110,7 +88,7 @@ sitDown _you = repeatableAction (ActionId "sit:on")
   , immediate (Narrate "You find a spot and settle in. Wind in the trees. Nothing else.")
   ]
 
-standUp :: CharId -> Action 'Repeatable
+standUp :: CharacterId -> Action 'Repeatable
 standUp _you = repeatableAction (ActionId "sit:off")
   "Stand up and move."
   (All [huntNotOver, HasWorldTag playerSitting])
@@ -124,7 +102,7 @@ standUp _you = repeatableAction (ActionId "sit:off")
 -- Sign types (tracks, scrapes) provide richer information gated by
 -- Understanding level.  Wind information also reported when deer is
 -- nearby.
-lookForDeer :: HuntWorld -> CharId -> Action 'Repeatable
+lookForDeer :: HuntWorld -> CharacterId -> Action 'Repeatable
 lookForDeer _hw you = repeatableAction (ActionId "look")
   "Look for deer."
   huntNotOver
@@ -146,7 +124,7 @@ lookForDeer _hw you = repeatableAction (ActionId "look")
   , immediateWhen (All [sameRegion, inFieldRegion, Not sameLoc, Not (Chance lookFieldSalt 0.34), Chance lookFieldSalt 0.67])
       (Narrate "Stubble shifts out past the middle of the field. A shape, then nothing. You wait. It doesn't come back.")
   , immediateWhen (All [sameRegion, inFieldRegion, Not sameLoc, Not (Chance lookFieldSalt 0.67)])
-      (Narrate "Brown against the grey, a long way out. You hold still. Whatever it was, it doesn't show itself again.")
+      (Narrate "Brown against the ansiGrey, a long way out. You hold still. Whatever it was, it doesn't show itself again.")
 
     -- Tier 3: Same region, sign present — scrape (very recent)
   , immediateWhen (All [sameRegion, Not sameLoc, hasScrape, lowExp])
@@ -204,7 +182,7 @@ fieldRegionNames =
 
 -- | Wave to another hunter when co-located. Only appears after merge
 -- brings another player to the same node.
-waveToHunter :: CharId -> Action 'Repeatable
+waveToHunter :: CharacterId -> Action 'Repeatable
 waveToHunter you = repeatableAction (ActionId "wave")
   "Wave to the other hunter."
   (All [ huntNotOver
@@ -228,7 +206,7 @@ pickUpPace, slowDown :: Action 'Repeatable
 
 -- | Take the shot — available only when DeerSpotted is active.
 -- Outcome determined by clock-seeded PRNG via Chance conditions.
-takeTheShot :: CharId -> Action 'Once
+takeTheShot :: CharacterId -> Action 'Once
 takeTheShot you = targetedOnceAction (ActionId "takeTheShot")
   "Take the shot."
   (ECharacter deer)

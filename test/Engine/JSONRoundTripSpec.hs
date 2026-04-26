@@ -32,8 +32,8 @@ spec = describe "JSON round-trips" $ do
   -- Primitive types (derived instances — sanity check)
   -- -------------------------------------------------------------------------
 
-  it "CharId round-trips" $ property $
-    \(c :: CharId) -> roundTrip c
+  it "CharacterId round-trips" $ property $
+    \(c :: CharacterId) -> roundTrip c
 
   it "Tag round-trips" $ property $
     \(t :: Tag) -> roundTrip t
@@ -45,12 +45,12 @@ spec = describe "JSON round-trips" $ do
     \(c :: LamportClock) -> roundTrip c
 
   -- -------------------------------------------------------------------------
-  -- CharId / StatType as map keys
+  -- CharacterId / StatType as map keys
   -- -------------------------------------------------------------------------
 
   -- These use ToJSONKey / FromJSONKey (Show/Read-based), not the generic path.
-  it "CharId survives as a JSON object key" $ property $
-    \(c :: CharId) (t :: Tag) ->
+  it "CharacterId survives as a JSON object key" $ property $
+    \(c :: CharacterId) (t :: Tag) ->
       let m = encode [(c, t)]
       in decode m == Just [(c, t)]
 

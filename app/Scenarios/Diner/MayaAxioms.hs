@@ -6,7 +6,7 @@ import           GameTypes
 import           Scenarios.Diner.Axioms     (dawnRule, weatherDesc, weatherEffect)
 import           Scenarios.Diner.Constants
 
-allAxiomsMaya :: CharId -> [Axiom]
+allAxiomsMaya :: CharacterId -> [Axiom]
 allAxiomsMaya mayaId =
   [ weatherNarrationAxiom weatherDesc
   , weatherInfluenceAxiom mayaId weatherEffect

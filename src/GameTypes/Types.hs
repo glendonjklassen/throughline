@@ -53,15 +53,15 @@ data LogEntry = LogEntry
 -- Identifiers & Tags
 -- ---------------------------------------------------------------------------
 
-data CharId = Named String | Truth
+data CharacterId = Named String | Truth
   deriving (Eq, Ord, Generic)
 
 -- | An entity that can be the target of an action.
 -- Starts as just characters; extensible to locations, objects, etc.
-newtype Entity = ECharacter CharId
+newtype Entity = ECharacter CharacterId
   deriving (Show, Eq, Ord, Generic)
 
-instance Show CharId where
+instance Show CharacterId where
   show (Named s) = s
   show Truth     = "Truth"
 
@@ -174,10 +174,10 @@ newtype Relationship = Relationship
   { relStats :: Map.Map StatType (PNCounter PlayerId)
   } deriving (Show, Eq, Generic)
 
-type RelationshipGraph = Map.Map CharId (Map.Map CharId Relationship)
+type RelationshipGraph = Map.Map CharacterId (Map.Map CharacterId Relationship)
 
 data Character = Character
-  { charId      :: CharId
+  { charId      :: CharacterId
   , charName    :: String
   , charEffects :: [Effect]
   , charTags    :: ORSet Tag
@@ -188,18 +188,18 @@ data Character = Character
 -- ---------------------------------------------------------------------------
 
 data GameWorld = GameWorld
-  { worldCharacters       :: Map.Map CharId Character
+  { worldCharacters       :: Map.Map CharacterId Character
   , worldGraph            :: RelationshipGraph
-  , worldLocations        :: Map.Map CharId Location
+  , worldLocations        :: Map.Map CharacterId Location
   , worldActiveEffects    :: [LiveEffect]
   , worldTags             :: ORSet Tag
   , worldClock            :: LamportClock
   , worldLocationGraph    :: LocationGraph
   , worldSeed             :: Int
-  , worldLocationHistory  :: Map.Map CharId [Location]
+  , worldLocationHistory  :: Map.Map CharacterId [Location]
     -- ^ Most recently departed location first, newest at head.  Bounded
     -- to a small window so downstream renderers can draw a fading trail.
-  , worldLocationVisits   :: Map.Map CharId (Map.Map Location Int)
+  , worldLocationVisits   :: Map.Map CharacterId (Map.Map Location Int)
     -- ^ Per-character visit count for each location, incremented on
     -- arrival.  Powers familiarity cues in the spatial HUD.
   , worldJournal          :: [String]
@@ -219,15 +219,15 @@ data GameWorld = GameWorld
 -- ---------------------------------------------------------------------------
 
 data Condition
-  = HasTag CharId Tag
+  = HasTag CharacterId Tag
   | HasWorldTag Tag
-  | RelationAbove CharId CharId StatType Int
-  | AtLocation CharId Location
-  | CoLocated CharId CharId
-  | InRegion CharId Region
-  | InSameRegion CharId CharId
+  | RelationAbove CharacterId CharacterId StatType Int
+  | AtLocation CharacterId Location
+  | CoLocated CharacterId CharacterId
+  | InRegion CharacterId Region
+  | InSameRegion CharacterId CharacterId
   | Chance Int Double
-  | HasCoLocated CharId [CharId]   -- ^ character has at least one co-located
+  | HasCoLocated CharacterId [CharacterId]   -- ^ character has at least one co-located
                                    -- character, excluding those listed
   | Not Condition
   | All [Condition]
@@ -246,27 +246,27 @@ data Condition
 -- "Engine.Author.DSL" which enforce those preconditions at construction time.
 data EffectBody
   = -- | Attach a 'Tag' to a character.
-    AddTag CharId Tag
+    AddTag CharacterId Tag
     -- | Attach a 'Tag' to the world.
   | AddWorldTag Tag
     -- | Remove a 'Tag' from a character.
-  | RemoveTag CharId Tag
+  | RemoveTag CharacterId Tag
     -- | Remove a 'Tag' from the world.
   | RemoveWorldTag Tag
     -- | Adjust a directed relationship stat by a signed delta.
-  | ModifyRelation CharId CharId StatType Int
+  | ModifyRelation CharacterId CharacterId StatType Int
     -- | Spoken dialogue attributed to a character, optionally directed at listeners.
     -- [] = said to the room (announcement, mutter). Non-empty = addressed to specific people.
-  | Say CharId [CharId] String
+  | Say CharacterId [CharacterId] String
     -- | Internal thought attributed to a character.
-  | Think CharId String
+  | Think CharacterId String
     -- | Narrator prose with no speaker.
   | Narrate String
     -- | Narrator prose picked from a pool by deterministic PRNG.
     -- The salt + world clock tick select which variant fires.
   | NarratePool Int [String]
     -- | Move a character to a new 'Location'.
-  | SetLocation CharId Location
+  | SetLocation CharacterId Location
     -- | Executes @inner@ for the effect's lifetime, then spawns @child@ on
     -- expiry. Use 'Engine.Author.DSL.ifItPersists' for condition-gated chains.
   | OnExpire EffectBody Effect
@@ -280,16 +280,16 @@ data EffectBody
   | Cycle     Int EffectBody EffectBody
     -- | A sequence of dialogue lines rendered as a block.
     -- Each triple: (speaker, listeners, text).
-  | Dialogue (NonEmpty (CharId, [CharId], String))
+  | Dialogue (NonEmpty (CharacterId, [CharacterId], String))
     -- | Move character to a random location from the given list.
     -- Salt + Lamport clock determines the choice.
-  | SetLocationRandom CharId Int [Location]
+  | SetLocationRandom CharacterId Int [Location]
     -- | Move character to a random adjacent location (reads worldLocationGraph).
     -- Salt + Lamport clock determines the choice.
-  | SetLocationAdjacent CharId Int
+  | SetLocationAdjacent CharacterId Int
     -- | Move character to a random adjacent location, preferring locations in
     -- the given region. Salt + Lamport clock determines the choice.
-  | SetLocationAdjacentPrefer CharId Int Region
+  | SetLocationAdjacentPrefer CharacterId Int Region
     -- | Append a line to the player's journal.  Renders no prose — the
     -- entry becomes visible when the player opens the journal.  Carried
     -- on the event log so it persists across sessions and replays.
@@ -348,7 +348,7 @@ instance Eq AnyAction where
 -- ---------------------------------------------------------------------------
 
 data StatDelta = StatDelta
-  { statDeltaChar   :: CharId
+  { statDeltaChar   :: CharacterId
   , statDeltaStat   :: StatType
   , statDeltaOld    :: Int
   , statDeltaNew    :: Int
@@ -356,8 +356,8 @@ data StatDelta = StatDelta
   } deriving (Show, Eq, Generic)
 
 data RelationDelta = RelationDelta
-  { relationDeltaFrom   :: CharId
-  , relationDeltaTo     :: CharId
+  { relationDeltaFrom   :: CharacterId
+  , relationDeltaTo     :: CharacterId
   , relationDeltaStat   :: StatType
   , relationDeltaOld    :: Int
   , relationDeltaNew    :: Int
@@ -365,7 +365,7 @@ data RelationDelta = RelationDelta
   } deriving (Show, Eq, Generic)
 
 data LocationDelta = LocationDelta
-  { locationDeltaChar :: CharId
+  { locationDeltaChar :: CharacterId
   , locationDeltaFrom :: Location
   , locationDeltaTo   :: Location
   } deriving (Show, Eq, Generic)
@@ -373,8 +373,8 @@ data LocationDelta = LocationDelta
 data WorldDiff = WorldDiff
   { diffStats            :: [StatDelta]
   , diffRelations        :: [RelationDelta]
-  , diffTagsAdded        :: [(CharId, Tag)]
-  , diffTagsRemoved      :: [(CharId, Tag)]
+  , diffTagsAdded        :: [(CharacterId, Tag)]
+  , diffTagsRemoved      :: [(CharacterId, Tag)]
   , diffWorldTagsAdded   :: [Tag]
   , diffWorldTagsRemoved :: [Tag]
   , diffLocations        :: [LocationDelta]
@@ -420,7 +420,7 @@ data MergeDelta a = MergeDelta
 data MergeDiff = MergeDiff
   { mergeStats     :: [MergeDelta StatDelta]
   , mergeRelations :: [MergeDelta RelationDelta]
-  , mergeTags      :: [MergeDelta (CharId, Tag)]
+  , mergeTags      :: [MergeDelta (CharacterId, Tag)]
   , mergeWorldTags :: [MergeDelta Tag]
   , mergeLocations :: [MergeDelta LocationDelta]
   } deriving (Show, Eq, Generic)
@@ -436,9 +436,9 @@ data MergeAxiom = MergeAxiom
 -- Declarative axiom rules (serializable)
 -- ---------------------------------------------------------------------------
 
--- | Sentinel CharId for rules that target multiple characters.
--- The rule evaluator substitutes this with the actual CharId.
-self :: CharId
+-- | Sentinel CharacterId for rules that target multiple characters.
+-- The rule evaluator substitutes this with the actual CharacterId.
+self :: CharacterId
 self = Named "\xa7self"
 
 data Trigger
@@ -452,9 +452,9 @@ data Trigger
 
 data Target
   = EachCharacter
-  | SpecificChar CharId
+  | SpecificChar CharacterId
   | ChangedChars
-  | CoLocatedWith CharId
+  | CoLocatedWith CharacterId
   | CharsAtLocation Location
   deriving (Show, Eq, Generic)
 
@@ -533,7 +533,7 @@ data Scenario = Scenario
   , scenarioMergeRules   :: [MergeAxiomRule]
   , scenarioTerminal     :: Condition
   , scenarioDebugDefault :: DebugMode
-  , scenarioPlayerCharId :: CharId
+  , scenarioPlayerCharId :: CharacterId
   , scenarioTombstoneGC  :: Maybe TombstoneGCRule
     -- ^ Optional per-scenario cleanup rule for ORSet tombstones.
     -- 'Nothing' keeps every tombstone forever (the conservative
@@ -557,7 +557,7 @@ type TombstoneGCRule = UTCTime -> UTCTime -> Bool
 
 instance NFData PlayerId
 instance NFData LamportClock
-instance NFData CharId
+instance NFData CharacterId
 instance NFData Entity
 instance NFData ClockTag
 instance NFData ActionId

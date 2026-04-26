@@ -79,8 +79,8 @@ coreLoop hook source = do
 -- walk. Returns the final world and the accumulated event log in
 -- chronological order.
 runHeadlessRandom
-  :: (CharId -> Scenario)
-  -> PlayerId  -- ^ identity for this run (CharId is derived as Named (take 12 pid))
+  :: (CharacterId -> Scenario)
+  -> PlayerId  -- ^ identity for this run (CharacterId is derived as Named (take 12 pid))
   -> Int       -- ^ max steps
   -> Int       -- ^ random seed
   -> IO (Either AppError (GameWorld, [LogEntry]))
@@ -124,8 +124,8 @@ runHeadlessRandom mkScenario playerId steps seed = do
 -- Unavailable actions (condition not met) are skipped. Returns the final
 -- world and the accumulated event log in chronological order.
 runHeadlessScript
-  :: (CharId -> Scenario)
-  -> PlayerId   -- ^ identity for this run (CharId is derived as Named (take 12 pid))
+  :: (CharacterId -> Scenario)
+  -> PlayerId   -- ^ identity for this run (CharacterId is derived as Named (take 12 pid))
   -> [ActionId] -- ^ action IDs to execute in order
   -> IO (Either AppError (GameWorld, [LogEntry]))
 runHeadlessScript mkScenario playerId actionIds = do
@@ -166,8 +166,8 @@ runHeadlessScript mkScenario playerId actionIds = do
 -- | Like 'runHeadlessScript' but also returns the captured narrative messages
 -- in chronological order. Useful for tests that need to assert on prose output.
 runHeadlessNarrated
-  :: (CharId -> Scenario)
-  -> PlayerId   -- ^ identity for this run (CharId is derived as Named (take 12 pid))
+  :: (CharacterId -> Scenario)
+  -> PlayerId   -- ^ identity for this run (CharacterId is derived as Named (take 12 pid))
   -> [ActionId] -- ^ action IDs to execute in order
   -> IO (Either AppError (GameWorld, [LogEntry], [NarrativeEntry]))
 runHeadlessNarrated mkScenario playerId actionIds = do
@@ -220,7 +220,7 @@ data TurnRecord = TurnRecord
 -- recording a 'TurnRecord' for each turn. Returns the final world and the
 -- per-turn records in chronological order.
 runHeadlessPlaythrough
-  :: (CharId -> Scenario)
+  :: (CharacterId -> Scenario)
   -> PlayerId
   -> [ActionId]
   -> IO (Either AppError (GameWorld, [TurnRecord]))

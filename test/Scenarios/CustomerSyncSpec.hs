@@ -96,7 +96,7 @@ spec = do
     it "places the customer at the expected location after a fixed walk" $ do
       -- A single player walking through the store's scene graph.
       let pid = PlayerId "customer-a"
-          you = Named "customer-a"    -- the CharId for this player
+          you = Named "customer-a"    -- the CharacterId for this player
       -- Script: walk from parking to entrance, then entrance to salesFloor.
       -- The customer scenario's scene graph connects these locations.
       Right (w, _) <- runHeadlessScript (customer 0) pid
@@ -172,8 +172,8 @@ spec = do
       -- world state must be identical.
       let pidA = PlayerId "customer-a"
           pidB = PlayerId "customer-b"
-          youA = Named "customer-a"   -- CharId for player A
-          youB = Named "customer-b"   -- CharId for player B
+          youA = Named "customer-a"   -- CharacterId for player A
+          youB = Named "customer-b"   -- CharacterId for player B
           scenA = customer 0 youA     -- scenario parameterized for player A
           scenB = customer 0 youB     -- scenario parameterized for player B
       -- Player A walks to salesFloor, player B walks to entrance.
@@ -204,7 +204,7 @@ spec = do
     it "all five players' locations survive a fold merge" $ do
       -- Five players, each with a unique PlayerId and RNG seed.
       let pids   = map (\n -> PlayerId ("c-" <> show n)) [1..5 :: Int]
-          youOf n = Named ("c-" <> show (n :: Int))  -- CharId for player n
+          youOf n = Named ("c-" <> show (n :: Int))  -- CharacterId for player n
           scenOf  = customer 0 . youOf                -- scenario for player n
           seeds  = [10, 20, 30, 40, 50]               -- different seeds = different walks
       -- Run each player for 6 random steps.
@@ -239,8 +239,8 @@ spec = do
         forAll (choose (1, 8 :: Int)) $ \steps -> ioProperty $ do
           let pidA = PlayerId "customer-a"
               pidB = PlayerId "customer-b"
-              youA = Named "customer-a"   -- CharId for player A
-              youB = Named "customer-b"   -- CharId for player B
+              youA = Named "customer-a"   -- CharacterId for player A
+              youB = Named "customer-b"   -- CharacterId for player B
               scenA = customer 0 youA
           -- Run both players for the same number of random steps with
           -- different seeds (s1, s2 from QuickCheck).

@@ -6,7 +6,7 @@ import           Engine.Author.DSL
 import           GameTypes
 import           Scenarios.Diner.Constants
 
-mayaCounterActions :: CharId -> [AnyAction]
+mayaCounterActions :: CharacterId -> [AnyAction]
 mayaCounterActions mayaId =
   [ anyAction (wipeCounter mayaId)
   , anyAction (prepOrder mayaId)
@@ -17,13 +17,13 @@ mayaCounterActions mayaId =
   , anyAction (takeStock mayaId)
   ]
 
-wipeCounter :: CharId -> Action 'Repeatable
+wipeCounter :: CharacterId -> Action 'Repeatable
 wipeCounter _mayaId = repeatableAction (ActionId "maya:wipeCounter")
   "Wipe down the counter."
   unconditional
   [immediate DoNothing]
 
-prepOrder :: CharId -> Action 'Once
+prepOrder :: CharacterId -> Action 'Once
 prepOrder mayaId = onceAction (ActionId "maya:prepOrder")
   "Pour a coffee for the new customer."
   (HasWorldTag orderedCoffee)
@@ -31,7 +31,7 @@ prepOrder mayaId = onceAction (ActionId "maya:prepOrder")
   , immediate (think mayaId "At least someone's drinking it.")
   ]
 
-noticeNewFace :: CharId -> Action 'Once
+noticeNewFace :: CharacterId -> Action 'Once
 noticeNewFace mayaId = onceAction (ActionId "maya:noticeNewFace")
   "Study the person who just came in."
   (AtLocation visitor counter)
@@ -41,7 +41,7 @@ noticeNewFace mayaId = onceAction (ActionId "maya:noticeNewFace")
   , immediate (ModifyRelation maya visitor (Perceived Understanding) 1)
   ]
 
-checkOnFrank :: CharId -> Action 'Once
+checkOnFrank :: CharacterId -> Action 'Once
 checkOnFrank mayaId = onceAction (ActionId "maya:checkOnFrank")
   "Top off Frank's cup."
   unconditional
@@ -53,17 +53,17 @@ checkOnFrank mayaId = onceAction (ActionId "maya:checkOnFrank")
   ++ addTags [frankChatted, smallKindness]
   ++ [modifyTrust frank maya 1]
 
-worryAboutKid :: CharId -> Action 'Once
+worryAboutKid :: CharacterId -> Action 'Once
 worryAboutKid mayaId = onceAction (ActionId "maya:worryAboutKid")
   "Check the time and think about Jamie."
   (HasWorldTag (timeTag 3))
   [ immediate (think mayaId "Jamie had that fever again when I left. The babysitter said it was fine. She always says it's fine.")
   , immediate (Narrate "You glance at the clock. 3 AM. Too late to call.")
-  , modifyCharacterStatEffect mayaId (Capacity Strength) (-1)
+  , modifyStat mayaId (Capacity Strength) (-1)
   , immediate (AddWorldTag worryInTheWalls)
   ]
 
-textBabysitter :: CharId -> Action 'Once
+textBabysitter :: CharacterId -> Action 'Once
 textBabysitter mayaId = onceAction (ActionId "maya:textBabysitter")
   "Send a quick text about Jamie."
   (HasWorldTag (timeTag 4))
@@ -72,7 +72,7 @@ textBabysitter mayaId = onceAction (ActionId "maya:textBabysitter")
   , immediate (AddWorldTag checkedOnKid)
   ]
 
-takeStock :: CharId -> Action 'Once
+takeStock :: CharacterId -> Action 'Once
 takeStock mayaId = onceAction (ActionId "maya:takeStock")
   "Take stock of the shift."
   (HasWorldTag orderedCoffee)

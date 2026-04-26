@@ -4,9 +4,9 @@ import           Data.Maybe        (fromMaybe)
 import qualified Data.Map.Strict as Map
 import           Engine.Author.CommonAxioms  (timeOfDayNarrationAxiom, weatherNarrationAxiom)
 import           Engine.Author.DSL
-import           Engine.Core.Time            (TimePhase(..))
+import           Engine.Core.Time            (TimePhase(..), currentHour)
+import           Engine.Core.World           (characterLocation)
 import           Engine.Author.Random        (rollCheck, rollChoice, rollD)
-import           Engine.CRDT.ORSet           (orToList)
 import           GameTypes
 import           Scenarios.DeerHunt.Constants
 import           Scenarios.DeerHunt.Discoveries (arrivalDiscoveryAxiom, findDiscoveryAxiom)
@@ -34,7 +34,7 @@ huntOver world = hasTag world deerKilled
 -- 'HuntWorld' so it can consult the generated map's class lookups,
 -- truck locations, and region groupings without having to thread the
 -- world through as an argument on every call.
-allAxioms :: HuntWorld -> CharId -> [Axiom]
+allAxioms :: HuntWorld -> CharacterId -> [Axiom]
 allAxioms hw you =
   [ windAxiom
   , deerMovementAxiom hw
@@ -91,7 +91,7 @@ rareEventPool =
       "A small plane crosses the sky high up. You watch until it's past."
       "Small plane overhead."
   , RareEvent
-      "A red-tail slides off a fencepost and out over the stubble."
+      "A ansiRed-tail slides off a fencepost and out over the stubble."
       "Hawk hunting the stubble edge."
   , RareEvent
       "Somewhere to the north, a single owl call. Big one."
@@ -227,7 +227,7 @@ windAxiom = Axiom
           newStrength   = max 0.0 (min 1.0 (oldStrength + strengthDrift + randomNudge))
           -- Remove old wind tags and add new ones
           removeOld = [ immediate (RemoveWorldTag t)
-                      | t <- orToList (worldTags world)
+                      | t <- worldTagList world
                       , isWindAngleTag t || isWindStrengthTag t ]
           addNew    = [ immediate (AddWorldTag (windAngleTag newAngle))
                       , immediate (AddWorldTag (windStrengthTag newStrength))
@@ -238,7 +238,7 @@ windAxiom = Axiom
 -- | Weather-based target for wind strength.
 weatherStrengthBias :: GameWorld -> Double
 weatherStrengthBias world =
-  case [ w | EngineTag (Weather w) <- orToList (worldTags world) ] of
+  case [ w | EngineTag (Weather w) <- worldTagList world ] of
     (WeatherDesc "Windy" : _)          -> 0.85
     (WeatherDesc "Light Snow" : _)     -> 0.40
     (WeatherDesc "Overcast" : _)       -> 0.50
@@ -265,7 +265,7 @@ deerMovementAxiom hw = Axiom
   , axiomEvaluate = \world _actions _diff ->
       let frozen = huntOver world || hasTag world deerSpooked
       in if frozen then [] else
-           let current   = fromMaybe (hwDeerStartLoc hw) (charLocation deer world)
+           let current   = fromMaybe (hwDeerStartLoc hw) (characterLocation deer world)
                preferred = deerPreferredClass world
                prefLocs  = hwLocsOfClass hw preferred
                neighbors = neighborsOf (worldLocationGraph world) current
@@ -290,13 +290,13 @@ deerMovementAxiom hw = Axiom
 -- spook.  If spooked, the deer bolts to a different cover region.
 -- Terrain noise at the player's location and visibility at the deer's
 -- location modify the base spook chance.
-spookAxiom :: HuntWorld -> CharId -> Axiom
+spookAxiom :: HuntWorld -> CharacterId -> Axiom
 spookAxiom hw you = Axiom
   { axiomId       = ScenarioAxiom "spook"
   , axiomPriority = 2
   , axiomEvaluate = \world _actions diff ->
-      let playerLoc = charLocation you world
-          deerLoc   = charLocation deer world
+      let playerLoc = characterLocation you world
+          deerLoc   = characterLocation deer world
           sameNode  = case (playerLoc, deerLoc) of
             (Just pl, Just dl) -> pl == dl
             _                  -> False
@@ -354,14 +354,14 @@ spookAxiom hw you = Axiom
 -- specific zone identity — deer and player are "nearby" when they're
 -- in the same terrain class of the section.  Clears DeerSpooked after
 -- one tick so the deer can be found again.
-deerPresenceAxiom :: HuntWorld -> CharId -> Axiom
+deerPresenceAxiom :: HuntWorld -> CharacterId -> Axiom
 deerPresenceAxiom _hw you = Axiom
   { axiomId       = ScenarioAxiom "deerPresence"
   , axiomPriority = 3
   , axiomEvaluate = \world _actions _diff ->
       let over      = huntOver world
-          playerLoc = charLocation you world
-          deerLoc   = charLocation deer world
+          playerLoc = characterLocation you world
+          deerLoc   = characterLocation deer world
           sameNode  = case (playerLoc, deerLoc) of
             (Just pl, Just dl) -> pl == dl
             _                  -> False
@@ -400,13 +400,13 @@ deerPresenceAxiom _hw you = Axiom
 -- signTracks/signScrape tags, and only when the deer's recent move
 -- touches the player's spot, so lookForDeer's "fresh tracks in the
 -- mud" branch still has a trigger.
-signPlacementAxiom :: CharId -> Axiom
+signPlacementAxiom :: CharacterId -> Axiom
 signPlacementAxiom you = Axiom
   { axiomId       = ScenarioAxiom "signPlacement"
   , axiomPriority = 3
   , axiomEvaluate = \world _actions diff ->
       if huntOver world then [] else
-      let playerLoc = charLocation you world
+      let playerLoc = characterLocation you world
           deerTouchedHere =
             [ ()
             | ld <- diffLocations diff
@@ -415,7 +415,7 @@ signPlacementAxiom you = Axiom
                 || Just (locationDeltaTo ld)   == playerLoc
             ]
           isSnow = weatherTag (WeatherDesc "Light Snow")
-                     `elem` orToList (worldTags world)
+                     `elem` worldTagList world
           trackDuration  = if isSnow then 12 else 24
           scrapeDuration = 12
       in concatMap (const
@@ -436,7 +436,7 @@ signPlacementAxiom you = Axiom
 -- No dedicated action is needed: walking in is enough. The axiom
 -- fires on the tick where the diff contains a LocationDelta for the
 -- player, so it never duplicates for a subsequent no-move tick.
-signDiscoveryAxiom :: CharId -> Axiom
+signDiscoveryAxiom :: CharacterId -> Axiom
 signDiscoveryAxiom you = Axiom
   { axiomId       = ScenarioAxiom "signDiscovery"
   , axiomPriority = 3
@@ -484,12 +484,12 @@ signDiscoveryAxiom you = Axiom
       | otherwise = "Droppings. Dry on top, damp underneath. Yesterday at most."
     signProse e SHair
       | e <= 2    = "Hair caught on a branch."
-      | e <= 5    = "Deer hair. Hollow-cored, brown with a grey tip. Buck coat."
-      | otherwise = "Hair snagged on the wire. Coarse, tipped grey — mature buck, rubbing through."
+      | e <= 5    = "Deer hair. Hollow-cored, brown with a ansiGrey tip. Buck coat."
+      | otherwise = "Hair snagged on the wire. Coarse, tipped ansiGrey — mature buck, rubbing through."
 
 -- | Track stillness while sitting. Increments each tick while PlayerSitting
 -- is active, resets to 0 when the player moves.
-stillnessAxiom :: CharId -> Axiom
+stillnessAxiom :: CharacterId -> Axiom
 stillnessAxiom you = Axiom
   { axiomId       = ScenarioAxiom "stillness"
   , axiomPriority = 4
@@ -500,8 +500,8 @@ stillnessAxiom you = Axiom
       in if huntOver world then []
          else if playerMoved && current > 0
               -- Reset to 0: modify by negative current value
-              then [modifyCharacterStatEffect you (Capacity Stillness) (negate current)]
-         else [modifyCharacterStatEffect you (Capacity Stillness) 1
+              then [modifyStat you (Capacity Stillness) (negate current)]
+         else [modifyStat you (Capacity Stillness) 1
               | isSitting && not playerMoved && current < 10]
   }
 
@@ -511,7 +511,7 @@ stillnessAxiom you = Axiom
 
 -- | Gain experience from time in the bush and finding sign.
 -- Each sign type grants +1 Understanding the first time it's discovered.
-experienceAxiom :: CharId -> Axiom
+experienceAxiom :: CharacterId -> Axiom
 experienceAxiom you = Axiom
   { axiomId       = ScenarioAxiom "experience"
   , axiomPriority = 5
@@ -520,25 +520,25 @@ experienceAxiom you = Axiom
           -- New day: +1 Understanding (slept on it, know the land better)
           newDay = dayNumberTag 1 `elem` diffWorldTagsAdded diff
                 || dayNumberTag 2 `elem` diffWorldTagsAdded diff
-          dayBonus = [modifyCharacterStatEffect you (Capacity Understanding) 1 | newDay && exp' < 8]
+          dayBonus = [modifyStat you (Capacity Understanding) 1 | newDay && exp' < 8]
           -- First discovery of any sign: +1 (original FreshSign behavior)
           firstFreshSign = freshSign `elem` diffWorldTagsAdded diff
                         && not (hasTag world foundSignTracks)
                         && not (hasTag world foundSignBed)
                         && not (hasTag world foundSignRub)
                         && not (hasTag world foundSignScrape)
-          freshBonus = [modifyCharacterStatEffect you (Capacity Understanding) 1 | firstFreshSign && exp' < 6]
+          freshBonus = [modifyStat you (Capacity Understanding) 1 | firstFreshSign && exp' < 6]
           -- Per-type first-discovery bonuses
           firstTracks = signTracks `elem` diffWorldTagsAdded diff
                      && not (hasTag world foundSignTracks)
                      && exp' < 8
-          trackBonus | firstTracks = [ modifyCharacterStatEffect you (Capacity Understanding) 1
+          trackBonus | firstTracks = [ modifyStat you (Capacity Understanding) 1
                                      , immediate (AddWorldTag foundSignTracks) ]
                      | otherwise   = []
           firstScrape = signScrape `elem` diffWorldTagsAdded diff
                      && not (hasTag world foundSignScrape)
                      && exp' < 8
-          scrapeBonus | firstScrape = [ modifyCharacterStatEffect you (Capacity Understanding) 1
+          scrapeBonus | firstScrape = [ modifyStat you (Capacity Understanding) 1
                                       , immediate (AddWorldTag foundSignScrape) ]
                       | otherwise   = []
       in dayBonus ++ freshBonus ++ trackBonus ++ scrapeBonus
@@ -550,13 +550,13 @@ experienceAxiom you = Axiom
 
 -- | At 7 PM, force the player back to their truck.  Picks the nearest
 -- truck by Euclidean distance in the generated map's coord space.
-nightfallAxiom :: HuntWorld -> CharId -> Axiom
+nightfallAxiom :: HuntWorld -> CharacterId -> Axiom
 nightfallAxiom hw you = Axiom
   { axiomId       = ScenarioAxiom "nightfall"
   , axiomPriority = 2
   , axiomEvaluate = \world _actions diff ->
       let evening  = timeTag 19 `elem` diffWorldTagsAdded diff
-          startLoc = fromMaybe (hwStartLoc hw) (charLocation you world)
+          startLoc = fromMaybe (hwStartLoc hw) (characterLocation you world)
           truck    = hwNearestTruck hw startLoc
       in if evening && not (huntOver world)
          then [ immediate (Narrate "The light is going. Legal shooting is over. You mark your spot mentally and head back to the road.")
@@ -575,7 +575,7 @@ nightfallAxiom hw you = Axiom
   }
 
 -- | At 7 AM the next day, wake the player and let them re-enter.
-dawnRule :: CharId -> AxiomRule
+dawnRule :: CharacterId -> AxiomRule
 dawnRule you = AxiomRule
   { ruleId       = ScenarioAxiom "dawn"
   , rulePriority = 2
@@ -597,7 +597,7 @@ dawnRule you = AxiomRule
 -- Tension
 -- ---------------------------------------------------------------------------
 
-tensionAxiom :: CharId -> Axiom
+tensionAxiom :: CharacterId -> Axiom
 tensionAxiom _you = Axiom
   { axiomId       = ScenarioAxiom "tension"
   , axiomPriority = 10
@@ -633,7 +633,7 @@ weatherDesc w                              = "The weather shifts. " <> weatherNa
 
 -- | When another hunter arrives at the player's location from an unaware
 -- merge, narrate it. Only fires if they actually ended up on your section.
-hunterArrivalMergeAxiom :: CharId -> MergeAxiom
+hunterArrivalMergeAxiom :: CharacterId -> MergeAxiom
 hunterArrivalMergeAxiom you = MergeAxiom
   { mergeAxiomId       = ScenarioAxiom "hunterArrival"
   , mergeAxiomPriority = 2
@@ -657,7 +657,7 @@ hunterArrivalMergeAxiom you = MergeAxiom
 -- truck, and re-place the buck somewhere new.  The section of land
 -- stays the same.  Long-lived location tags (seeded treasure sign)
 -- persist.
-dayRolloverAxiom :: HuntWorld -> CharId -> Axiom
+dayRolloverAxiom :: HuntWorld -> CharacterId -> Axiom
 dayRolloverAxiom hw you = Axiom
   { axiomId       = ScenarioAxiom "dayRollover"
   , axiomPriority = 100

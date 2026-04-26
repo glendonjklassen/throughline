@@ -12,7 +12,7 @@ import           Data.Maybe          (fromMaybe)
 import qualified Data.Map.Strict     as Map
 
 import           Engine.Author.DSL
-import           Engine.Core.Conditions (getCharStat)
+import           Engine.Core.Conditions (getCharacterStat)
 import           Engine.Core.Axioms.Shared (charIsSleeping)
 import           Engine.CRDT.ORSet
 import           Engine.Core.World
@@ -22,19 +22,19 @@ import           GameTypes
 -- Character tag queries (biological)
 -- ---------------------------------------------------------------------------
 
-charHasFatigue :: CharId -> FatigueLevel -> GameWorld -> Bool
+charHasFatigue :: CharacterId -> FatigueLevel -> GameWorld -> Bool
 charHasFatigue cid level world =
   case Map.lookup cid (worldCharacters world) of
     Just c  -> orMember (fatigueTag level) (charTags c)
     Nothing -> False
 
-charHasAnyFatigue :: CharId -> GameWorld -> Bool
+charHasAnyFatigue :: CharacterId -> GameWorld -> Bool
 charHasAnyFatigue cid world =
   case Map.lookup cid (worldCharacters world) of
     Just c  -> any isFatigueTag (orToList (charTags c))
     Nothing -> False
 
-charHasHungerState :: CharId -> HungerLevel -> GameWorld -> Bool
+charHasHungerState :: CharacterId -> HungerLevel -> GameWorld -> Bool
 charHasHungerState cid level world =
   case Map.lookup cid (worldCharacters world) of
     Just c  -> orMember (hungerStateTag level) (charTags c)
@@ -61,13 +61,13 @@ fatigueSystemAxiom = Axiom
   }
   where
     fatigueFor world hour cid =
-      case getCharStat cid (Capacity Strength) world of
+      case getCharacterStat cid (Capacity Strength) world of
         Nothing -> []
         Just _  ->
           if charIsSleeping cid world
-            then [modifyCharacterStatEffect cid (Capacity Strength) 1]
+            then [modifyStat cid (Capacity Strength) 1]
             else let drain = circadianDrain hour
-                 in [modifyCharacterStatEffect cid (Capacity Strength) (negate drain) | drain /= 0]
+                 in [modifyStat cid (Capacity Strength) (negate drain) | drain /= 0]
 
     -- Circadian fatigue curve (drain per hour by time of day):
     --   00-05  heavy drain (2) -- deep night, body demands sleep
@@ -103,7 +103,7 @@ tirednessSystemAxiom = Axiom
     tirednessThreshold  = 3
 
     tirednessFor world cid =
-      case getCharStat cid (Capacity Strength) world of
+      case getCharacterStat cid (Capacity Strength) world of
         Nothing -> []
         Just s
           | s <= exhaustionThreshold -> setFatigue cid Exhausted world
@@ -136,13 +136,13 @@ hungerSystemAxiom = Axiom
     hungerRestoreTarget        = 6
 
     hungerFor world cid =
-      case getCharStat cid (Capacity Hunger) world of
+      case getCharacterStat cid (Capacity Hunger) world of
         Nothing -> []
         Just hunger ->
           if charIsSleeping cid world then [] else
           if hunger <= hungerAutoRestoreThreshold
-            then [modifyCharacterStatEffect cid (Capacity Hunger) (hungerRestoreTarget - hunger)]
-            else [modifyCharacterStatEffect cid (Capacity Hunger) (-1)]
+            then [modifyStat cid (Capacity Hunger) (hungerRestoreTarget - hunger)]
+            else [modifyStat cid (Capacity Hunger) (-1)]
 
 -- | Sets the HungerState EngineTag on each character based on Hunger thresholds.
 -- Hunger <= 2 -> Hungry. Hunger <= 4 -> Peckish. Above 4 -> Satiated.
@@ -162,7 +162,7 @@ hungerStateSystemAxiom = Axiom
     peckishThreshold = 4
 
     hungerStateFor world cid =
-      case getCharStat cid (Capacity Hunger) world of
+      case getCharacterStat cid (Capacity Hunger) world of
         Nothing -> []
         Just h
           | h <= hungryThreshold  -> setHunger cid Hungry world

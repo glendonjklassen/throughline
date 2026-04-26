@@ -37,7 +37,7 @@ triggerFires (WhenRelationChanged stat) diff =
   any (\rd -> relationDeltaStat rd == stat) (diffRelations diff)
 
 -- | Resolve a target specification to a list of CharIds to iterate over.
-resolveTarget :: Target -> GameWorld -> WorldDiff -> [CharId]
+resolveTarget :: Target -> GameWorld -> WorldDiff -> [CharacterId]
 resolveTarget EachCharacter world _ =
   [ cid | cid <- Map.keys (worldCharacters world), cid /= Truth ]
 resolveTarget (SpecificChar cid) _ _ = [cid]
@@ -55,7 +55,7 @@ resolveTarget (CharsAtLocation loc) world _ =
   [ c | (c, l) <- Map.toList (worldLocations world), l == loc, c /= Truth ]
 
 -- | Evaluate a rule for a single target character: substitute self, check guard, return effects.
-evalForTarget :: GameWorld -> AxiomRule -> CharId -> [Effect]
+evalForTarget :: GameWorld -> AxiomRule -> CharacterId -> [Effect]
 evalForTarget world rule cid =
   let guard' = substituteSelfCondition cid (ruleGuard rule)
   in if checkCondition world guard'
@@ -66,12 +66,12 @@ evalForTarget world rule cid =
 -- Self substitution
 -- ---------------------------------------------------------------------------
 
--- | Replace the @self@ sentinel CharId with a concrete CharId in an Effect.
-substituteSelf :: CharId -> Effect -> Effect
+-- | Replace the @self@ sentinel CharacterId with a concrete CharacterId in an Effect.
+substituteSelf :: CharacterId -> Effect -> Effect
 substituteSelf cid e = e { effectBody = substituteSelfBody cid (effectBody e)
                          , effectCondition = substituteSelfCondition cid (effectCondition e) }
 
-substituteSelfBody :: CharId -> EffectBody -> EffectBody
+substituteSelfBody :: CharacterId -> EffectBody -> EffectBody
 substituteSelfBody cid (AddTag c t)             = AddTag (sub cid c) t
 substituteSelfBody cid (RemoveTag c t)          = RemoveTag (sub cid c) t
 substituteSelfBody _   (AddWorldTag t)          = AddWorldTag t
@@ -93,7 +93,7 @@ substituteSelfBody _   (JournalEntry txt)       = JournalEntry txt
 substituteSelfBody _   AdvanceDay               = AdvanceDay
 substituteSelfBody _   DoNothing                = DoNothing
 
-substituteSelfCondition :: CharId -> Condition -> Condition
+substituteSelfCondition :: CharacterId -> Condition -> Condition
 substituteSelfCondition cid (HasTag c t)            = HasTag (sub cid c) t
 substituteSelfCondition _   (HasWorldTag t)         = HasWorldTag t
 substituteSelfCondition cid (RelationAbove f t s n) = RelationAbove (sub cid f) (sub cid t) s n
@@ -107,7 +107,7 @@ substituteSelfCondition cid (Not c)                 = Not (substituteSelfConditi
 substituteSelfCondition cid (All cs)                = All (map (substituteSelfCondition cid) cs)
 substituteSelfCondition cid (Any cs)                = Any (map (substituteSelfCondition cid) cs)
 
-sub :: CharId -> CharId -> CharId
+sub :: CharacterId -> CharacterId -> CharacterId
 sub cid c = if c == self then cid else c
 
 -- ---------------------------------------------------------------------------

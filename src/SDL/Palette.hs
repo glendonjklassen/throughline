@@ -9,19 +9,28 @@
 module SDL.Palette
   ( Color(..)
   , PaletteMode(..)
+    -- * Base tones
   , bgColor
-  , defaultText, dimText, greyText
-  , narratorColor, dialogueColor, thoughtColor
-  , warningColor, errorColor
+  , textColor
+  , dimTextColor
+  , chromeColor
+    -- * Semantic colours (uniform body text)
+  , dialogueColor
+  , thoughtColor
+  , warningColor
+  , errorColor
   , separatorColor
+    -- * Tension-keyed colours (functions of an Int 0–10)
+  , narratorColor
   , glitchColor
-  , tensionColor
+    -- * Effects
   , breathePulseColor
   , sparkleColor
   , sparkleGlyph
   , ageFadeColor
   , familiarityColor
   , zoneTintDefault
+    -- * High-contrast remap
   , remapColor
   , remapBgColor
   ) where
@@ -49,16 +58,16 @@ bgColor :: Color
 bgColor = Color 20 20 17 255
 
 -- | Default text: parchment. Warm white, never blue.
-defaultText :: Color
-defaultText = Color 212 204 186 255
+textColor :: Color
+textColor = Color 212 204 186 255
 
 -- | Dim text: dried mud. Readable but receding.
-dimText :: Color
-dimText = Color 92 88 73 255
+dimTextColor :: Color
+dimTextColor = Color 92 88 73 255
 
--- | Grey (UI chrome): weathered fence post.
-greyText :: Color
-greyText = Color 138 132 117 255
+-- | UI chrome (prompts, action numbers): weathered fence post.
+chromeColor :: Color
+chromeColor = Color 138 132 117 255
 
 -- ---------------------------------------------------------------------------
 -- Semantic colors
@@ -97,10 +106,6 @@ narratorColor t
   | t <= 8    = Color 196 122  58 255  -- rust
   | otherwise = Color  92  88  73 255  -- dim (tunnel vision)
 
--- | Tension color for narrator text (alias for narratorColor).
-tensionColor :: Int -> Color
-tensionColor = narratorColor
-
 -- | Glitch character color based on tension.
 glitchColor :: Int -> Color
 glitchColor t
@@ -116,7 +121,7 @@ glitchColor t
 -- a near-white peak.  Use alongside 'sparkleGlyph' to pick the glyph itself.
 sparkleColor :: Int -> Color
 sparkleColor n
-  | n <= 0    = dimText
+  | n <= 0    = dimTextColor
   | n == 1    = Color 140 128  78 255   -- faint wheat
   | n == 2    = Color 196 172  92 255   -- honey
   | otherwise = Color 232 210 140 255   -- pale gold

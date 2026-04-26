@@ -3,7 +3,6 @@ module Scenarios.TopBuy.Constants where
 import qualified Data.Map.Strict as Map
 import           Data.List.NonEmpty (NonEmpty(..))
 import           Engine.Author.DSL
-import           Engine.CRDT.ORSet
 import           Engine.Core.World    (addRelationship, mkRelationship, setCharacterStat)
 import           GameTypes
 import           Scenarios.TopBuy.Locations
@@ -12,10 +11,10 @@ import           Scenarios.TopBuy.Locations
 -- Characters
 -- ---------------------------------------------------------------------------
 
-bradley :: CharId
+bradley :: CharacterId
 bradley = Named "bradley"
 
-kyle :: CharId
+kyle :: CharacterId
 kyle = Named "kyle"
 
 -- ---------------------------------------------------------------------------
@@ -154,7 +153,7 @@ weatherSequence =
 -- | Builds the initial relationship graph including:
 -- * Bidirectional you↔bradley trust (starting value 3)
 -- * Ground truth stats for all three characters (Truth → char → stat)
-initialGraph :: CharId -> RelationshipGraph
+initialGraph :: CharacterId -> RelationshipGraph
 initialGraph you
   = addRelationship you bradley (mkRelationship Trust 3) (mkRelationship Trust 3)
   . setCharacterStat you     (Capacity Intelligence)  5
@@ -172,12 +171,12 @@ initialGraph you
   . setCharacterStat kyle    (Capacity Understanding) 8  -- he's seen this before
   $ Map.empty
 
-initialWorld :: Int -> CharId -> GameWorld
+initialWorld :: Int -> CharacterId -> GameWorld
 initialWorld seed you = GameWorld
   { worldCharacters = Map.fromList
-      [ (you,     Character you     "You"     [] orEmpty)
-      , (bradley, Character bradley "Bradley" [] orEmpty)
-      , (kyle,    Character kyle    "Kyle"    [] orEmpty)
+      [ (you,     Character you     "You"     [] emptyTags)
+      , (bradley, Character bradley "Bradley" [] emptyTags)
+      , (kyle,    Character kyle    "Kyle"    [] emptyTags)
       ]
   , worldGraph         = initialGraph you
   , worldLocations     = Map.fromList
@@ -185,9 +184,9 @@ initialWorld seed you = GameWorld
       , (bradley, salesFloor)
       , (kyle,    backOffice)
       ]
-  , worldActiveEffects = map staticLive [timeCycle, weatherCycle]
+  , worldActiveEffects = map staticInitEffect [timeCycle, weatherCycle]
   , worldClock         = LamportClock 0 (PlayerId "init")
-  , worldTags          = orFromList
+  , worldTags          = tagsFromList
       [ weatherTag  (WeatherDesc "Clear")   -- initial weather
       , seasonTag   0         -- Spring
       , dayOfWeekTag 0        -- Monday

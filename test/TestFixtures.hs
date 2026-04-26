@@ -25,7 +25,8 @@ import qualified Data.Map.Strict as Map
 
 import           Engine.Core.Conditions (checkCondition)
 import           Engine.Core.Effects
-import           Engine.Core.World    (setRelStat, setCharacterStat)
+import           Engine.Core.World          (setCharacterStat)
+import           Engine.Core.World.Internal (setRelStat)
 import           Engine.CRDT.ORSet
 import           Engine.Sync.EventLog  (nullLogStore)
 import           GameTypes
@@ -40,10 +41,10 @@ import           Generators             (arbUUID)
 -- Characters
 -- ---------------------------------------------------------------------------
 
-player :: CharId
+player :: CharacterId
 player = Named "player"
 
-npc :: CharId
+npc :: CharacterId
 npc = Named "npc"
 
 -- ---------------------------------------------------------------------------
@@ -147,7 +148,7 @@ runAppEither world action = do
 
 -- | Build an 'Env' wired to a specific scenario and player character.
 -- Sets all 'Env' fields including 'envMergeAxioms' and 'envFrontier'.
-mkScenarioEnv :: CharId -> Scenario -> IO Env
+mkScenarioEnv :: CharacterId -> Scenario -> IO Env
 mkScenarioEnv cid scenario = do
   debugRef    <- newIORef Off
   msgRef      <- newIORef []

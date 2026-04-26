@@ -7,7 +7,7 @@ import           GameTypes
 import           Scenarios.TopBuy.Constants
 import           Scenarios.TopBuy.Locations
 
-salesFloorActions :: CharId -> [AnyAction]
+salesFloorActions :: CharacterId -> [AnyAction]
 salesFloorActions you =
   [ anyAction (waitAction you)
   , anyAction (greetBradley you)
@@ -33,7 +33,7 @@ salesFloorActions you =
 -- Phone — available any time on shift; drains Understanding after 5 ticks
 -- ---------------------------------------------------------------------------
 
-checkPhone :: CharId -> Action 'Repeatable
+checkPhone :: CharacterId -> Action 'Repeatable
 checkPhone you = repeatableAction (ActionId "checkPhone")
   "Check your phone."
   (Not (HasWorldTag phoneOut))
@@ -53,7 +53,7 @@ putAwayPhone = repeatableAction (ActionId "putAwayPhone")
 -- Early game
 -- ---------------------------------------------------------------------------
 
-waitAction :: CharId -> Action 'Repeatable
+waitAction :: CharacterId -> Action 'Repeatable
 waitAction you = repeatableAction (ActionId "wait")
   "Stay busy on the floor."
   unconditional
@@ -65,7 +65,7 @@ waitAction you = repeatableAction (ActionId "wait")
   ]
 
 -- Test action for dialogueChain + continueAction flow.
-greetBradley :: CharId -> Action 'Once
+greetBradley :: CharacterId -> Action 'Once
 greetBradley you = onceAction (ActionId "greetBradley") "Say hi to Bradley." unconditional
   $ conversation you bradley
       ( (you,     "Hey Bradley, how's it going?") :|
@@ -75,9 +75,9 @@ greetBradley you = onceAction (ActionId "greetBradley") "Say hi to Bradley." unc
       ])
 
 -- Talking to Bradley is what starts his scheme — he decides you're his mark.
-smallTalk :: CharId -> Action 'Once
+smallTalk :: CharacterId -> Action 'Once
 smallTalk you = onceAction (ActionId "smallTalk") "Make small talk with Bradley." unconditional $
-  mutualTrust you bradley 4 ++
+  bidirectionalTrust you bradley 4 4 ++
   [ immediate (ModifyRelation bradley you (Perceived Understanding) 2)
   , conversationThen you bradley
       ( (you,     "Quiet day, huh?") :|
@@ -87,25 +87,25 @@ smallTalk you = onceAction (ActionId "smallTalk") "Make small talk with Bradley.
   ]
 
 -- Builds Understanding +1. Available only before things get tense.
-helpCustomer :: CharId -> Action 'Once
+helpCustomer :: CharacterId -> Action 'Once
 helpCustomer you = onceAction (ActionId "helpCustomer")
   "Help a customer find what they're looking for."
   (Not (RelationAbove bradley you (Perceived Understanding) 0))
   [ immediate (Narrate "An older man is squinting at the laptop section. You spend ten minutes with him. He leaves happy.")
   , immediate (think you "I'm actually decent at this.")
-  , modifyCharacterStatEffect you (Capacity Understanding) 1
+  , modifyStat you (Capacity Understanding) 1
   ]
 
 -- Builds Understanding +1. Plants an early seed about Bradley's behaviour.
-observeStore :: CharId -> Action 'Once
+observeStore :: CharacterId -> Action 'Once
 observeStore you = onceAction (ActionId "observeStore")
   "Take stock of the floor — who's where, what's moving."
   (Not (RelationAbove bradley you (Perceived Understanding) 0))
   [ immediate (Narrate "You do a slow scan. Bradley's made three trips to the stockroom since his break. Kyle hasn't been out front all shift.")
-  , modifyCharacterStatEffect you (Capacity Understanding) 1
+  , modifyStat you (Capacity Understanding) 1
   ]
 
-complimentWork :: CharId -> Action 'Once
+complimentWork :: CharacterId -> Action 'Once
 complimentWork you = onceAction (ActionId "complimentWork")
   "Tell Bradley he runs a tight ship back here."
   (All [Not (RelationAbove bradley you (Perceived Understanding) 0), trustAbove you bradley 3]) $
@@ -121,7 +121,7 @@ complimentWork you = onceAction (ActionId "complimentWork")
 -- Mid game — Bradley is acting off
 -- ---------------------------------------------------------------------------
 
-checkStockroom :: CharId -> Action 'Once
+checkStockroom :: CharacterId -> Action 'Once
 checkStockroom you = onceAction (ActionId "checkStockroom")
   "Offer to help with the stockroom count."
   (All [RelationAbove bradley you (Perceived Understanding) 0, Not (HasWorldTag inventoryDiscrepancy)])
@@ -131,7 +131,7 @@ checkStockroom you = onceAction (ActionId "checkStockroom")
       (think you "Those gaps aren't random. They're all high-margin items.")
   ]
 
-askIfHesOkay :: CharId -> Action 'Once
+askIfHesOkay :: CharacterId -> Action 'Once
 askIfHesOkay you = onceAction (ActionId "askIfHesOkay")
   "Ask Bradley if everything's alright."
   (All [RelationAbove bradley you (Perceived Understanding) 0, trustAbove you bradley 3])
@@ -156,37 +156,37 @@ askIfHesOkay you = onceAction (ActionId "askIfHesOkay")
 -- Co-location interactions
 -- ---------------------------------------------------------------------------
 
-greetCustomer :: CharId -> CharId -> Action 'Once
+greetCustomer :: CharacterId -> CharacterId -> Action 'Once
 greetCustomer you other = onceAction (ActionId "greetCustomer")
   "Greet the customer."
   (All [AtLocation you salesFloor, AtLocation other salesFloor])
   [ immediate (sayTo you other "Hey there — need any help today?") ]
 
 -- Shows Bradley you know how to read people under pressure.
-reassureAngryCustomer :: CharId -> Action 'Once
+reassureAngryCustomer :: CharacterId -> Action 'Once
 reassureAngryCustomer you = onceAction (ActionId "reassureAngryCustomer")
   "Step in with an agitated customer at the service desk."
   (RelationAbove bradley you (Perceived Understanding) 0)
   [ immediate (Narrate "A man is at the counter, voice up, arms out. You get there before it escalates — acknowledge the problem, don't argue it. He leaves unhappy but quiet.")
   , immediate (think you "People just want to feel heard. Even when they're wrong.")
-  , modifyCharacterStatEffect you (Capacity Understanding) 1
+  , modifyStat you (Capacity Understanding) 1
   ]
 
 -- Shows Bradley you understand people well enough to guide them, not just serve them.
-explainProduct :: CharId -> Action 'Once
+explainProduct :: CharacterId -> Action 'Once
 explainProduct you = onceAction (ActionId "explainProduct")
   "Help a couple who can't decide on a TV."
   (RelationAbove bradley you (Perceived Understanding) 0)
   [ immediate (Narrate "They have a budget and a list of specs from a Reddit thread. You spend fifteen minutes with them — not selling, just translating. They leave with something they can afford and actually understand.")
   , immediate (think you "That felt good, actually.")
-  , modifyCharacterStatEffect you (Capacity Understanding) 1
+  , modifyStat you (Capacity Understanding) 1
   ]
 
 -- ---------------------------------------------------------------------------
 -- The small ask — Bradley builds the paper trail
 -- ---------------------------------------------------------------------------
 
-logReturnForBradley :: CharId -> Action 'Once
+logReturnForBradley :: CharacterId -> Action 'Once
 logReturnForBradley you = onceAction (ActionId "logReturnForBradley")
   "Log the return at register three."
   (HasWorldTag bradleySmallAsk)
@@ -209,7 +209,7 @@ logReturnForBradley you = onceAction (ActionId "logReturnForBradley")
             bigAskLine))
       ]
 
-refuseReturn :: CharId -> Action 'Once
+refuseReturn :: CharacterId -> Action 'Once
 refuseReturn you = onceAction (ActionId "refuseReturn")
   "Tell Bradley to log it himself."
   (All [HasWorldTag bradleySmallAsk, HasWorldTag playerSuspecting])
@@ -224,7 +224,7 @@ refuseReturn you = onceAction (ActionId "refuseReturn")
 -- The big ask
 -- ---------------------------------------------------------------------------
 
-coverForBradley :: CharId -> Action 'Once
+coverForBradley :: CharacterId -> Action 'Once
 coverForBradley you = onceAction (ActionId "coverForBradley")
   "Cover the floor while Bradley does inventory."
   (HasWorldTag bradleyBigAsk)
@@ -242,7 +242,7 @@ coverForBradley you = onceAction (ActionId "coverForBradley")
           (immediate DoNothing)
       ]
 
-refuseBigAsk :: CharId -> Action 'Once
+refuseBigAsk :: CharacterId -> Action 'Once
 refuseBigAsk you = onceAction (ActionId "refuseBigAsk")
   "Tell Bradley you'd rather not."
   (All [HasWorldTag bradleyBigAsk, HasWorldTag playerSuspecting])
@@ -259,7 +259,7 @@ refuseBigAsk you = onceAction (ActionId "refuseBigAsk")
 -- Proactive moves
 -- ---------------------------------------------------------------------------
 
-reportDiscrepancy :: CharId -> Action 'Once
+reportDiscrepancy :: CharacterId -> Action 'Once
 reportDiscrepancy you = onceAction (ActionId "reportDiscrepancy")
   "Report the inventory discrepancy to your manager."
   (All [HasWorldTag inventoryDiscrepancy, Not (HasWorldTag reportedToKyle)])
@@ -272,7 +272,7 @@ reportDiscrepancy you = onceAction (ActionId "reportDiscrepancy")
 -- The confrontation — path is determined by condition-gated effects
 -- ---------------------------------------------------------------------------
 
-talkToKyle :: CharId -> Action 'Once
+talkToKyle :: CharacterId -> Action 'Once
 talkToKyle you = onceAction (ActionId "talkToKyle")
   "Go talk to Kyle."
   (HasWorldTag kyleInvestigating)
@@ -327,7 +327,7 @@ talkToKyle you = onceAction (ActionId "talkToKyle")
 
 -- | Like conversationThen but gated on a condition. The conversation chain
 -- and the continuation effect are both only active when the condition holds.
-conversationThenWhen :: Condition -> CharId -> CharId -> NonEmpty (CharId, String) -> Effect -> Effect
+conversationThenWhen :: Condition -> CharacterId -> CharacterId -> NonEmpty (CharacterId, String) -> Effect -> Effect
 conversationThenWhen cond speaker listener lines' cont =
   timedWhen 1 cond (OnExpire (Dialogue (fmap (\(s, t) -> (s, [listener | s == speaker], t)) lines'))
     (cont { effectCondition = All [cond, effectCondition cont] }))

@@ -6,7 +6,7 @@ import           Engine.Author.DSL
 import           GameTypes
 import           Scenarios.Diner.Constants
 
-counterActions :: CharId -> [AnyAction]
+counterActions :: CharacterId -> [AnyAction]
 counterActions you =
   [ anyAction (waitCounter you)
   , anyAction (talkToMaya you)
@@ -20,13 +20,13 @@ counterActions you =
   , anyAction (senseTheRoom you)
   ]
 
-waitCounter :: CharId -> Action 'Repeatable
+waitCounter :: CharacterId -> Action 'Repeatable
 waitCounter _you = repeatableAction (ActionId "waitCounter")
   "Lean on the counter and wait."
   unconditional
   [immediate DoNothing]
 
-talkToMaya :: CharId -> Action 'Once
+talkToMaya :: CharacterId -> Action 'Once
 talkToMaya you = onceAction (ActionId "talkToMaya")
   "Make conversation with Maya."
   (HasWorldTag orderedCoffee)
@@ -38,7 +38,7 @@ talkToMaya you = onceAction (ActionId "talkToMaya")
       ])
   ++ bidirectionalTrust maya you 2 1
 
-askMayaAboutHerNight :: CharId -> Action 'Once
+askMayaAboutHerNight :: CharacterId -> Action 'Once
 askMayaAboutHerNight you = onceAction (ActionId "askMayaAboutHerNight")
   "Ask Maya how she's really doing."
   (All [trustAbove maya you 1, HasWorldTag orderedCoffee])
@@ -66,7 +66,7 @@ askMayaAboutHerNight you = onceAction (ActionId "askMayaAboutHerNight")
             ]))
       ++ [immediateWhen (Not perceptiveCond) (ModifyRelation maya you Trust 1)]
 
-noticeFrame :: CharId -> Action 'Once
+noticeFrame :: CharacterId -> Action 'Once
 noticeFrame you = onceAction (ActionId "noticeFrame")
   "Notice the photo behind the counter."
   (statAbove you (Capacity Understanding) 4)
@@ -74,7 +74,7 @@ noticeFrame you = onceAction (ActionId "noticeFrame")
   , immediate (think you "That's hers.")
   ]
 
-sitNearFrank :: CharId -> Action 'Once
+sitNearFrank :: CharacterId -> Action 'Once
 sitNearFrank you = onceAction (ActionId "sitNearFrank")
   "Take the stool next to the older man."
   unconditional
@@ -82,7 +82,7 @@ sitNearFrank you = onceAction (ActionId "sitNearFrank")
   , immediate (ModifyRelation frank you (Perceived Understanding) 1)
   ]
 
-askFrankName :: CharId -> Action 'Once
+askFrankName :: CharacterId -> Action 'Once
 askFrankName you = onceAction (ActionId "askFrankName")
   "Introduce yourself."
   (HasWorldTag (actionTaken (ActionId "sitNearFrank")))
@@ -92,9 +92,9 @@ askFrankName you = onceAction (ActionId "askFrankName")
       , (you,   "You come here a lot?")
       , (frank, "Most nights.")
       ])
-  ++ mutualTrust frank you 1
+  ++ bidirectionalTrust frank you 1 1
 
-askWhyHeComes :: CharId -> Action 'Once
+askWhyHeComes :: CharacterId -> Action 'Once
 askWhyHeComes you = onceAction (ActionId "askWhyHeComes")
   "Ask Frank what brings him here at this hour."
   (All [ trustAbove frank you 0
@@ -122,31 +122,31 @@ askWhyHeComes you = onceAction (ActionId "askWhyHeComes")
             ]))
       ++ [immediateWhen (Not perceptiveCond) (ModifyRelation frank you Trust 1)]
 
-stayWithMaya :: CharId -> Action 'Once
+stayWithMaya :: CharacterId -> Action 'Once
 stayWithMaya you = onceAction (ActionId "stayWithMaya")
   "Stay at the counter while Maya wipes down."
   (All [HasWorldTag mayaOpened, trustAbove maya you 4]) $
   [ immediate (Narrate "Maya does her closing count, mouthing numbers. You don't interrupt. The coffee machine sighs and clicks off. She tops up your mug without asking.")
   , immediate (think you "This is okay. This is actually okay.")
   ]
-  ++ mutualTrust maya you 2
+  ++ bidirectionalTrust maya you 2 2
   ++ [ modifyTrust you maya 1 ]
   ++ removeTags [restless]
   ++ addTags [settled, quietPresence]
 
-listenToFrank :: CharId -> Action 'Once
+listenToFrank :: CharacterId -> Action 'Once
 listenToFrank you = onceAction (ActionId "listenToFrank")
   "Just sit with Frank for a while."
   (All [HasWorldTag frankOpened, trustAbove frank you 2]) $
   [ immediate (Narrate "You don't say anything. Neither does he. Maya refills both cups without being asked. The rain eases outside.")
   , immediate (think you "Sometimes company is enough.")
   ]
-  ++ mutualTrust frank you 2
+  ++ bidirectionalTrust frank you 2 2
   ++ [ modifyTrust you frank 1 ]
   ++ removeTags [restless]
   ++ addTags [settled, quietPresence]
 
-senseTheRoom :: CharId -> Action 'Once
+senseTheRoom :: CharacterId -> Action 'Once
 senseTheRoom you = onceAction (ActionId "senseTheRoom")
   "Take in the room — really take it in."
   (HasWorldTag orderedCoffee)

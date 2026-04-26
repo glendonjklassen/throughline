@@ -105,7 +105,7 @@ movementTarget act = go (anyActionEffects act)
 -- If the world has no location graph with coordinates, or the player
 -- has no known location, returns a flat layout (all actions in
 -- shGeneralLabels, no spatial cells).
-layoutHUD :: CharId -> GameWorld -> [AnyAction] -> Int -> Int -> SpatialHUD
+layoutHUD :: CharacterId -> GameWorld -> [AnyAction] -> Int -> Int -> SpatialHUD
 layoutHUD you world actions totalCols boxH =
   let prevLoc = case Map.lookup you (worldLocationHistory world) of
         Just (p:_) -> Just p
@@ -124,7 +124,7 @@ layoutHUD you world actions totalCols boxH =
 -- the spatial box before the real 'layoutHUD' call.  Also reports
 -- whether any movement action has a graph coord (and thus whether a
 -- spatial box will actually be rendered).
-hudGenRowCount :: CharId -> GameWorld -> [AnyAction] -> Int -> (Int, Bool)
+hudGenRowCount :: CharacterId -> GameWorld -> [AnyAction] -> Int -> (Int, Bool)
 hudGenRowCount you world actions totalCols =
   let measure = layoutHUD you world actions totalCols 0
       genLabels = shGeneralLabels measure
@@ -379,7 +379,7 @@ resolveOverlaps cx cy bw bh cells = go [] cells
 -- spot looks different but is stable across frames.  Density scales with
 -- how deep in its zone the player's location is: edge locations feel
 -- sparse, interior ones feel dense.
-terrainSprites :: CharId -> GameWorld -> Int -> Int -> [TerrainSprite]
+terrainSprites :: CharacterId -> GameWorld -> Int -> Int -> [TerrainSprite]
 terrainSprites you world boxW boxH =
   case Map.lookup you (worldLocations world) of
     Nothing  -> []
@@ -412,7 +412,7 @@ data SpritePlacement = SpritePlacement
 -- The sprite pool is keyed on the last word of the region's name
 -- ("Field", "Road", etc.) — same convention the narration pool uses.
 terrainSpriteScatter
-  :: CharId
+  :: CharacterId
   -> GameWorld
   -> (Int, Int)            -- ^ panel pixel origin (left, top)
   -> (Int, Int)            -- ^ panel pixel size (w, h)
@@ -537,7 +537,7 @@ locHash (Location name) = foldl (\acc c -> acc * 37 + fromEnum c) 7 name
 -- HUD), emit a 'TrailMark' co-located with that cell.  Entries that don't
 -- land on a visible neighbor are silently dropped — they still live in
 -- the history deque, just off-screen from this viewpoint.
-trailMarks :: CharId -> GameWorld -> SpatialHUD -> [TrailMark]
+trailMarks :: CharacterId -> GameWorld -> SpatialHUD -> [TrailMark]
 trailMarks cid world hud =
   let history = Map.findWithDefault [] cid (worldLocationHistory world)
       cells   = shSpatialCells hud

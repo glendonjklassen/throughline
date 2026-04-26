@@ -88,9 +88,9 @@ sdlUI scenName display = RuntimeUI
       let fc = sdlFont ctx
       let endLines = sdEndScreen display finalW
       mapM_ (\(row, line) ->
-        renderText fc (stripAnsi line) defaultText (2, fromIntegral row + 1)
+        renderText fc (stripAnsi line) textColor (2, fromIntegral row + 1)
         ) (zip [0 :: Int ..] endLines)
-      renderText fc "Press any key to exit." greyText (2, fromIntegral (length endLines) + 2)
+      renderText fc "Press any key to exit." chromeColor (2, fromIntegral (length endLines) + 2)
       presentSDL ctx
       _ <- awaitAnyKeySDL
       freeSDL ctx
@@ -112,8 +112,8 @@ sdlUI scenName display = RuntimeUI
       ctx <- initSDLFromSettings scenName
       clearSDL ctx
       let fc = sdlFont ctx
-      renderText fc ("Foreign log from " <> name <> ": " <> show count <> " new action(s).") greyText (2, 2)
-      renderText fc "Merge? (y/n)" defaultText (2, 4)
+      renderText fc ("Foreign log from " <> name <> ": " <> show count <> " new action(s).") chromeColor (2, 2)
+      renderText fc "Merge? (y/n)" textColor (2, 4)
       presentSDL ctx
       mc <- awaitKeySDL
       freeSDL ctx
@@ -301,13 +301,13 @@ confirmQuit :: SDLContext -> IO Bool
 confirmQuit ctx = do
   clearSDL ctx
   let fc = sdlFont ctx
-  renderText fc "Quit hunt?"                              defaultText (3, 2)
-  renderText fc ""                                        dimText     (3, 3)
-  renderText fc "Your progress has been saved."           dimText     (3, 4)
-  renderText fc "You can pick up where you left off."     dimText     (3, 5)
-  renderText fc ""                                        dimText     (3, 6)
-  renderText fc "y) Yes, quit"                            defaultText (4, 8)
-  renderText fc "n) No, keep hunting"                     defaultText (4, 9)
+  renderText fc "Quit hunt?"                              textColor (3, 2)
+  renderText fc ""                                        dimTextColor     (3, 3)
+  renderText fc "Your progress has been saved."           dimTextColor     (3, 4)
+  renderText fc "You can pick up where you left off."     dimTextColor     (3, 5)
+  renderText fc ""                                        dimTextColor     (3, 6)
+  renderText fc "y) Yes, quit"                            textColor (4, 8)
+  renderText fc "n) No, keep hunting"                     textColor (4, 9)
   presentSDL ctx
   let yesRect = confirmRowRect fc 8 'y'
       noRect  = confirmRowRect fc 9 'n'
@@ -353,11 +353,11 @@ dayEndOverlay ctx dayLabel summary = do
       firstLine = headerRow + 3
       hintRow   = rows - 3
       centerCol s = fromIntegral (max 0 (cols `div` 2 - length s `div` 2))
-  renderText fc headerTxt defaultText (centerCol headerTxt, fromIntegral headerRow)
+  renderText fc headerTxt textColor (centerCol headerTxt, fromIntegral headerRow)
   mapM_ (\(i, line) ->
-    renderText fc line defaultText (centerCol line, fromIntegral (firstLine + i))
+    renderText fc line textColor (centerCol line, fromIntegral (firstLine + i))
     ) (zip [0 :: Int ..] wrapped)
-  renderText fc hintTxt greyText (centerCol hintTxt, fromIntegral hintRow)
+  renderText fc hintTxt chromeColor (centerCol hintTxt, fromIntegral hintRow)
   presentSDL ctx
   drainSDLEvents
   _ <- awaitInputSDL (sdlWindow ctx)
@@ -431,14 +431,14 @@ shareWithFriends ctx scenName playerId = do
   case sSharedFolder settings of
     Nothing -> do
       renderText fc "No shared folder configured."     warningColor (3, 2)
-      renderText fc ""                                 dimText      (3, 3)
-      renderText fc "Pick a folder in Settings first"  dimText      (3, 4)
-      renderText fc "— a Dropbox / Drive / Syncthing"  dimText      (3, 5)
-      renderText fc "path that you and your friends"   dimText      (3, 6)
-      renderText fc "all point at.  Their hunts will"  dimText      (3, 7)
-      renderText fc "merge into yours automatically."  dimText      (3, 8)
-      renderText fc ""                                 dimText      (3, 9)
-      renderText fc "press any key or click to return" greyText     (3, 11)
+      renderText fc ""                                 dimTextColor      (3, 3)
+      renderText fc "Pick a folder in Settings first"  dimTextColor      (3, 4)
+      renderText fc "— a Dropbox / Drive / Syncthing"  dimTextColor      (3, 5)
+      renderText fc "path that you and your friends"   dimTextColor      (3, 6)
+      renderText fc "all point at.  Their hunts will"  dimTextColor      (3, 7)
+      renderText fc "merge into yours automatically."  dimTextColor      (3, 8)
+      renderText fc ""                                 dimTextColor      (3, 9)
+      renderText fc "press any key or click to return" chromeColor     (3, 11)
       presentSDL ctx
       _ <- awaitInputSDL (sdlWindow ctx)
       pure ()
@@ -451,28 +451,28 @@ shareWithFriends ctx scenName playerId = do
   where
     renderShareResult fc result = case result of
       Broadcast path -> do
-        renderText fc "Sent."                              defaultText  (3, 2)
-        renderText fc ""                                   dimText      (3, 3)
-        renderText fc "Your log was copied to:"            dimText      (3, 4)
-        renderText fc path                                 dimText      (3, 5)
-        renderText fc ""                                   dimText      (3, 6)
-        renderText fc "Your friends' hunts will merge"     dimText      (3, 7)
-        renderText fc "into yours next time their logs"    dimText      (3, 8)
-        renderText fc "are visible in that folder."        dimText      (3, 9)
-        renderText fc ""                                   dimText      (3, 10)
-        renderText fc "press any key or click to return"   greyText     (3, 12)
+        renderText fc "Sent."                              textColor  (3, 2)
+        renderText fc ""                                   dimTextColor      (3, 3)
+        renderText fc "Your log was copied to:"            dimTextColor      (3, 4)
+        renderText fc path                                 dimTextColor      (3, 5)
+        renderText fc ""                                   dimTextColor      (3, 6)
+        renderText fc "Your friends' hunts will merge"     dimTextColor      (3, 7)
+        renderText fc "into yours next time their logs"    dimTextColor      (3, 8)
+        renderText fc "are visible in that folder."        dimTextColor      (3, 9)
+        renderText fc ""                                   dimTextColor      (3, 10)
+        renderText fc "press any key or click to return"   chromeColor     (3, 12)
       BroadcastNoLog -> do
-        renderText fc "Nothing to send yet."               dimText      (3, 2)
-        renderText fc ""                                   dimText      (3, 3)
-        renderText fc "Take a few actions first."          dimText      (3, 4)
-        renderText fc ""                                   dimText      (3, 5)
-        renderText fc "press any key or click to return"   greyText     (3, 7)
+        renderText fc "Nothing to send yet."               dimTextColor      (3, 2)
+        renderText fc ""                                   dimTextColor      (3, 3)
+        renderText fc "Take a few actions first."          dimTextColor      (3, 4)
+        renderText fc ""                                   dimTextColor      (3, 5)
+        renderText fc "press any key or click to return"   chromeColor     (3, 7)
       BroadcastFailed err -> do
         renderText fc "Share failed."                      warningColor (3, 2)
-        renderText fc ""                                   dimText      (3, 3)
-        renderText fc (take 70 err)                        dimText      (3, 4)
-        renderText fc ""                                   dimText      (3, 5)
-        renderText fc "press any key or click to return"   greyText     (3, 7)
+        renderText fc ""                                   dimTextColor      (3, 3)
+        renderText fc (take 70 err)                        dimTextColor      (3, 4)
+        renderText fc ""                                   dimTextColor      (3, 5)
+        renderText fc "press any key or click to return"   chromeColor     (3, 7)
 
 -- | Build a single clickable rectangle for a tab label on the
 -- journal footer row.  Offset from 'marginLeft' matches the column
@@ -754,7 +754,7 @@ typewriteFullFrame
   -> (Location -> Int)
   -> (Location -> Maybe Color)
   -> RevealFrame           -- ^ HUD frame to render under the typewriter
-  -> CharId -> GameWorld -> [AnyAction]
+  -> CharacterId -> GameWorld -> [AnyAction]
   -> IORef [NarrativeEntry] -> IORef DebugMode -> IORef [AxiomTrace]
   -> FontContext -> Int
   -> [(Color, Int, String)]   -- ^ (color, delayMs, plainLine) for each new line
@@ -879,8 +879,8 @@ fmtLis ns = " (to " <> unwords ns <> ")"
 msgColorSDL :: NarrativeMessage -> Int -> Color
 msgColorSDL MsgSay {}       _ = dialogueColor
 msgColorSDL (MsgThink _ _)  _ = thoughtColor
-msgColorSDL (MsgNarrate _)  t = tensionColor t
-msgColorSDL (MsgEffect _)   t = tensionColor t
+msgColorSDL (MsgNarrate _)  t = narratorColor t
+msgColorSDL (MsgEffect _)   t = narratorColor t
 msgColorSDL (MsgDialogue _) _ = dialogueColor
 
 -- | Typewriter delay per message type (milliseconds).

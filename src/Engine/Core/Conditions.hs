@@ -52,18 +52,18 @@ checkCondition g (HasCoLocated cid excludes) =
 -- | Read a character's ground truth stat from the truth edge.
 -- NOTE: returns Just 0 for any stat on a character that has at least one
 -- truth edge entry, even if the specific stat was never set. Use
--- 'hasCharStat' to distinguish "explicitly set to 0" from "not set".
-getCharStat :: CharId -> StatType -> GameWorld -> Maybe Int
-getCharStat cid stat world = do
+-- 'hasCharacterStat' to distinguish "explicitly set to 0" from "not set".
+getCharacterStat :: CharacterId -> StatType -> GameWorld -> Maybe Int
+getCharacterStat cid stat world = do
   truthEdges <- Map.lookup Truth (worldGraph world)
   rel        <- Map.lookup cid truthEdges
   pure (getRelStat stat rel)
 
 -- | Check whether a stat was explicitly set on a character's truth edge.
 -- Returns False when the stat key is absent from the relationship map,
--- even if 'getCharStat' would return Just 0.
-hasCharStat :: CharId -> StatType -> GameWorld -> Bool
-hasCharStat cid stat world =
+-- even if 'getCharacterStat' would return Just 0.
+hasCharacterStat :: CharacterId -> StatType -> GameWorld -> Bool
+hasCharacterStat cid stat world =
   case Map.lookup Truth (worldGraph world) >>= Map.lookup cid of
     Just (Relationship m) -> Map.member stat m
     Nothing               -> False

@@ -6,7 +6,7 @@ import           Engine.Author.DSL
 import           GameTypes
 import           Scenarios.Diner.Constants
 
-boothActions :: CharId -> [AnyAction]
+boothActions :: CharacterId -> [AnyAction]
 boothActions you =
   [ anyAction (waitBooth you)
   , anyAction (orderCoffee you)
@@ -16,13 +16,13 @@ boothActions you =
   , anyAction (fourAM you)
   ]
 
-waitBooth :: CharId -> Action 'Repeatable
+waitBooth :: CharacterId -> Action 'Repeatable
 waitBooth _you = repeatableAction (ActionId "waitBooth")
   "Sit with your thoughts."
   unconditional
   [immediate DoNothing]
 
-orderCoffee :: CharId -> Action 'Once
+orderCoffee :: CharacterId -> Action 'Once
 orderCoffee you = onceAction (ActionId "orderCoffee")
   "Flag down the server for coffee."
   (Not (HasWorldTag orderedCoffee))
@@ -34,16 +34,16 @@ orderCoffee you = onceAction (ActionId "orderCoffee")
      , modifyTrust you maya 1
      ]
 
-lookAround :: CharId -> Action 'Once
+lookAround :: CharacterId -> Action 'Once
 lookAround you = onceAction (ActionId "lookAround")
   "Take in the room."
   unconditional
   [ immediate (Narrate "Fluorescent light, the hum of the coffee machine, a country song you half-recognize from the speakers. There's a man at the counter — older, nursing something. The server moves behind the counter like she's done this ten thousand times.")
   , immediate (think you "It's the kind of place that doesn't try to be anything.")
-  , modifyCharacterStatEffect you (Capacity Understanding) 1
+  , modifyStat you (Capacity Understanding) 1
   ]
 
-thinkAboutSleep :: CharId -> Action 'Once
+thinkAboutSleep :: CharacterId -> Action 'Once
 thinkAboutSleep you = onceAction (ActionId "thinkAboutSleep")
   "Try to remember why you can't sleep."
   (HasWorldTag restless)
@@ -51,7 +51,7 @@ thinkAboutSleep you = onceAction (ActionId "thinkAboutSleep")
   , immediate (Narrate "The rain taps against the window. You wrap your hands around the mug.")
   ]
 
-readGraffitiOnTable :: CharId -> Action 'Once
+readGraffitiOnTable :: CharacterId -> Action 'Once
 readGraffitiOnTable you = onceAction (ActionId "readGraffitiOnTable")
   "Look at the marks on the table."
   (statAbove you (Capacity Understanding) 4)
@@ -59,7 +59,7 @@ readGraffitiOnTable you = onceAction (ActionId "readGraffitiOnTable")
   , immediate (think you "Everyone leaves a mark somewhere.")
   ]
 
-fourAM :: CharId -> Action 'Once
+fourAM :: CharacterId -> Action 'Once
 fourAM you = onceAction (ActionId "fourAM")
   "Stare at the clock on the wall."
   (HasWorldTag (timeTag 4))

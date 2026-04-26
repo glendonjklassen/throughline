@@ -20,8 +20,10 @@ import           Control.Exception      (SomeException, try)
 import           Data.Maybe             (fromMaybe)
 import qualified Data.Version           as Version
 
-import           Engine
-import           GameTypes              (CharId(..), PlayerId, Scenario, scenarioName)
+import           Engine.Runtime         (runScenarioWith)
+import           Engine.Sync.Identity   (defaultIdentityPath, loadOrCreate, playerIdOf)
+import           Engine.Sync.Progress   (Progress, defaultProgressPath, recordHunt)
+import           GameTypes              (CharacterId(..), PlayerId, Scenario, scenarioName)
 import           Paths_throughline      (version)
 import           SDL.ClickMap           (ClickMap, gridRowRect, hitTest)
 import           SDL.CrashHandler       (withCrashHandler)
@@ -29,7 +31,7 @@ import           SDL.FontContext        (renderText)
 import           SDL.InputHandler       (InputEvent(..), awaitInputSDL)
 import           SDL.Layout             (ScenarioDisplay)
 import           SDL.Onboarding         (defaultHowToPlay, howToPlayLoop)
-import           SDL.Palette            (PaletteMode(..), defaultText, dimText, greyText, warningColor)
+import           SDL.Palette            (PaletteMode(..), textColor, dimTextColor, chromeColor, warningColor)
 import           SDL.Renderer           (SDLContext(..), clearSDL, freeSDL, initSDLWith, presentSDL)
 import           SDL.Runner             (sdlUI)
 import           SDL.SaveSlots          (SaveStatus(..), resetScenarioSave,
@@ -50,7 +52,7 @@ data ScenarioEntry = ScenarioEntry
   { entryLabel     :: String
   , entryTagline   :: String
   , entryDisplay   :: ScenarioDisplay
-  , entryMake      :: Int -> CharId -> Scenario
+  , entryMake      :: Int -> CharacterId -> Scenario
   , entryHowToPlay :: Maybe [String]
   }
 
@@ -136,22 +138,22 @@ renderSingleMenu ctx entry status = do
       -- Each clickable row spans the full screen width so a tap
       -- anywhere on the line selects the option.
       rowHit r = gridRowRect fc 0 r 80
-  renderText fc (entryLabel entry)                  defaultText (3, 2)
-  renderText fc (entryTagline entry)                dimText     (3, 3)
-  renderText fc ""                                  dimText     (3, 4)
+  renderText fc (entryLabel entry)                  textColor (3, 2)
+  renderText fc (entryTagline entry)                dimTextColor     (3, 3)
+  renderText fc ""                                  dimTextColor     (3, 4)
   let primaryRow =
         if hasSave status
           then do
-            renderText fc "1) Continue"                 defaultText (4, 6)
-            renderText fc (continueHint status)         dimText     (4, 7)
-            renderText fc "2) New hunt (discards save)" defaultText (4, 9)
+            renderText fc "1) Continue"                 textColor (4, 6)
+            renderText fc (continueHint status)         dimTextColor     (4, 7)
+            renderText fc "2) New hunt (discards save)" textColor (4, 9)
           else
-            renderText fc "1) Begin"                    defaultText (4, 6)
+            renderText fc "1) Begin"                    textColor (4, 6)
   primaryRow
-  renderText fc "h) How to play"                    greyText    (4, 11)
-  renderText fc "s) Settings"                       greyText    (4, 12)
-  renderText fc "q) Quit"                           greyText    (4, 13)
-  renderText fc versionTag                          dimText     (4, 15)
+  renderText fc "h) How to play"                    chromeColor    (4, 11)
+  renderText fc "s) Settings"                       chromeColor    (4, 12)
+  renderText fc "q) Quit"                           chromeColor    (4, 13)
+  renderText fc versionTag                          dimTextColor     (4, 15)
   presentSDL ctx
   let continueMap =
         [ rowHit 6 '1'
@@ -210,11 +212,11 @@ pickSingle ctx pid entry status = loop
       cm' <- renderSingleMenu ctx entry status
       loop cm'
 
--- | A placeholder CharId used only to ask a scenario for its 'scenarioName'.
+-- | A placeholder CharacterId used only to ask a scenario for its 'scenarioName'.
 -- Scenario names are static strings that never depend on the player
--- CharId passed at construction, so feeding in a throwaway value is
+-- CharacterId passed at construction, so feeding in a throwaway value is
 -- safe and saves the launcher from having to know the real one early.
-dummyChar :: CharId
+dummyChar :: CharacterId
 dummyChar = Truth
 
 -- ---------------------------------------------------------------------------
@@ -264,17 +266,17 @@ renderMultiMenu ctx entries statuses = do
   clearSDL ctx
   let fc = sdlFont ctx
       rowHit r = gridRowRect fc 0 r 80
-  renderText fc "throughline" defaultText (3, 2)
-  renderText fc "A narrative engine." dimText (3, 3)
-  renderText fc "" dimText (3, 4)
+  renderText fc "throughline" textColor (3, 2)
+  renderText fc "A narrative engine." dimTextColor (3, 3)
+  renderText fc "" dimTextColor (3, 4)
   mapM_ (renderRow fc) (zip3 [1 :: Int ..] entries statuses)
   let helpRow     = fromIntegral (4 + length entries * 2 + 2)
       settingsRow = helpRow + 1
       quitRow     = settingsRow + 1
-  renderText fc "h) How to play" greyText (4, helpRow)
-  renderText fc "s) Settings"    greyText (4, settingsRow)
-  renderText fc "q) Quit"        greyText (4, quitRow)
-  renderText fc versionTag       dimText  (4, quitRow + 2)
+  renderText fc "h) How to play" chromeColor (4, helpRow)
+  renderText fc "s) Settings"    chromeColor (4, settingsRow)
+  renderText fc "q) Quit"        chromeColor (4, quitRow)
+  renderText fc versionTag       dimTextColor  (4, quitRow + 2)
   presentSDL ctx
   -- Each scenario takes two text rows (label + tagline); click on
   -- either row dispatches the scenario's digit.
@@ -299,8 +301,8 @@ renderMultiMenu ctx entries statuses = do
     renderRow fc (n, e, s) = do
       let row   = fromIntegral (4 + n * 2)
           label = show n <> ". " <> entryLabel e <> saveTag s
-      renderText fc label           defaultText (4, row)
-      renderText fc ("   " <> entryTagline e) dimText (4, row + 1)
+      renderText fc label           textColor (4, row)
+      renderText fc ("   " <> entryTagline e) dimTextColor (4, row + 1)
     saveTag s
       | hasSave s = "  (in progress)"
       | otherwise = ""
@@ -333,12 +335,12 @@ confirmDiscard ctx label = do
   clearSDL ctx
   let fc = sdlFont ctx
       rowHit r = gridRowRect fc 0 r 80
-  renderText fc "Start a new hunt?"             defaultText  (3, 2)
+  renderText fc "Start a new hunt?"             textColor  (3, 2)
   renderText fc ("This deletes your " <> label) warningColor (3, 3)
   renderText fc "save permanently."             warningColor (3, 4)
-  renderText fc ""                              dimText      (3, 5)
-  renderText fc "y) Yes, start over"            defaultText  (4, 7)
-  renderText fc "n) Cancel"                     defaultText  (4, 8)
+  renderText fc ""                              dimTextColor      (3, 5)
+  renderText fc "y) Yes, start over"            textColor  (4, 7)
+  renderText fc "n) Cancel"                     textColor  (4, 8)
   presentSDL ctx
   let cm = [rowHit 7 'y', rowHit 8 'n']
   loop cm
@@ -374,16 +376,16 @@ renderCrashScreen reportPath message = do
       clearSDL ctx
       let fc = sdlFont ctx
       renderText fc "throughline crashed."                    warningColor (3, 2)
-      renderText fc ""                                        dimText      (3, 3)
-      renderText fc "A crash report was written to:"          defaultText  (3, 4)
-      renderText fc reportPath                                defaultText  (3, 5)
-      renderText fc ""                                        dimText      (3, 6)
-      renderText fc "You can attach that file when reporting" dimText      (3, 7)
-      renderText fc "this issue."                             dimText      (3, 8)
-      renderText fc ""                                        dimText      (3, 9)
-      renderText fc (excerpt message)                         greyText     (3, 10)
-      renderText fc ""                                        dimText      (3, 11)
-      renderText fc "Press any key or click to close."        greyText     (3, 12)
+      renderText fc ""                                        dimTextColor      (3, 3)
+      renderText fc "A crash report was written to:"          textColor  (3, 4)
+      renderText fc reportPath                                textColor  (3, 5)
+      renderText fc ""                                        dimTextColor      (3, 6)
+      renderText fc "You can attach that file when reporting" dimTextColor      (3, 7)
+      renderText fc "this issue."                             dimTextColor      (3, 8)
+      renderText fc ""                                        dimTextColor      (3, 9)
+      renderText fc (excerpt message)                         chromeColor     (3, 10)
+      renderText fc ""                                        dimTextColor      (3, 11)
+      renderText fc "Press any key or click to close."        chromeColor     (3, 12)
       presentSDL ctx
       _ <- awaitInputSDL (sdlWindow ctx)
       freeSDL ctx

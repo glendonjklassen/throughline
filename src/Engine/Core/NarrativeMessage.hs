@@ -4,17 +4,17 @@ module Engine.Core.NarrativeMessage
   , NarrativeEntry (..)
   ) where
 
-import GameTypes (CharId)
+import GameTypes (CharacterId)
 
 -- | Structured message emitted by the engine when an effect fires.
 -- The engine produces these; the display layer decides how to render them.
 data NarrativeMessage
-  = MsgSay     CharId String [CharId] [String] String
+  = MsgSay     CharacterId String [CharacterId] [String] String
     -- ^ speaker charId, speaker name, listener charIds, listener names, text
-  | MsgThink   CharId String          -- ^ thinker charId, text
+  | MsgThink   CharacterId String          -- ^ thinker charId, text
   | MsgNarrate String                 -- ^ narration prose ("> ...")
   | MsgEffect  String                 -- ^ effect narration from renderNarrative
-  | MsgDialogue [(CharId, String, [CharId], [String], String)]
+  | MsgDialogue [(CharacterId, String, [CharacterId], [String], String)]
     -- ^ dialogue lines: (speaker charId, speaker name, listener charIds, listener names, text)
   deriving (Show, Eq)
 

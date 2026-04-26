@@ -6,7 +6,7 @@ import           Test.Hspec
 
 import           Engine.Author.Validate    (validateScenario, validateSceneGraph)
 import           Engine.Core.Conditions    (checkCondition)
-import           Engine.Core.World         (setCharacterStat)
+import           Engine.Core.World         (characterLocation, setCharacterStat)
 import           Engine.Author.Random      (rollD)
 import           Engine.Author.Scene       (SceneGraph(..), SceneEdge(..))
 import           Engine.CRDT.ORSet         (orFromList, orEmpty, orMember)
@@ -26,7 +26,7 @@ import           Scenarios.DeerHuntTestFixtures
 -- | Build a world where the player and deer are co-located at the
 -- given location, DeerSpotted is set, and the clock tick is controlled
 -- for deterministic random outcomes.
-mkShootableWorld :: CharId -> Location -> Int -> GameWorld
+mkShootableWorld :: CharacterId -> Location -> Int -> GameWorld
 mkShootableWorld you loc tick = GameWorld
   { worldCharacters = Map.fromList
       [ (you,  Character you  "You"      [] orEmpty)
@@ -58,7 +58,7 @@ mkShootableWorld you loc tick = GameWorld
   }
 
 -- | Same as mkShootableWorld but with another hunter co-located.
-mkShootableWorldWith :: CharId -> CharId -> Location -> Int -> GameWorld
+mkShootableWorldWith :: CharacterId -> CharacterId -> Location -> Int -> GameWorld
 mkShootableWorldWith you other loc tick =
   let base = mkShootableWorld you loc tick
   in base
@@ -165,7 +165,7 @@ spec = do
           env <- mkScenarioEnv you scenario
           let walkId = edgeActionId from to
           w1 <- step env walkId w0
-          charLocation you w1 `shouldBe` Just to
+          characterLocation you w1 `shouldBe` Just to
         [] -> expectationFailure "walkPath returned empty path"
 
   describe "validation" $ do
@@ -231,13 +231,13 @@ spec = do
                           , scenarioInitial = w0
                           }
       env <- mkScenarioEnv you scenario
-      charLocation you  w0 `shouldBe` Just fixtureStart
-      charLocation deer w0 `shouldBe` Just endLoc
+      characterLocation you  w0 `shouldBe` Just fixtureStart
+      characterLocation deer w0 `shouldBe` Just endLoc
 
       -- Walk each edge of the path.
       wFinal <- foldr (\edge k w -> step env (uncurry edgeActionId edge) w >>= k) pure path w0
-      charLocation you wFinal `shouldBe` Just endLoc
-      charLocation deer wFinal `shouldBe` Just endLoc
+      characterLocation you wFinal `shouldBe` Just endLoc
+      characterLocation deer wFinal `shouldBe` Just endLoc
 
       -- Look for the deer.
       wLook <- step env (ActionId "look") wFinal
@@ -320,7 +320,7 @@ spec = do
           w0 = scenarioInitial scenario
           (path, _) = walkPath fixtureStart CField 3
       env <- mkScenarioEnv you scenario
-      charLocation you w0 `shouldBe` Just fixtureStart
+      characterLocation you w0 `shouldBe` Just fixtureStart
       wFinal <- foldr (\edge k w -> step env (uncurry edgeActionId edge) w >>= k) pure path w0
       -- Hunt until terminal.
       wEnd <- huntLoop env wFinal 1000
@@ -350,7 +350,7 @@ huntLoop env w n
       step env (ActionId "takeTheShot") w
   -- Night fell: walk any neighbour round-trip to advance time to dawn.
   | checkCondition w (HasWorldTag backAtTruck) =
-      case (charLocation (Named "test-player") w, findAnyNeighbour w) of
+      case (characterLocation (Named "test-player") w, findAnyNeighbour w) of
         (Just cur, Just nbr) -> do
           w'  <- step env (edgeActionId cur nbr) w
           w'' <- step env (edgeActionId nbr cur) w'
@@ -367,7 +367,7 @@ huntLoop env w n
           huntLoop env w'' (n - 1)
   where
     findAnyNeighbour world =
-      case charLocation (Named "test-player") world of
+      case characterLocation (Named "test-player") world of
         Just cur ->
           let pairs = foldr (:) [] (lgEdges (worldLocationGraph world))
               ns = [ b | (a, b) <- pairs, a == cur ]

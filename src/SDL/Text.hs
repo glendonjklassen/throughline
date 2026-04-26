@@ -8,8 +8,10 @@ module SDL.Text
   , fitToWidth
     -- * Word wrapping
   , wrapWords
-    -- * ANSI colour wrappers (for scenario end screens)
-  , grey, green, yellow, red, cyan, bold, dim
+    -- * ANSI colour wrappers (for scenario end screens).  Prefixed
+    -- @ansi@ so scenarios can use plain-English colour identifiers
+    -- locally without shadowing the engine's wrappers.
+  , ansiGrey, ansiGreen, ansiYellow, ansiRed, ansiCyan, ansiBold, ansiDim
   ) where
 
 import Data.Char (isAlpha)
@@ -60,23 +62,23 @@ wrapWords w s = go (words s) [] 0
 -- ANSI colour wrappers
 -- ---------------------------------------------------------------------------
 
-grey :: String -> String
-grey s = "\ESC[90m" <> s <> "\ESC[0m"
+ansiGrey :: String -> String
+ansiGrey s = "\ESC[90m" <> s <> "\ESC[0m"
 
-green :: String -> String
-green s = "\ESC[32m" <> s <> "\ESC[0m"
+ansiGreen :: String -> String
+ansiGreen s = "\ESC[32m" <> s <> "\ESC[0m"
 
-yellow :: String -> String
-yellow s = "\ESC[33m" <> s <> "\ESC[0m"
+ansiYellow :: String -> String
+ansiYellow s = "\ESC[33m" <> s <> "\ESC[0m"
 
-red :: String -> String
-red s = "\ESC[31m" <> s <> "\ESC[0m"
+ansiRed :: String -> String
+ansiRed s = "\ESC[31m" <> s <> "\ESC[0m"
 
-cyan :: String -> String
-cyan s = "\ESC[36m" <> s <> "\ESC[0m"
+ansiCyan :: String -> String
+ansiCyan s = "\ESC[36m" <> s <> "\ESC[0m"
 
-bold :: String -> String
-bold s = "\ESC[1m" <> s <> "\ESC[0m"
+ansiBold :: String -> String
+ansiBold s = "\ESC[1m" <> s <> "\ESC[0m"
 
-dim :: String -> String
-dim s = "\ESC[2m" <> s <> "\ESC[0m"
+ansiDim :: String -> String
+ansiDim s = "\ESC[2m" <> s <> "\ESC[0m"

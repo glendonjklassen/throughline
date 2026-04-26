@@ -29,14 +29,14 @@ garden = Location "garden"
 spec :: Spec
 spec = describe "Engine.Author.Scene" $ do
 
-  describe "buildActions" $ do
+  describe "compileSceneGraph" $ do
 
     it "generates movement actions from edges" $ do
       let sg = SceneGraph
             { sgScenes = [Scene kitchen (const []), Scene hallway (const [])]
             , sgEdges  = [edge kitchen hallway "Go to hallway" "You walk to the hallway."]
             }
-          actions = buildActions player sg
+          actions = compileSceneGraph player sg
           moveActions = filter (\a -> anyActionId a == edgeActionId kitchen hallway) actions
       length moveActions `shouldBe` 1
 
@@ -46,7 +46,7 @@ spec = describe "Engine.Author.Scene" $ do
             , sgEdges  = [edge kitchen hallway "Go to hallway" "You walk."]
             }
           world = emptyWorld { worldLocations = locAt player kitchen }
-          actions = buildActions player sg
+          actions = compileSceneGraph player sg
           moveActions = filter (\a -> anyActionId a == edgeActionId kitchen hallway) actions
       case moveActions of
         [moveAction] -> checkCondition world (anyActionCondition moveAction) `shouldBe` True
@@ -58,7 +58,7 @@ spec = describe "Engine.Author.Scene" $ do
             , sgEdges  = [edge kitchen hallway "Go to hallway" "You walk."]
             }
           world = emptyWorld { worldLocations = locAt player hallway }
-          actions = buildActions player sg
+          actions = compileSceneGraph player sg
           moveActions = filter (\a -> anyActionId a == edgeActionId kitchen hallway) actions
       case moveActions of
         [moveAction] -> checkCondition world (anyActionCondition moveAction) `shouldBe` False
@@ -72,7 +72,7 @@ spec = describe "Engine.Author.Scene" $ do
             }
           worldAtKitchen = emptyWorld { worldLocations = locAt player kitchen }
           worldAtHallway = emptyWorld { worldLocations = locAt player hallway }
-          actions = buildActions player sg
+          actions = compileSceneGraph player sg
       case actions of
         [actionHere] -> do
           checkCondition worldAtKitchen (anyActionCondition actionHere)  `shouldBe` True
@@ -105,11 +105,11 @@ spec = describe "Engine.Author.Scene" $ do
             , sgEdges  = [gatedEdge]
             }
           worldNoKey = emptyWorld { worldLocations = locAt player hallway }
-          actions = buildActions player sg
+          actions = compileSceneGraph player sg
           moveActions = filter (\a -> anyActionId a == edgeActionId hallway garden) actions
       case moveActions of
         [moveAction] -> checkCondition worldNoKey (anyActionCondition moveAction) `shouldBe` False
         _            -> expectationFailure "expected exactly one move action"
 
-locAt :: CharId -> Location -> Map.Map CharId Location
+locAt :: CharacterId -> Location -> Map.Map CharacterId Location
 locAt = Map.singleton

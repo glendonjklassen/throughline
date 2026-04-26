@@ -19,5 +19,5 @@ mayaGraph = SceneGraph
              "Head back to the counter."          "The warm diner air settles around you."
   }
 
-mayaActions :: CharId -> [AnyAction]
-mayaActions mayaId = anyAction continueAction : buildActions mayaId mayaGraph
+mayaActions :: CharacterId -> [AnyAction]
+mayaActions mayaId = anyAction continueAction : compileSceneGraph mayaId mayaGraph

@@ -25,7 +25,7 @@ data Env = Env
   , envTerminal       :: Condition
   , envMessageLog     :: IORef [NarrativeEntry]  -- ^ structured narrative entries, newest first
   , envPlayerId       :: PlayerId
-  , envPlayerCharId   :: CharId                    -- ^ the player's own CharId
+  , envPlayerCharId   :: CharacterId                    -- ^ the player's own CharacterId
   , envLogStore       :: LogStore
   , envAxiomTrace     :: IORef [AxiomTrace]        -- ^ last tick's axiom traces (for learning mode)
   , envFrontier       :: IORef CausalFrontier      -- ^ causal frontier: latest seen entry per sync partner

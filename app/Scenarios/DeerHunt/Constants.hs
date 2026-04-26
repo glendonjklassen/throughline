@@ -5,13 +5,13 @@ import           Data.Maybe           (fromMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 import           Data.List.NonEmpty (NonEmpty(..))
-import           Data.Time.Calendar (Day, DayOfWeek(..), addDays, dayOfWeek,
-                                     fromGregorian, toGregorian)
+import           Data.Time.Calendar (Day, addDays, fromGregorian)
+import           Engine.Author.Calendar (formatShortDate)
 import           Engine.Author.DSL
 import           Engine.Author.Random   (rollChoice)
 import           System.Random          (mkStdGen, randomR)
-import           Engine.CRDT.ORSet
-import           Engine.Core.World      (setCharacterStat)
+import           Engine.Core.Time       (currentHour)
+import           Engine.Core.World      (characterLocation, setCharacterStat)
 import           GameTypes
 import           Scenarios.DeerHunt.Generation (GeneratedMap(..), TerrainClass(..))
 import           Scenarios.DeerHunt.Signature  (SignatureFind(..),
@@ -38,37 +38,15 @@ huntDayDate n = addDays (fromIntegral (max 0 (n - 1))) huntStartDate
 -- | Short journal-style date label for the @n@'th day — e.g.
 -- \"Thu, Nov 7\".  Used for notebook day headers, the day-end
 -- transition overlay, and each discovery's first-seen stamp in the
--- index.  The weekday makes the passage of time feel lived-in; the
--- terse month abbreviation keeps headers from crowding a narrow
--- viewport.
+-- index.
 formatHuntDate :: Int -> String
-formatHuntDate n =
-  let d = huntDayDate n
-      (_y, m, dom) = toGregorian d
-  in dowShort (dayOfWeek d) <> ", " <> monthShort m <> " " <> show dom
-
-dowShort :: DayOfWeek -> String
-dowShort dow = case dow of
-  Monday    -> "Mon"
-  Tuesday   -> "Tue"
-  Wednesday -> "Wed"
-  Thursday  -> "Thu"
-  Friday    -> "Fri"
-  Saturday  -> "Sat"
-  Sunday    -> "Sun"
-
-monthShort :: Int -> String
-monthShort m = case m of
-  1  -> "Jan"; 2  -> "Feb"; 3  -> "Mar"; 4  -> "Apr"
-  5  -> "May"; 6  -> "Jun"; 7  -> "Jul"; 8  -> "Aug"
-  9  -> "Sep"; 10 -> "Oct"; 11 -> "Nov"; 12 -> "Dec"
-  _  -> "?"
+formatHuntDate = formatShortDate . huntDayDate
 
 -- ---------------------------------------------------------------------------
 -- Characters
 -- ---------------------------------------------------------------------------
 
-deer :: CharId
+deer :: CharacterId
 deer = Named "deer"
 
 -- ---------------------------------------------------------------------------
@@ -285,14 +263,14 @@ codeToType _           = Nothing
 -- | All sign types present at a location in the world right now.
 signsAt :: GameWorld -> Location -> [SignType]
 signsAt world loc =
-  nub [ t | tag <- orToList (worldTags world)
+  nub [ t | tag <- worldTagList world
           , Just (t, l) <- [parseSignTag tag]
           , l == loc ]
 
 -- | All sign types the player has *discovered* at a location.
 foundSignsAt :: GameWorld -> Location -> [SignType]
 foundSignsAt world loc =
-  nub [ t | tag <- orToList (worldTags world)
+  nub [ t | tag <- worldTagList world
           , Just (t, l) <- [parseFoundTag tag]
           , l == loc ]
 
@@ -302,7 +280,7 @@ hasDiscoveredAnySign world =
   any (\tag -> case parseFoundTag tag of
          Just _ -> True
          Nothing -> False)
-      (orToList (worldTags world))
+      (worldTagList world)
 
 -- | How strong is the evidence the player *has noticed* at a location?
 -- 0 = none; higher with more distinct sign types and rarer types.
@@ -427,7 +405,7 @@ isWindStrengthTag _ = False
 -- | Read the current wind angle (degrees) from world tags.
 getWindAngle :: GameWorld -> Double
 getWindAngle world =
-  let tags = orToList (worldTags world)
+  let tags = worldTagList world
   in case [ n | ScenarioTag (MkScenarioTag s) <- tags
               , take 10 s == "WindAngle "
               , (n, _) <- reads (drop 10 s) :: [(Int, String)] ] of
@@ -437,7 +415,7 @@ getWindAngle world =
 -- | Read the current wind strength (0.0–1.0) from world tags.
 getWindStrength :: GameWorld -> Double
 getWindStrength world =
-  let tags = orToList (worldTags world)
+  let tags = worldTagList world
   in case [ n | ScenarioTag (MkScenarioTag s) <- tags
               , take 13 s == "WindStrength "
               , (n, _) <- reads (drop 13 s) :: [(Int, String)] ] of
@@ -509,30 +487,6 @@ saltSignPlacement = 8
 -- World queries
 -- ---------------------------------------------------------------------------
 
-charLocation :: CharId -> GameWorld -> Maybe Location
-charLocation cid world = Map.lookup cid (worldLocations world)
-
-coLocated :: CharId -> CharId -> GameWorld -> Bool
-coLocated a b world = case (charLocation a world, charLocation b world) of
-  (Just la, Just lb) -> la == lb
-  _                  -> False
-
-coLocatedHunters :: CharId -> GameWorld -> [CharId]
-coLocatedHunters you world =
-  [ cid | (cid, _) <- Map.toList (worldCharacters world)
-        , cid /= you
-        , cid /= deer
-        , cid /= Truth
-        , coLocated you cid world
-        ]
-
-currentHour :: GameWorld -> Maybe Int
-currentHour world =
-  let tags = orToList (worldTags world)
-  in case [ h | EngineTag (Clock (TimeOfDay h)) <- tags ] of
-       (h:_) -> Just h
-       []    -> Nothing
-
 -- | Preferred terrain class for the deer based on time of day.  The
 -- generator no longer gives us a pinned Zone ADT, so we work in
 -- 'TerrainClass' instead.  Behaviour is the same: feed in fields
@@ -554,7 +508,7 @@ deerPreferredClass world = case currentHour world of
 -- the class itself (a teleport fallback when the deer is stuck).
 deerNextLocation :: HuntWorld -> GameWorld -> Location
 deerNextLocation hw world =
-  let current   = fromMaybe (hwDeerStart hw) (charLocation deer world)
+  let current   = fromMaybe (hwDeerStart hw) (characterLocation deer world)
       preferred = deerPreferredClass world
       neighbors = neighborsOf (worldLocationGraph world) current
       prefNeighbors = filter (\l -> hwClass hw l == preferred) neighbors
@@ -576,7 +530,7 @@ neighborsOf lg loc =
 -- Initial world
 -- ---------------------------------------------------------------------------
 
-initialGraph :: CharId -> RelationshipGraph
+initialGraph :: CharacterId -> RelationshipGraph
 initialGraph you
   = setCharacterStat you  (Capacity Intelligence)  5
   . setCharacterStat you  (Capacity Strength)      6
@@ -591,20 +545,20 @@ initialGraph you
 -- map, start, and deer-start are all already baked into the
 -- 'HuntWorld'; this function composes them with characters, tags, and
 -- engine-level effects.
-initialWorld :: HuntWorld -> CharId -> GameWorld
+initialWorld :: HuntWorld -> CharacterId -> GameWorld
 initialWorld hw you = GameWorld
   { worldCharacters = Map.fromList
-      [ (you,  Character you  "You"      [] orEmpty)
-      , (deer, Character deer "The Deer" [] orEmpty)
+      [ (you,  Character you  "You"      [] emptyTags)
+      , (deer, Character deer "The Deer" [] emptyTags)
       ]
   , worldGraph         = initialGraph you
   , worldLocations     = Map.fromList
       [ (you,  hwStart hw)
       , (deer, hwDeerStart hw)
       ]
-  , worldActiveEffects = map staticLive [timeCycle, weatherCycle]
+  , worldActiveEffects = map staticInitEffect [timeCycle, weatherCycle]
   , worldClock         = LamportClock 0 (PlayerId "init")
-  , worldTags          = orFromList
+  , worldTags          = tagsFromList
       (
         [ weatherTag  (WeatherDesc "Clear and Cold")
         , seasonTag   3

@@ -170,7 +170,7 @@ axiomScenario = Scenario
   }
   where
     respondToOne = Axiom (ScenarioAxiom "respond-to-one") 0 $
-      \_world _available diff -> whenTagAdded tagOne diff [immediate (AddWorldTag axiomTag)]
+      \_world _available diff -> effectsIfTagAdded tagOne diff [immediate (AddWorldTag axiomTag)]
 
 -- | Bare scenario with no actions or axioms. Used by PATH 3's
 -- divergence-point test where the only thing that matters is stat values
@@ -322,7 +322,7 @@ spec = describe "Engine.Sync.ConvergenceSpec" $ do
     it "axioms fire on the post-diff world during replay" $ do
       let pid     = PlayerId "test"
           -- This diff adds tagOne, which is what the axiom in axiomScenario
-          -- watches for via whenTagAdded.
+          -- watches for via effectsIfTagAdded.
           diffOne = emptyDiff { diffWorldTagsAdded = [tagOne] }
           entry1 = mkLogEntry pid (LamportClock 1 pid) (ActionId "act1") diffOne Map.empty
       -- Replay through axiomScenario, which has an axiom that fires when
@@ -667,18 +667,18 @@ spec = describe "Engine.Sync.ConvergenceSpec" $ do
 
     it "includes effects from both sides" $
       -- Two distinct active effects (different liveIds). Both must survive.
-      let fx1 = staticLive (eternal (AddWorldTag (ScenarioTag (MkScenarioTag "fx1"))))
-          fx2 = staticLive (eternal (AddWorldTag (ScenarioTag (MkScenarioTag "fx2"))))
+      let fx1 = staticInitEffect (eternal (AddWorldTag (ScenarioTag (MkScenarioTag "fx1"))))
+          fx2 = staticInitEffect (eternal (AddWorldTag (ScenarioTag (MkScenarioTag "fx2"))))
       in length (mergeActiveEffects [fx1] [fx2]) `shouldBe` 2
 
     it "deduplicates effects with the same liveId" $
       -- Same effect on both sides (same liveId). Merging should not
       -- double it — that would cause the effect to fire twice per tick.
-      let fx = staticLive (eternal (AddWorldTag (ScenarioTag (MkScenarioTag "fx"))))
+      let fx = staticInitEffect (eternal (AddWorldTag (ScenarioTag (MkScenarioTag "fx"))))
       in length (mergeActiveEffects [fx] [fx]) `shouldBe` 1
 
     it "is identity when one side is empty" $
       -- Merging with an empty list changes nothing — the non-empty side
       -- is returned as-is.
-      let fx = staticLive (eternal (AddWorldTag (ScenarioTag (MkScenarioTag "fx"))))
+      let fx = staticInitEffect (eternal (AddWorldTag (ScenarioTag (MkScenarioTag "fx"))))
       in mergeActiveEffects [fx] [] `shouldBe` [fx]

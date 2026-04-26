@@ -56,8 +56,8 @@ spec = do
     -- Player identities for the two scenarios.
     let tbPid   = PlayerId "topbuy-player"   -- TopBuy player's session ID
         custPid = PlayerId "customer-a"      -- Customer player's session ID
-        tbYou   = Named (take 12 "topbuy-player")  -- TopBuy player's CharId
-        custYou = Named (take 12 "customer-a")      -- Customer's CharId
+        tbYou   = Named (take 12 "topbuy-player")  -- TopBuy player's CharacterId
+        custYou = Named (take 12 "customer-a")      -- Customer's CharacterId
 
         -- Snapshot merge path: run both scenarios independently, then CRDT-
         -- merge their final worlds. No replay involved — just a structural

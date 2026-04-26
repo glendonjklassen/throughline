@@ -5,6 +5,7 @@ import           Test.Hspec
 
 import           Engine.CRDT.ORSet  (orFromList)
 import           Engine.Core.World
+import           Engine.Core.World.Internal
 import           GameTypes
 import           TestFixtures  (emptyWorld)
 

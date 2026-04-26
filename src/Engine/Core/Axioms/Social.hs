@@ -11,7 +11,7 @@ import           Data.Maybe          (fromMaybe)
 import qualified Data.Map.Strict     as Map
 
 import           Engine.Author.DSL
-import           Engine.Core.Conditions (getCharStat, hasCharStat)
+import           Engine.Core.Conditions (getCharacterStat, hasCharacterStat)
 import           Engine.Core.Axioms.Shared (charIsSleeping)
 import           Engine.CRDT.ORSet
 import           GameTypes
@@ -27,7 +27,7 @@ trustedCompanionThreshold = 5
 -- Character tag queries (social)
 -- ---------------------------------------------------------------------------
 
-charHasSocialEnergy :: CharId -> SocialEnergyLevel -> GameWorld -> Bool
+charHasSocialEnergy :: CharacterId -> SocialEnergyLevel -> GameWorld -> Bool
 charHasSocialEnergy cid level world =
   case Map.lookup cid (worldCharacters world) of
     Just c  -> orMember (socialEnergyTag level) (charTags c)
@@ -38,7 +38,7 @@ charHasSocialEnergy cid level world =
 -- ---------------------------------------------------------------------------
 
 -- | Find all characters at the same location as the given character.
-coLocated :: CharId -> GameWorld -> [CharId]
+coLocated :: CharacterId -> GameWorld -> [CharacterId]
 coLocated cid world =
   case Map.lookup cid (worldLocations world) of
     Nothing  -> []
@@ -67,7 +67,7 @@ socialEnergyAxiom = Axiom
   }
   where
     socialEnergyFor world cid
-      | not (hasCharStat cid (Capacity SocialStamina) world) = []
+      | not (hasCharacterStat cid (Capacity SocialStamina) world) = []
       | charIsSleeping cid world = []
       | otherwise =
           -- Without a personality system, social energy drains in untrusted
@@ -75,8 +75,8 @@ socialEnergyAxiom = Axiom
           let others = coLocated cid world
               alone  = null others
           in if alone
-               then [modifyCharacterStatEffect cid (Capacity SocialStamina) 1]
-               else [modifyCharacterStatEffect cid (Capacity SocialStamina) (-1)
+               then [modifyStat cid (Capacity SocialStamina) 1]
+               else [modifyStat cid (Capacity SocialStamina) (-1)
                     | not (any (trustedCompanion cid world) others)]
 
     trustedCompanion cid world other =
@@ -102,7 +102,7 @@ socialEnergyStateAxiom = Axiom
     neutralThreshold = 4
 
     socialEnergyStateFor world cid =
-      case getCharStat cid (Capacity SocialStamina) world of
+      case getCharacterStat cid (Capacity SocialStamina) world of
         Nothing -> []
         Just s
           | s <= drainedThreshold -> setSocialEnergy cid Drained world
@@ -144,7 +144,7 @@ perceptionDriftAxiom = Axiom
           in [ifItPersists perceptionDriftTicks coLocCond e | e <- drifts]
 
     driftEffect perceiver target world stat =
-      let truth     = fromMaybe 0 (getCharStat target (Capacity stat) world)
+      let truth     = fromMaybe 0 (getCharacterStat target (Capacity stat) world)
           perceived = perceivedStat perceiver target stat world
       in if perceived == 0 || perceived == truth then [] else
            let delta = signum (truth - perceived)

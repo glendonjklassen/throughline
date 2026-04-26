@@ -61,7 +61,7 @@ pidA, pidB :: PlayerId
 pidA = PlayerId "hunter-alpha"
 pidB = PlayerId "hunter-bravo"
 
-youA, youB :: CharId
+youA, youB :: CharacterId
 youA = Named (take 12 "hunter-alpha")
 youB = Named (take 12 "hunter-bravo")
 
@@ -84,7 +84,7 @@ fieldEnd = snd fieldWalk
 -- Pinned deer (remove deer movement and spook so the deer stays put)
 -- ---------------------------------------------------------------------------
 
-pinnedDeerHunt :: CharId -> Scenario
+pinnedDeerHunt :: CharacterId -> Scenario
 pinnedDeerHunt you =
   let base = deerHunt fixtureSeed you
       pinned = filter (\a -> axiomId a `notElem`
@@ -97,7 +97,7 @@ pinnedDeerHunt you =
   in base { scenarioAxioms = pinned, scenarioInitial = w0pinned }
 
 -- | Find a clock tick where the shot hits.
-findHitTick :: CharId -> Int -> Int
+findHitTick :: CharacterId -> Int -> Int
 findHitTick you offset =
   case [ t | t <- [0..5000]
            , let w = GameWorld
@@ -224,7 +224,7 @@ spec = describe "DeerHunt playthrough (narrated)" $ do
 -- | Thin wrapper: we need logs for the merge but runHeadlessPlaythrough
 -- doesn't return them. Reuse the existing narrated runner for that.
 runHeadlessScript'
-  :: (CharId -> Scenario) -> PlayerId -> [ActionId]
+  :: (CharacterId -> Scenario) -> PlayerId -> [ActionId]
   -> IO (Either AppError (GameWorld, [LogEntry]))
 runHeadlessScript' mkScenario pid script = do
   result <- Engine.Headless.runHeadlessNarrated mkScenario pid script

@@ -48,7 +48,8 @@ import           SDL.SpatialHUD (SpatialHUD(..), HUDCell(..),
                                  TrailMark(..), SpritePlacement(..),
                                  layoutHUD, hudGenRowCount,
                                  terrainSpriteScatter, trailMarks)
-import           Engine.Core.World (playerLocationName, engineTimeStatus, exitBearings, getWeather)
+import           Engine.Core.World          (getWeather)
+import           Engine.Core.World.Internal (playerLocationName, engineTimeStatus, exitBearings)
 import           Engine.Core.NarrativeMessage
 import           SDL.Layout (LayoutConfig(..), ScenarioDisplay(..))
 import           SDL.Debug (learningModeLines)
@@ -163,7 +164,7 @@ drawCompassRose fc cols row exits =
                + length sep * (length compassRoseOrder - 1)
       startCol = max marginLeft (fromIntegral (cols - totalW) `div` 2)
       drawLabel col lbl = do
-        let color = if Set.member lbl present then greyText else separatorColor
+        let color = if Set.member lbl present then chromeColor else separatorColor
         renderText fc lbl color (col, row)
         pure (col + fromIntegral (length lbl))
       draw _   []         = pure ()
@@ -266,7 +267,7 @@ computeLayout rows topH learnH genRowCount hasSpatial =
 drawTopBar
   :: FontContext
   -> Int
-  -> CharId
+  -> CharacterId
   -> GameWorld
   -> (GameWorld -> Maybe String)
   -> IO ()
@@ -277,14 +278,14 @@ drawTopBar fc cols you world statusLine = do
                       (fromIntegral cols - fromIntegral (length timeStr) - marginLeft)
       compassDirs = [ lbl | (_, lbl, _) <- exitBearings you world ]
       locCol      = max marginLeft (fromIntegral (cols - length locName) `div` 2)
-  renderText fc locName defaultText (locCol, 0)
+  renderText fc locName textColor (locCol, 0)
   case timeStr of
     "" -> pure ()
-    _  -> renderText fc timeStr dimText (timeCol, 0)
+    _  -> renderText fc timeStr dimTextColor (timeCol, 0)
   drawCompassRose fc cols 1 compassDirs
   drawHLine fc cols 2
   case statusLine world of
-    Just s  -> renderText fc s dimText (marginLeft, 1)
+    Just s  -> renderText fc s dimTextColor (marginLeft, 1)
     Nothing -> pure ()
 
 -- ---------------------------------------------------------------------------
@@ -299,7 +300,7 @@ renderWorldSDL
   -> (Location -> Int)
   -> (Location -> Maybe Color)
   -> RevealFrame
-  -> CharId
+  -> CharacterId
   -> GameWorld
   -> [AnyAction]
   -> IORef [NarrativeEntry]
@@ -334,17 +335,17 @@ renderWorldSDL ctx _layout statusLine sparkleFn zoneTintFn frame you world actio
 
   -- Learning mode (optional, just below top bar)
   mapM_ (\(idx, line) ->
-    renderText fc (stripAnsi line) dimText (marginLeft, fromIntegral (topBarRows + idx))
+    renderText fc (stripAnsi line) dimTextColor (marginLeft, fromIntegral (topBarRows + idx))
     ) (zip [0 :: Int ..] learnLines)
 
   -- Selection HUD (middle, largest) — prompt, general actions, spatial map
   drawHLine fc cols (fromIntegral loHudStart)
-  renderText fc "What do you do?" defaultText (marginLeft, fromIntegral (loHudStart + 1))
+  renderText fc "What do you do?" textColor (marginLeft, fromIntegral (loHudStart + 1))
   mapM_ (\(rowIdx, rowActions) -> do
     let y = fromIntegral (loHudStart + 2 + rowIdx * loGenRowStride)
     mapM_ (\(colIdx, label) -> do
       let x = marginLeft + 1 + fromIntegral colIdx * fromIntegral genColW
-      renderText fc label greyText (x, y)
+      renderText fc label chromeColor (x, y)
       ) (zip [0 :: Int ..] rowActions)
     ) (zip [0 :: Int ..] genRows)
   let spatialLeft = fromIntegral ((cols - shBoxWidth hud) `div` 2)
@@ -374,7 +375,7 @@ renderWorldFrame
   -> (Location -> Int)
   -> (Location -> Maybe Color)
   -> RevealFrame
-  -> CharId
+  -> CharacterId
   -> GameWorld
   -> [AnyAction]
   -> IORef [NarrativeEntry]
@@ -407,16 +408,16 @@ renderWorldFrame ctx _layout statusLine sparkleFn zoneTintFn frame you world act
   drawTopBar fc cols you world statusLine
 
   mapM_ (\(idx, line) ->
-    renderText fc (stripAnsi line) dimText (marginLeft, fromIntegral (topBarRows + idx))
+    renderText fc (stripAnsi line) dimTextColor (marginLeft, fromIntegral (topBarRows + idx))
     ) (zip [0 :: Int ..] learnLines)
 
   drawHLine fc cols (fromIntegral loHudStart)
-  renderText fc "What do you do?" defaultText (marginLeft, fromIntegral (loHudStart + 1))
+  renderText fc "What do you do?" textColor (marginLeft, fromIntegral (loHudStart + 1))
   mapM_ (\(rowIdx, rowActions) -> do
     let y = fromIntegral (loHudStart + 2 + rowIdx * loGenRowStride)
     mapM_ (\(colIdx, label) -> do
       let x = marginLeft + 1 + fromIntegral colIdx * fromIntegral genColW
-      renderText fc label greyText (x, y)
+      renderText fc label chromeColor (x, y)
       ) (zip [0 :: Int ..] rowActions)
     ) (zip [0 :: Int ..] genRows)
   let spatialLeft = fromIntegral ((cols - shBoxWidth hud) `div` 2)
@@ -508,7 +509,7 @@ drawSpatialHUD
   -> (Location -> Int)
   -> (Location -> Maybe Color)
   -> RevealFrame
-  -> CharId
+  -> CharacterId
   -> GameWorld
   -> SpatialHUD
   -> CInt        -- ^ spatialLeft (col)
@@ -550,7 +551,7 @@ drawSpatialHUD fc totalCols sparkleFn zoneTintFn frame you world hud spatialLeft
   let (pcol, prow) = shPlayerMarker hud
       markerText = "You"
       markerCol  = max 0 (pcol - length markerText `div` 2)
-  renderText fc markerText dimText
+  renderText fc markerText dimTextColor
     (spatialLeft + fromIntegral markerCol, spatialTopRow + fromIntegral prow)
   -- Render every cell whose alpha is >0.  The alpha multiplies into
   -- both label and halo so a fading-in cell carries its full visual
@@ -631,7 +632,7 @@ drawSpatialHUD fc totalCols sparkleFn zoneTintFn frame you world hud spatialLeft
         (dxPx, dyPx) = labelPixelOffset fc (hudLabel cell)
         px = baseCol * cellWidth fc  + dxPx
         py = baseRow * cellHeight fc + dyPx
-        fg = applyAlpha alpha (fromMaybe greyText (hudTint cell))
+        fg = applyAlpha alpha (fromMaybe chromeColor (hudTint cell))
     renderTextAtPixel fc (hudLabel cell) fg (px, py)
     case hudHalo cell of
       Just halo -> drawCellUnderline fc (applyAlpha alpha halo)
@@ -668,7 +669,7 @@ drawSpatialHUD fc totalCols sparkleFn zoneTintFn frame you world hud spatialLeft
   -- and anything more than a few moves old dissolves into the scatter.
   mapM_ (\tm -> do
     let alpha = max 0.12 (1.0 - fromIntegral (tmAge tm) * 0.18 :: Double)
-        Color r g b a = dimText
+        Color r g b a = dimTextColor
         effA = round (fromIntegral a * alpha :: Double)
     renderText fc (tmGlyph tm) (Color r g b effA)
       ( spatialLeft   + fromIntegral (tmCol tm)
@@ -744,7 +745,7 @@ labelBBoxPx fc spatialLeft spatialTopRow cell =
 
 -- | Look up how many times a character has arrived at a given location.
 -- Zero for never-visited (or for characters absent from the visits map).
-lookupVisits :: CharId -> Location -> GameWorld -> Int
+lookupVisits :: CharacterId -> Location -> GameWorld -> Int
 lookupVisits cid loc world =
   case Map.lookup cid (worldLocationVisits world) of
     Nothing -> 0
@@ -786,8 +787,8 @@ fmtEntry contentW labelW entry =
 msgColor :: NarrativeMessage -> Int -> Color
 msgColor MsgSay {}       _ = dialogueColor
 msgColor (MsgThink _ _)  _ = thoughtColor
-msgColor (MsgNarrate _)  t = tensionColor t
-msgColor (MsgEffect _)   t = tensionColor t
+msgColor (MsgNarrate _)  t = narratorColor t
+msgColor (MsgEffect _)   t = narratorColor t
 msgColor (MsgDialogue _) _ = dialogueColor
 
 -- | Extract raw text lines from a message (before word-wrapping).
@@ -895,7 +896,7 @@ renderJournalOverlay ctx display world tab scroll = do
     TabPast    -> drawPast    fc display cols      firstRow lastRow scroll world
     TabCatalog -> drawCatalog fc cols              firstRow lastRow scroll display world
   renderText fc "1 today  2 earlier  3 index   s share   \x2191/\x2193 scroll   any other: close"
-    greyText (marginLeft, fromIntegral lastRow)
+    chromeColor (marginLeft, fromIntegral lastRow)
   presentSDL ctx
 
 drawJournalHeader :: FontContext -> Int -> Int -> JournalTab -> IO ()
@@ -904,7 +905,7 @@ drawJournalHeader fc cols row tab = do
         TabToday   -> "— field notes · today —"
         TabPast    -> "— field notes · earlier —"
         TabCatalog -> "— field notes · index —"
-  renderText fc title defaultText (marginLeft, fromIntegral row)
+  renderText fc title textColor (marginLeft, fromIntegral row)
   drawHLine fc cols (fromIntegral (row + 1))
 
 -- ---------------------------------------------------------------------------
@@ -959,14 +960,14 @@ drawJournalLines fc firstRow lastRow anchorBottom scroll lines_ =
 -- entry so the page has texture rather than a flat list.
 dayBlockLines :: Int -> String -> Maybe String -> [String] -> [JournalLine]
 dayBlockLines textW dayLabel msub entries =
-  let header = Just (defaultText, notebookHeaderCol, dayLabel)
+  let header = Just (textColor, notebookHeaderCol, dayLabel)
       subLine = case msub of
-        Just s  -> [Just (dimText, notebookHeaderCol, s)]
+        Just s  -> [Just (dimTextColor, notebookHeaderCol, s)]
         Nothing -> []
       entryRows entry = case wrapWords textW entry of
         []     -> []
-        (l:ls) -> Just (defaultText, notebookEntryCol, "\x00b7  " <> l)
-                : map (\r -> Just (defaultText, notebookContCol, r)) ls
+        (l:ls) -> Just (textColor, notebookEntryCol, "\x00b7  " <> l)
+                : map (\r -> Just (textColor, notebookContCol, r)) ls
       entriesSection = intercalate [Nothing] (map entryRows entries)
   in [header] <> subLine <> [Nothing] <> entriesSection <> [Nothing]
 
@@ -998,7 +999,7 @@ drawToday fc display cols _rows firstRow lastRow scroll world =
       lines_  = dayBlockLines textW todayLabel weather todayEntries
   in case todayEntries of
        [] -> renderText fc "Nothing written yet today."
-               greyText (notebookHeaderCol, fromIntegral firstRow)
+               chromeColor (notebookHeaderCol, fromIntegral firstRow)
        _  -> drawJournalLines fc firstRow lastRow True scroll lines_
 
 -- | Earlier days: every completed day's notebook block stacked in
@@ -1020,7 +1021,7 @@ drawPast fc display cols firstRow lastRow scroll world =
       lines_ = concat blocks
   in case past of
        [] -> renderText fc "No earlier days yet."
-               greyText (notebookHeaderCol, fromIntegral firstRow)
+               chromeColor (notebookHeaderCol, fromIntegral firstRow)
        _  -> drawJournalLines fc firstRow lastRow True scroll lines_
 
 -- | Index: things noticed on this hunt, as diary paragraphs rather
@@ -1035,13 +1036,13 @@ drawCatalog fc cols firstRow lastRow scroll display world =
       lines_  = intercalate [Nothing] (map (entryLines textW) entries)
   in case entries of
        [] -> renderText fc "Nothing kept in this ledger yet."
-               greyText (notebookHeaderCol, fromIntegral firstRow)
+               chromeColor (notebookHeaderCol, fromIntegral firstRow)
        _  -> drawJournalLines fc firstRow lastRow False scroll lines_
   where
     entryLines textW paragraph =
       case wrapWords textW paragraph of
         []     -> []
         (l:ls) ->
-          Just (defaultText, notebookEntryCol, "\x00b7  " <> l)
-          : map (\r -> Just (defaultText, notebookContCol, r)) ls
+          Just (textColor, notebookEntryCol, "\x00b7  " <> l)
+          : map (\r -> Just (textColor, notebookContCol, r)) ls
 

@@ -1,16 +1,30 @@
 {-# LANGUAGE DataKinds #-}
--- | Scene graph construction: locations, edges, and action gating by scene.
+-- | The spatial layer.  A 'SceneGraph' is a list of 'Scene's (a
+-- location plus the actions available there) plus a list of
+-- 'SceneEdge's (traversable connections with their movement
+-- narration).  'compileSceneGraph' compiles the graph into the flat
+-- @[AnyAction]@ list a scenario hands to the engine.
+--
+-- Build edges with 'edge' \/ 'biEdge' for ad-hoc connections, or
+-- 'biEdgeWith' when narration is derived per-direction (e.g. from a
+-- terrain classifier).  Lift a 'LocationGraph' into a full scene
+-- graph in one call with 'sceneGraphFromLocations'.
 module Engine.Author.Scene
   ( Scene(..)
   , SceneEdge(..)
   , SceneGraph(..)
-  , buildActions
+  , compileSceneGraph
   , edge
   , biEdge
+  , biEdgeWith
   , edgeActionId
+  , edgeSalt
   , narrationEffects
+  , poolNarration
+  , sceneGraphFromLocations
   ) where
 
+import qualified Data.Set as Set
 import Engine.Author.DSL (atScene, repeatableAction, immediate, immediateWhen, anyAction)
 import GameTypes
 
@@ -19,11 +33,11 @@ import GameTypes
 -- ---------------------------------------------------------------------------
 
 -- | A scene at a specific location with its own actions.
--- Actions provided here should NOT be pre-gated with atScene — buildActions
+-- Actions provided here should NOT be pre-gated with atScene — compileSceneGraph
 -- handles location-gating from the sceneLocation.
 data Scene = Scene
   { sceneLocation :: Location
-  , sceneActions  :: CharId -> [AnyAction]
+  , sceneActions  :: CharacterId -> [AnyAction]
   }
 
 -- | A traversable path between two locations.
@@ -79,6 +93,45 @@ biEdge a b labelAB narrAB labelBA narrBA =
   , edge b a labelBA narrBA
   ]
 
+-- | Bidirectional pair of edges with a derived 'Narration' per direction.
+-- Labels are the destination's location name; for richer labels build
+-- 'SceneEdge' values directly.
+biEdgeWith :: (Location -> Location -> Narration)
+           -> Location -> Location
+           -> [SceneEdge]
+biEdgeWith mkNarr a b =
+  [ SceneEdge (edgeActionId a b) a b (locationName b) (mkNarr a b) unconditional
+  , SceneEdge (edgeActionId b a) b a (locationName a) (mkNarr b a) unconditional
+  ]
+
+-- | Deterministic salt derived from a location pair.  Useful for
+-- per-edge 'NarrationPool' seeds so adjacent edges produce independent
+-- PRNG sequences.
+edgeSalt :: Location -> Location -> Int
+edgeSalt (Location a) (Location b) = sum (map fromEnum a) + sum (map fromEnum b) * 31
+
+-- | Build a 'NarrationPool' for an edge from a per-edge variant
+-- function, salted by the location pair.
+poolNarration :: (Location -> Location -> [String])
+              -> Location -> Location
+              -> Narration
+poolNarration variants from to = NarrationPool (edgeSalt from to) (variants from to)
+
+-- | Lift a 'LocationGraph' into a 'SceneGraph' by attaching per-scene
+-- actions and an edge-builder for each location pair.  Pass
+-- @\\_ _ -> []@ for @mkScene@ when actions are universal rather than
+-- per-scene, and a builder like 'biEdgeWith' for @mkEdges@.
+sceneGraphFromLocations
+  :: [Location]
+  -> LocationGraph
+  -> (Location -> CharacterId -> [AnyAction])
+  -> (Location -> Location -> [SceneEdge])
+  -> SceneGraph
+sceneGraphFromLocations locs lg mkScene mkEdges = SceneGraph
+  { sgScenes = [ Scene loc (mkScene loc) | loc <- locs ]
+  , sgEdges  = concatMap (uncurry mkEdges) (Set.toList (lgEdges lg))
+  }
+
 -- ---------------------------------------------------------------------------
 -- Assembly
 -- ---------------------------------------------------------------------------
@@ -86,8 +139,8 @@ biEdge a b labelAB narrAB labelBA narrBA =
 -- | Assemble a scene graph into the flat action list a Scenario needs.
 -- Location-gates each scene's actions and generates movement actions
 -- from edges.
-buildActions :: CharId -> SceneGraph -> [AnyAction]
-buildActions cid sg =
+compileSceneGraph :: CharacterId -> SceneGraph -> [AnyAction]
+compileSceneGraph cid sg =
   concatMap sceneToActions (sgScenes sg)
   ++ map edgeToAction (sgEdges sg)
   where

@@ -58,8 +58,8 @@ typewriteLines fc rend msgs allMsgs rightW startCol maxRows startRow = do
     messageColor :: NarrativeMessage -> Int -> Color
     messageColor MsgSay {}       _ = dialogueColor
     messageColor (MsgThink _ _)  _ = thoughtColor
-    messageColor (MsgNarrate _)  t = tensionColor t
-    messageColor (MsgEffect _)   t = tensionColor t
+    messageColor (MsgNarrate _)  t = narratorColor t
+    messageColor (MsgEffect _)   t = narratorColor t
     messageColor (MsgDialogue _) _ = dialogueColor
 
 -- | Format a single entry into plain-text lines (no ANSI codes).
