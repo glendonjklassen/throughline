@@ -12,8 +12,8 @@
 -- them from disk at runtime.
 --
 -- Supports both keyboard and pointer input:
---   keyboard — j/k to move between rows, h/l to adjust, enter to
---              save, escape to cancel.
+--   keyboard — arrow keys (primary) or h/j/k/l (fallback) to navigate
+--              and adjust, enter to save, escape to cancel.
 --   pointer  — click a row to focus it; click the \'<\' or \'>\'
 --              beside the value to step it; click the footer rows
 --              to save or cancel.  Touches work the same way.
@@ -26,7 +26,9 @@ import           Data.IORef         (newIORef, readIORef, writeIORef)
 
 import           SDL.ClickMap       (ClickMap, gridRect, gridRowRect, hitTest)
 import           SDL.FontContext    (renderText)
-import           SDL.InputHandler   (InputEvent(..), awaitInputSDL)
+import           SDL.InputHandler   (InputEvent(..), awaitInputSDL,
+                                     arrowLeftKeyChar, arrowRightKeyChar,
+                                     scrollDownKeyChar, scrollUpKeyChar)
 import           SDL.Palette        (textColor, dimTextColor, chromeColor, warningColor)
 import           SDL.Renderer       (SDLContext(..), clearSDL, presentSDL)
 import           SDL.Settings       (DisplayMode(..), Settings(..), ViewportPreset,
@@ -77,14 +79,18 @@ settingsMenu ctx = do
       | otherwise         = MoveBy 0   -- no-op
 
     keyToCmd c sel
-      | c == '\x1B'          = Cancel
-      | c == 'q'             = Cancel
-      | c == '\n' || c == '\r' = Commit
-      | c `elem` "jJ"        = MoveBy 1
-      | c `elem` "kK"        = MoveBy (-1)
-      | c `elem` "hH"        = AdjustRow sel (-1)
-      | c `elem` "lL"        = AdjustRow sel 1
-      | otherwise            = MoveBy 0
+      | c == '\x1B'             = Cancel
+      | c == 'q'                = Cancel
+      | c == '\n' || c == '\r'  = Commit
+      | c == scrollDownKeyChar  = MoveBy 1
+      | c == scrollUpKeyChar    = MoveBy (-1)
+      | c == arrowLeftKeyChar   = AdjustRow sel (-1)
+      | c == arrowRightKeyChar  = AdjustRow sel 1
+      | c `elem` "jJ"           = MoveBy 1
+      | c `elem` "kK"           = MoveBy (-1)
+      | c `elem` "hH"           = AdjustRow sel (-1)
+      | c `elem` "lL"           = AdjustRow sel 1
+      | otherwise               = MoveBy 0
 
     handleCmd baseline stateRef cmd = case cmd of
       Cancel -> pure baseline
@@ -223,10 +229,10 @@ renderMenu ctx s sel = do
   mapM_ (renderRow fc) (zip [0 :: Int ..] rowLabels)
   let footerRowStart = 5 + length rowLabels * 2 + 1 :: Int
       footerStart    = fromIntegral footerRowStart
-  renderText fc "j / k       select row"             chromeColor (3, footerStart)
-  renderText fc "h / l       adjust value (< / >)"   chromeColor (3, footerStart + 1)
-  renderText fc "enter       save and close"         chromeColor (3, footerStart + 2)
-  renderText fc "esc         cancel"                 chromeColor (3, footerStart + 3)
+  renderText fc "↑ / ↓       select row     (or k / j)"   chromeColor (3, footerStart)
+  renderText fc "← / →       adjust value   (or h / l)"   chromeColor (3, footerStart + 1)
+  renderText fc "enter       save and close"              chromeColor (3, footerStart + 2)
+  renderText fc "esc         cancel"                      chromeColor (3, footerStart + 3)
   renderText fc ""                                   dimTextColor  (3, footerStart + 4)
   renderText fc "display / contrast take effect on next launch"
                                                      warningColor (3, footerStart + 5)

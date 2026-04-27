@@ -21,6 +21,8 @@ module SDL.InputHandler
   , debugKeyChar
   , scrollUpKeyChar
   , scrollDownKeyChar
+  , arrowLeftKeyChar
+  , arrowRightKeyChar
   , pageUpKeyChar
   , pageDownKeyChar
   ) where
@@ -132,6 +134,8 @@ keycodeToChar kc = lookup kc letterCodes <|> lookup kc digitCodes
       , (KC.KeycodeKPEnter, '\n')
       , (KC.KeycodeUp,       scrollUpKeyChar)
       , (KC.KeycodeDown,     scrollDownKeyChar)
+      , (KC.KeycodeLeft,     arrowLeftKeyChar)
+      , (KC.KeycodeRight,    arrowRightKeyChar)
       , (KC.KeycodePageUp,   pageUpKeyChar)
       , (KC.KeycodePageDown, pageDownKeyChar)
       ]
@@ -274,11 +278,14 @@ debugKeyChar = '\x7F'  -- ASCII DEL, not emitted by any text key
 -- | Navigation key placeholders.  Outside printable ASCII so they
 -- never collide with option-key selections.  Consumers match the
 -- raw 'Char' returned by 'awaitInputSDL' against these constants.
-scrollUpKeyChar, scrollDownKeyChar, pageUpKeyChar, pageDownKeyChar :: Char
+scrollUpKeyChar, scrollDownKeyChar, arrowLeftKeyChar, arrowRightKeyChar,
+  pageUpKeyChar, pageDownKeyChar :: Char
 scrollUpKeyChar   = '\x01'  -- ASCII SOH — unused by any text key
 scrollDownKeyChar = '\x02'  -- ASCII STX
 pageUpKeyChar     = '\x03'  -- ASCII ETX
 pageDownKeyChar   = '\x04'  -- ASCII EOT
+arrowLeftKeyChar  = '\x05'  -- ASCII ENQ
+arrowRightKeyChar = '\x06'  -- ASCII ACK
 
 -- | Option-key character for the @n@'th (1-based) entry of the pool.
 -- Falls back to the decimal representation of @n@ only if @n@
