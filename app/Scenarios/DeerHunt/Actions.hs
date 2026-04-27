@@ -50,6 +50,8 @@ allActions hw you =
   , anyAction (takeTheShot you)
   , anyAction continueAction
   , anyAction (callItForTheDay hw you)
+  , anyAction (confirmCallItForTheDay hw you)
+  , anyAction (cancelCallItForTheDay hw you)
   ] ++ compileSceneGraph you (huntGraph hw)
 
 -- ---------------------------------------------------------------------------
@@ -64,17 +66,42 @@ huntNotOver = All [ Not (HasWorldTag deerKilled)
                   , Not (HasWorldTag dayOver)
                   , Not (HasWorldTag seasonOver) ]
 
--- | End the day on your own terms — wind shifted, you're cold, the
--- spot's cooked, whatever.  Triggers the same day-rollover montage as
--- a kill or a miss.  Gated on "not at the truck already" so this is a
--- choice you make out in the bush, not a button at the start line.
+-- | First step of ending the day — arms the confirmation.  Calling
+-- it quits is a choice that should sting at least a little, so we
+-- gate it behind a confirm/cancel pair instead of letting one tap
+-- end the hunt.  The 'pendingCallIt' tag is day-scoped, so a
+-- forgotten armed state clears on its own at rollover.
 callItForTheDay :: HuntWorld -> CharacterId -> Action 'Repeatable
 callItForTheDay _hw _you = repeatableAction (ActionId "hunt:callItForTheDay")
   "Call it for the day. Head back to the truck."
-  huntNotOver
+  (All [huntNotOver, Not (HasWorldTag pendingCallIt)])
+  [ immediate (Narrate "You stop and look at the light. Wind on your face. Are you done out here?")
+  , immediate (AddWorldTag pendingCallIt)
+  ]
+
+-- | Second step — confirm the day-end.  Only visible while armed.
+-- Carries the same closing prose and journal line the single-tap
+-- action used to emit, plus the @dayOver@ tag that triggers
+-- rollover.  Clears the armed tag on the way out so a future day
+-- starts clean.
+confirmCallItForTheDay :: HuntWorld -> CharacterId -> Action 'Repeatable
+confirmCallItForTheDay _hw _you = repeatableAction (ActionId "hunt:callItForTheDay:confirm")
+  "Yes — head back to the truck."
+  (All [huntNotOver, HasWorldTag pendingCallIt])
   [ immediate (Narrate "You stand, shoulder the rifle, and start the walk back. The light has the afternoon slant to it. Good enough for today.")
   , immediate (JournalEntry "Called it. Packed it in. Tomorrow.")
+  , immediate (RemoveWorldTag pendingCallIt)
   , immediate (AddWorldTag dayOver)
+  ]
+
+-- | Third step — back out of the confirmation and keep hunting.
+-- Only visible while armed.
+cancelCallItForTheDay :: HuntWorld -> CharacterId -> Action 'Repeatable
+cancelCallItForTheDay _hw _you = repeatableAction (ActionId "hunt:callItForTheDay:cancel")
+  "No — keep hunting."
+  (All [huntNotOver, HasWorldTag pendingCallIt])
+  [ immediate (Narrate "You shake it off. Not yet. The light's still good.")
+  , immediate (RemoveWorldTag pendingCallIt)
   ]
 
 -- | Sitting is a toggle: sit down / stand up. While sitting, the stillness

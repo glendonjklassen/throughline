@@ -72,6 +72,7 @@ data DeerHuntDayTag
   | SignRub              -- ^ Antler rub found (repeated visits)
   | SignScrape           -- ^ Ground scrape (very recent activity)
   | DayOver              -- ^ Current day is ending; triggers rollover axiom
+  | PendingCallIt        -- ^ "Call it for the day" armed; awaiting confirm/cancel
   deriving (Show, Eq, Ord, Enum, Bounded)
 
 -- | Season-scoped tags — persist across day rollovers.  Things the
@@ -162,6 +163,9 @@ foundSignScrape = scenarioTag FoundSignScrape
 
 dayOver :: Tag
 dayOver = scenarioTag DayOver
+
+pendingCallIt :: Tag
+pendingCallIt = scenarioTag PendingCallIt
 
 seasonOver :: Tag
 seasonOver = scenarioTag SeasonOver
