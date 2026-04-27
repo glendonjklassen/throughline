@@ -151,7 +151,7 @@ lookForDeer _hw you = repeatableAction (ActionId "look")
   , immediateWhen (All [sameRegion, inFieldRegion, Not sameLoc, Not (Chance lookFieldSalt 0.34), Chance lookFieldSalt 0.67])
       (Narrate "Stubble shifts out past the middle of the field. A shape, then nothing. You wait. It doesn't come back.")
   , immediateWhen (All [sameRegion, inFieldRegion, Not sameLoc, Not (Chance lookFieldSalt 0.67)])
-      (Narrate "Brown against the ansiGrey, a long way out. You hold still. Whatever it was, it doesn't show itself again.")
+      (Narrate "Brown against the grey, a long way out. You hold still. Whatever it was, it doesn't show itself again.")
 
     -- Tier 3: Same region, sign present — scrape (very recent)
   , immediateWhen (All [sameRegion, Not sameLoc, hasScrape, lowExp])

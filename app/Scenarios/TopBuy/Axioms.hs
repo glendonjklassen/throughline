@@ -167,7 +167,7 @@ effortAxiom you = Axiom
 weatherDesc :: WeatherDesc -> String
 weatherDesc (WeatherDesc "Clear")         = "You glance at the storefront. Clear skies, hard light."
 weatherDesc (WeatherDesc "Partly Cloudy") = "The light through the entrance has gone soft. Clouds moving in."
-weatherDesc (WeatherDesc "Overcast")      = "Outside has gone ansiGrey. The parking lot looks flat and muted."
+weatherDesc (WeatherDesc "Overcast")      = "Outside has gone grey. The parking lot looks flat and muted."
 weatherDesc (WeatherDesc "Light Rain")    = "Rain taps the glass doors at the entrance. A few customers shake off their coats."
 weatherDesc (WeatherDesc "Windy")         = "Someone comes in and the automatic doors don't close fast enough. Cold air hits the floor."
 weatherDesc (WeatherDesc "Stormy")        = "You can hear the wind from here. Rain against the windows. The automatic doors keep triggering."

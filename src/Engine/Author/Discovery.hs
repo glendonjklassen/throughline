@@ -9,6 +9,7 @@ module Engine.Author.Discovery
   , discoveryTag
   , firstFind
   , arrivalDiscoveryAxiom
+  , parseFirstFindLine
   ) where
 
 import           Engine.Author.DSL
@@ -45,6 +46,25 @@ firstFind opener d@(Discovery kind name) =
      , immediateWhen guard (JournalEntry ("First " <> show kind <> ": " <> name <> "."))
      , immediateWhen guard (AddWorldTag tag)
      ]
+
+-- | Inverse of the 'firstFind' journal-entry format.  Takes a journal
+-- line (e.g. @"First Find: skull."@) and returns @(kindWord, name)@
+-- if it matches.  Generic over scenario discovery kinds — kind-word
+-- parsing is left to the caller via 'Read'.  Used by frontends that
+-- want to react to first-finds without coupling to a scenario's
+-- specific 'DiscoveryKind' enum.
+parseFirstFindLine :: String -> Maybe (String, String)
+parseFirstFindLine line
+  | take 6 line == "First " =
+      let (kindWord, afterKind) = break (== ':') (drop 6 line)
+      in case afterKind of
+           (':':' ':rest) ->
+             let name = reverse (dropWhile (== '.') (reverse rest))
+             in if null kindWord || null name
+                  then Nothing
+                  else Just (kindWord, name)
+           _ -> Nothing
+  | otherwise = Nothing
 
 -- | When the player arrives at a new location, roll once to notice
 -- something.  If the roll lands, the first still-undiscovered entry

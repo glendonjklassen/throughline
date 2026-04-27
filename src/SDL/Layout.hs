@@ -31,7 +31,7 @@ defaultLayout = LayoutConfig
 -- | Display configuration for a scenario, separate from the engine's Scenario type.
 data ScenarioDisplay = ScenarioDisplay
   { sdEndScreen       :: GameWorld -> [String]
-  , sdStatusLine      :: GameWorld -> Maybe String
+  , sdStatusLine      :: GameWorld -> CharacterId -> Maybe String
   , sdLayout          :: LayoutConfig
   , sdLocationSparkle :: GameWorld -> CharacterId -> Location -> Int
     -- ^ "shiny-sense" level for a location, shown on the spatial HUD.
@@ -66,7 +66,7 @@ data ScenarioDisplay = ScenarioDisplay
 defaultDisplay :: ScenarioDisplay
 defaultDisplay = ScenarioDisplay
   { sdEndScreen       = const []
-  , sdStatusLine      = const Nothing
+  , sdStatusLine      = \_ _ -> Nothing
   , sdLayout          = defaultLayout
   , sdLocationSparkle = \_ _ _ -> 0
   , sdZoneTintFor     = \_ _   -> Nothing

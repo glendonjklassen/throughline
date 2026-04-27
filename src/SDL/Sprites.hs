@@ -9,7 +9,9 @@ module SDL.Sprites
   , Pixel(..)
   , spritesForClass
   , spriteByName
+  , spriteBounds
   , drawSprite
+  , drawSpriteScaled
   , drawSparkleParticles
   ) where
 
@@ -55,6 +57,36 @@ drawSprite fc (ox, oy) alpha sprite = do
     SDL.rendererDrawColor ren SDL.$= SDL.V4 r g b effA
     SDL.fillRect ren (Just rect)
     ) (spritePixels sprite)
+
+-- | Like 'drawSprite', but with a caller-supplied pixel scale.  Used
+-- by the find-reveal modal to render a sprite chunky enough to fill
+-- a featured area of the screen.  Same alpha modulation rules as
+-- 'drawSprite'.
+drawSpriteScaled :: FontContext -> (CInt, CInt) -> CInt -> Double -> Sprite -> IO ()
+drawSpriteScaled fc (ox, oy) scale alpha sprite = do
+  let ren = fcRenderer fc
+  SDL.rendererDrawBlendMode ren SDL.$= SDL.BlendAlphaBlend
+  mapM_ (\(Pixel px py (Color r g b pa)) -> do
+    let effA = min pa (round (fromIntegral pa * (alpha :: Double)))
+        x    = ox + fromIntegral px * scale
+        y    = oy + fromIntegral py * scale
+        rect = SDL.Rectangle (SDL.P (SDL.V2 x y))
+                             (SDL.V2 scale scale)
+    SDL.rendererDrawColor ren SDL.$= SDL.V4 r g b effA
+    SDL.fillRect ren (Just rect)
+    ) (spritePixels sprite)
+
+-- | Width and height of a sprite, in sprite-pixel units (the smallest
+-- bounding box that contains every 'Pixel').  Used to center and
+-- frame sprites at render time.  Empty sprites report (0, 0).
+spriteBounds :: Sprite -> (Int, Int)
+spriteBounds (Sprite _ pixels) =
+  case pixels of
+    [] -> (0, 0)
+    _  ->
+      let xs = [ x | Pixel x _ _ <- pixels ]
+          ys = [ y | Pixel _ y _ <- pixels ]
+      in (maximum xs + 1, maximum ys + 1)
 
 -- | Draw an animated particle-style sparkle cluster at a pixel
 -- origin.  Replaces the old single-glyph sparkle (which rendered as
@@ -558,7 +590,7 @@ spriteByName n
       "jackrabbit"      -> Just hareSprite
       "coyote"          -> Just coyoteSprite
       "great horned owl"-> Just owlSprite
-      "ansiRed-tailed hawk" -> Just owlSprite
+      "red-tailed hawk" -> Just owlSprite
       "whitetail buck"  -> Just buckBedded
       "rusty 50s car"   -> Just rustyCar
       "shed antler"     -> Just shedAntler

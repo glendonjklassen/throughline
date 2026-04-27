@@ -100,10 +100,10 @@ treesOf CBush  = [ Discovery Tree "trembling aspen"
                  ]
 treesOf CRidge = [ Discovery Tree "bur oak"
                  , Discovery Tree "hazel"
-                 , Discovery Tree "ansiGreen ash"
+                 , Discovery Tree "green ash"
                  ]
 treesOf CCreek = [ Discovery Tree "willow"
-                 , Discovery Tree "ansiRed osier dogwood"
+                 , Discovery Tree "red osier dogwood"
                  ]
 treesOf _      = []
 
@@ -113,7 +113,7 @@ animalsOf CBush  = [ Discovery Animal "raven"
                    , Discovery Animal "snowshoe hare"
                    ]
 animalsOf CRidge = [ Discovery Animal "raven"
-                   , Discovery Animal "ansiRed-tailed hawk"
+                   , Discovery Animal "red-tailed hawk"
                    ]
 animalsOf CField = [ Discovery Animal "raven"
                    , Discovery Animal "jackrabbit"
@@ -289,7 +289,7 @@ factoidFor (Discovery Animal name) = case name of
   "raven"            -> "Clever bird. Pairs stay on a territory for years."
   "ruffed grouse"    -> "Drums from a log in spring — a heartbeat louder than you'd believe."
   "snowshoe hare"    -> "Turns white for winter. Moves at the edges of things."
-  "ansiRed-tailed hawk"  -> "Rides the ridge thermals. Always hunting."
+  "red-tailed hawk"  -> "Rides the ridge thermals. Always hunting."
   "jackrabbit"       -> "Not really a rabbit. Runs flat out; stops dead."
   "great horned owl" -> "Nests in old hawk stick nests. Calls a lot before dawn."
   _                  -> ""
@@ -299,9 +299,9 @@ factoidFor (Discovery Tree name) = case name of
   "chokecherry"        -> "Berries bitter on the tongue, black when ripe."
   "box elder"          -> "Soft wood, quick growth. Breaks in ice storms."
   "hazel"              -> "Short and dense. Brush deer push through head-low."
-  "ansiGreen ash"          -> "Straight grain; splits clean."
+  "green ash"          -> "Straight grain; splits clean."
   "willow"             -> "Bent toward water. Roots holding the bank together."
-  "ansiRed osier dogwood"  -> "Bright ansiRed bark under the snow."
+  "red osier dogwood"  -> "Bright red bark under the snow."
   _                    -> ""
 factoidFor (Discovery Find name) = case name of
   "rusty 50s car"    -> "No plates, no glass. Someone left it here long before your time."

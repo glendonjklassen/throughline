@@ -10,6 +10,7 @@ module SDL.Runner (sdlUI) where
 
 import           Control.Monad           (unless, when)
 import           Control.Monad.IO.Class (liftIO)
+import           Data.Char       (isAsciiUpper)
 import           Data.Foldable           (for_)
 import           Control.Monad.Reader   (asks)
 import           Control.Monad.State    (get)
@@ -21,6 +22,7 @@ import           Data.Word       (Word32)
 import           Foreign.C.Types (CInt)
 import qualified SDL
 
+import           Engine.Author.Discovery (parseFirstFindLine)
 import           Engine.Core.NarrativeMessage (NarrativeEntry(..), neTimeLabel,
                                                NarrativeMessage(..))
 import           Engine.Core.Conditions (checkCondition)
@@ -34,6 +36,7 @@ import           SDL.ClickMap          (hitTest)
 import           SDL.Settings          (Settings(..), loadSettings,
                                         viewportRecommendedFontScale, viewportSize)
 import           SDL.SharedFolder      (SharedBroadcastResult(..), broadcastLog)
+import           SDL.FindReveal        (findRevealOverlay)
 import           SDL.FontContext
 import           SDL.InputHandler
 import           SDL.Palette
@@ -719,6 +722,12 @@ sdlStepHook ctx display countRef actionsRef before after _diff = do
       -- Drain lingering key events, brief pause, then done
       drainSDLEvents
       SDL.delay 400
+      -- First-find reveal modals: punctuate any "First X: Y." entries
+      -- the scenario wrote this tick with a centered visual of the
+      -- find.  Modal is silent (no-op) when the find has no sprite,
+      -- so trees and other unillustrated kinds slip through.
+      mapM_ (\(kindLbl, name) -> findRevealOverlay ctx kindLbl name [])
+            (revealableFinds newJournal)
       -- Day-end transition: if the tick crossed a day boundary (the
       -- scenario wrote a "— ... —" marker this tick), pause on a
       -- recap modal before the new day's HUD loads.  Pulls the
@@ -732,6 +741,32 @@ sdlStepHook ctx display countRef actionsRef before after _diff = do
         -- remembers every day.
         writeIORef logRef []
   liftIO $ writeIORef countRef (if crossedDay then 0 else newCount)
+
+-- | Pull (kindLabel, name) pairs out of a journal diff for any
+-- first-find lines whose kind warrants a reveal modal.  Lines that
+-- don't match the "First Kind: Name." format are silently skipped.
+-- Tree first-finds are excluded by intent — trees are catalogued in
+-- prose without a visual moment.  Sign first-finds are also
+-- excluded; sign reveals are already covered by the spatial HUD's
+-- sparkle and ambient narration.
+revealableFinds :: [String] -> [(String, String)]
+revealableFinds journal =
+  [ (kindLabel kind, name)
+  | line <- journal
+  , Just (kind, name) <- [parseFirstFindLine line]
+  , kindShouldReveal kind
+  ]
+  where
+    kindShouldReveal "Tree" = False
+    kindShouldReveal "Sign" = False
+    kindShouldReveal _      = True
+    kindLabel "Find"      = "find"
+    kindLabel "Signature" = "signature"
+    kindLabel "Animal"    = "creature"
+    kindLabel k           = map toLowerCh k
+    toLowerCh c
+      | isAsciiUpper c = toEnum (fromEnum c + 32)
+      | otherwise      = c
 
 -- | Drop adjacent-duplicate entries.  The day-rollover axiom's
 -- "called it" path repeats the player's own journal entry; we'd
@@ -750,7 +785,7 @@ dedupe []                  = []
 -- Each tick: renderWorldFrame (full clear+render) → overlay partial text → present.
 -- A keypress skips to showing all text immediately.
 typewriteFullFrame
-  :: SDLContext -> LayoutConfig -> (GameWorld -> Maybe String)
+  :: SDLContext -> LayoutConfig -> (GameWorld -> CharacterId -> Maybe String)
   -> (Location -> Int)
   -> (Location -> Maybe Color)
   -> RevealFrame           -- ^ HUD frame to render under the typewriter
