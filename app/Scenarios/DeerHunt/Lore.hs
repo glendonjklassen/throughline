@@ -34,7 +34,7 @@ loreFragments =
       "somebody told you about a shed with a drop tine long as a thumb"
       "Heard: a drop-tine shed, thumb-long. Never saw it myself."
   , Rumor
-      "heard about a cairn on a ridge with a cartridge inside — brass, ansiGreen with age"
+      "heard about a cairn on a ridge with a cartridge inside — brass, green with age"
       "Heard: a cairn on a ridge with brass inside. People do strange things."
   , Rumor
       "a carving in a bur oak somewhere, E.L. and a year in the sixties"

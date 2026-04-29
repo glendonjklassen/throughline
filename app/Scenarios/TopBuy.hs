@@ -29,7 +29,7 @@ topBuy seed you = Scenario
 topBuyDisplay :: ScenarioDisplay
 topBuyDisplay = ScenarioDisplay
   { sdEndScreen       = endScreen
-  , sdStatusLine      = const Nothing
+  , sdStatusLine      = \_ _ -> Nothing
   , sdLayout          = defaultLayout
   , sdLocationSparkle = \_ _ _ -> 0
   , sdZoneTintFor     = \_ _   -> Nothing

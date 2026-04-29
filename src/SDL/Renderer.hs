@@ -269,7 +269,7 @@ drawTopBar
   -> Int
   -> CharacterId
   -> GameWorld
-  -> (GameWorld -> Maybe String)
+  -> (GameWorld -> CharacterId -> Maybe String)
   -> IO ()
 drawTopBar fc cols you world statusLine = do
   let locName     = fromMaybe "" (playerLocationName you world)
@@ -284,7 +284,7 @@ drawTopBar fc cols you world statusLine = do
     _  -> renderText fc timeStr dimTextColor (timeCol, 0)
   drawCompassRose fc cols 1 compassDirs
   drawHLine fc cols 2
-  case statusLine world of
+  case statusLine world you of
     Just s  -> renderText fc s dimTextColor (marginLeft, 1)
     Nothing -> pure ()
 
@@ -296,7 +296,7 @@ drawTopBar fc cols you world statusLine = do
 renderWorldSDL
   :: SDLContext
   -> LayoutConfig
-  -> (GameWorld -> Maybe String)
+  -> (GameWorld -> CharacterId -> Maybe String)
   -> (Location -> Int)
   -> (Location -> Maybe Color)
   -> RevealFrame
@@ -371,7 +371,7 @@ renderWorldSDL ctx _layout statusLine sparkleFn zoneTintFn frame you world actio
 renderWorldFrame
   :: SDLContext
   -> LayoutConfig
-  -> (GameWorld -> Maybe String)
+  -> (GameWorld -> CharacterId -> Maybe String)
   -> (Location -> Int)
   -> (Location -> Maybe Color)
   -> RevealFrame

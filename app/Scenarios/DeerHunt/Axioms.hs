@@ -91,7 +91,7 @@ rareEventPool =
       "A small plane crosses the sky high up. You watch until it's past."
       "Small plane overhead."
   , RareEvent
-      "A ansiRed-tail slides off a fencepost and out over the stubble."
+      "A red-tail slides off a fencepost and out over the stubble."
       "Hawk hunting the stubble edge."
   , RareEvent
       "Somewhere to the north, a single owl call. Big one."
@@ -484,8 +484,8 @@ signDiscoveryAxiom you = Axiom
       | otherwise = "Droppings. Dry on top, damp underneath. Yesterday at most."
     signProse e SHair
       | e <= 2    = "Hair caught on a branch."
-      | e <= 5    = "Deer hair. Hollow-cored, brown with a ansiGrey tip. Buck coat."
-      | otherwise = "Hair snagged on the wire. Coarse, tipped ansiGrey — mature buck, rubbing through."
+      | e <= 5    = "Deer hair. Hollow-cored, brown with a grey tip. Buck coat."
+      | otherwise = "Hair snagged on the wire. Coarse, tipped grey — mature buck, rubbing through."
 
 -- | Track stillness while sitting. Increments each tick while PlayerSitting
 -- is active, resets to 0 when the player moves.
