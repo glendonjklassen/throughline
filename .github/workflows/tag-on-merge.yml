@@ -1,0 +1,36 @@
+name: Tag on merge
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  tag:
+    name: Create version tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from package.yaml
+        id: version
+        run: |
+          VERSION=$(grep '^version:' package.yaml | awk '{print $2}')
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag if it doesn't exist
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          if git tag -l "v$VERSION" | grep -q "v$VERSION"; then
+            echo "Tag v$VERSION already exists, skipping."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "v$VERSION"
+            git push origin "v$VERSION"
+            echo "Tagged v$VERSION"
+          fi
