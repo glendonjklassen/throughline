@@ -104,6 +104,8 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
+          stack exec -- bash -c "echo 'Server = https://repo.msys2.org/mingw/x86_64/' > /etc/pacman.d/mirrorlist.mingw64"
+          stack exec -- pacman --noconfirm -Sy
           stack exec -- pacman --noconfirm -S \
             mingw-w64-x86_64-SDL2 \
             mingw-w64-x86_64-SDL2_ttf \
