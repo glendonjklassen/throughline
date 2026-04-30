@@ -23,6 +23,12 @@ module Engine.Author.DSL
   ( module Engine.Author.DSL
   , module Engine.Author.Dialogue
   , module Engine.Author.MergeHelpers
+  -- Re-exported from 'GameTypes' for ergonomic parity with the
+  -- DSL-native effect-lifetime helpers ('immediate', 'eternal',
+  -- 'timed').  A scenario writing @repeatableAction _ _ unconditional
+  -- _@ should not need a second import to reach the always-available
+  -- guard.
+  , unconditional
   ) where
 
 import           Data.List.NonEmpty (NonEmpty(..))

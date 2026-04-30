@@ -9,6 +9,13 @@ copyright:           "2026 Glendon Klassen"
 extra-source-files:
 - README.md
 
+# Files shipped with the package and resolvable at runtime via
+# 'Paths_throughline.getDataFileName'.  Listed here so a consumer
+# repo using throughline as a git extra-dep doesn't have to copy the
+# font into its own working directory.
+data-files:
+- assets/JetBrainsMono-Regular.ttf
+
 description:         A narrative engine written in Haskell for modeling experience with specificity through composable effects and world state.
 
 # Cabal flag for release builds.  When enabled, compiles out the F3
@@ -89,6 +96,7 @@ library:
     - SDL.Launcher
     - SDL.Layout
     - SDL.Palette
+    - SDL.Sprites
     - SDL.Text
   dependencies:
     - throughline-internal

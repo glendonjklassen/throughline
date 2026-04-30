@@ -134,6 +134,27 @@ data LocationGraph = LocationGraph
   { lgEdges   :: Set.Set (Location, Location)
   , lgRegions :: Map.Map Location Region
   , lgCoords  :: Map.Map Location (Double, Double)
+    -- ^ Cartesian @(x, y)@ in arbitrary units.  The renderer is
+    -- translation- and scale-invariant: it computes per-neighbour
+    -- offsets relative to the player, derives angles from
+    -- @atan2 dx dy@, and scales distance against the farthest
+    -- visible neighbour ('SDL.SpatialHUD.spatialLayout').
+    --
+    -- Consumers are free to use whatever range / origin / sign
+    -- convention fits the scenario:
+    --
+    -- * @(0, 0)@ at one corner with positive @x@ east, positive @y@
+    --   south — DeerHunt's choice (and normalised to @[0, 1]@ by
+    --   its generator, but that is a DeerHunt detail, not an engine
+    --   requirement).
+    -- * @(0, 0)@ at the player's home with positive\/negative
+    --   growth in either direction — works just as well.
+    -- * Real-world coordinates (e.g. lat\/lon-like Doubles) — also
+    --   fine; the renderer never compares against absolute values.
+    --
+    -- Z is not currently rendered.  If a scenario needs vertical
+    -- separation, encode it in the location name / region for now;
+    -- a 3D extension would be a renderer change, not a graph change.
   } deriving (Show, Eq, Generic)
 
 emptyLocationGraph :: LocationGraph

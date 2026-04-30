@@ -24,12 +24,13 @@ import           Engine.Runtime         (runScenarioWith)
 import           Engine.Sync.Identity   (defaultIdentityPath, loadOrCreate, playerIdOf)
 import           Engine.Sync.Progress   (Progress, defaultProgressPath, recordHunt)
 import           GameTypes              (CharacterId(..), PlayerId, Scenario, scenarioName)
-import           Paths_throughline      (version)
+import           Paths_throughline      (getDataFileName, version)
 import           SDL.ClickMap           (ClickMap, gridRowRect, hitTest)
 import           SDL.CrashHandler       (withCrashHandler)
 import           SDL.FontContext        (renderText)
 import           SDL.InputHandler       (InputEvent(..), awaitInputSDL)
-import           SDL.Layout             (ScenarioDisplay)
+import           SDL.Layout             (ScenarioDisplay, SessionNoun(..),
+                                         sdSession)
 import           SDL.Onboarding         (defaultHowToPlay, howToPlayLoop)
 import           SDL.Palette            (PaletteMode(..), textColor, dimTextColor, chromeColor, warningColor)
 import           SDL.Renderer           (SDLContext(..), clearSDL, freeSDL, initSDLWith, presentSDL)
@@ -57,10 +58,13 @@ data ScenarioEntry = ScenarioEntry
   }
 
 -- | Font asset path — same for every bundle, shipped alongside the
--- binary.  If we ever need per-bundle fonts this moves into
--- 'ScenarioEntry' or a bundle config.
-fontAsset :: FilePath
-fontAsset = "assets/JetBrainsMono-Regular.ttf"
+-- binary.  Resolved through 'getDataFileName' so the .ttf travels
+-- with the package and works for consumers depending on throughline
+-- as a git extra-dep (no 'assets/' folder in their working dir).
+-- If we ever need per-bundle fonts this moves into 'ScenarioEntry'
+-- or a bundle config.
+fontAsset :: IO FilePath
+fontAsset = getDataFileName "assets/JetBrainsMono-Regular.ttf"
 
 -- ---------------------------------------------------------------------------
 -- Top-level entry
@@ -86,7 +90,8 @@ launcherMain entries = do
       -- "a bit smaller" relative to what reads cleanly on their
       -- screen, not raw pixel sizes.
       scale = viewportRecommendedFontScale vp * sFontScale settings
-  ctx    <- initSDLWith fontAsset title (viewportSize vp) scale mode
+  font   <- fontAsset
+  ctx    <- initSDLWith font title (viewportSize vp) scale mode
   ident  <- loadOrCreate =<< defaultIdentityPath
   let pid = playerIdOf ident
   choice <- case entries of
@@ -141,12 +146,14 @@ renderSingleMenu ctx entry status = do
   renderText fc (entryLabel entry)                  textColor (3, 2)
   renderText fc (entryTagline entry)                dimTextColor     (3, 3)
   renderText fc ""                                  dimTextColor     (3, 4)
-  let primaryRow =
+  let noun     = sdSession (entryDisplay entry)
+      newLabel = "2) New " <> sessionSingular noun <> " (discards save)"
+      primaryRow =
         if hasSave status
           then do
             renderText fc "1) Continue"                 textColor (4, 6)
             renderText fc (continueHint status)         dimTextColor     (4, 7)
-            renderText fc "2) New hunt (discards save)" textColor (4, 9)
+            renderText fc newLabel                      textColor (4, 9)
           else
             renderText fc "1) Begin"                    textColor (4, 6)
   primaryRow
@@ -192,7 +199,8 @@ pickSingle ctx pid entry status = loop
       '1' | hasSave status -> pure (Just entry)
           | otherwise      -> pure (Just entry)
       '2' | hasSave status -> do
-              confirmed <- confirmDiscard ctx (entryLabel entry)
+              confirmed <- confirmDiscard ctx (sdSession (entryDisplay entry))
+                                              (entryLabel entry)
               if confirmed
                 then do
                   resetScenarioSave pid (scenarioName (entryMake entry 0 dummyChar))
@@ -330,12 +338,13 @@ helpPagesFor e = fromMaybe defaultHowToPlay (entryHowToPlay e)
 -- corresponding row resolves; anything else cancels conservatively.
 -- The "discards save" wording on the main screen already does the
 -- warning work, so this screen stays spartan.
-confirmDiscard :: SDLContext -> String -> IO Bool
-confirmDiscard ctx label = do
+confirmDiscard :: SDLContext -> SessionNoun -> String -> IO Bool
+confirmDiscard ctx noun label = do
   clearSDL ctx
   let fc = sdlFont ctx
       rowHit r = gridRowRect fc 0 r 80
-  renderText fc "Start a new hunt?"             textColor  (3, 2)
+      header   = "Start a new " <> sessionSingular noun <> "?"
+  renderText fc header                          textColor  (3, 2)
   renderText fc ("This deletes your " <> label) warningColor (3, 3)
   renderText fc "save permanently."             warningColor (3, 4)
   renderText fc ""                              dimTextColor      (3, 5)
@@ -368,7 +377,8 @@ renderCrashScreen reportPath message = do
   -- Spin up a fresh context with default settings — the user's own
   -- settings might have been implicated in the crash, so we don't
   -- re-read them here.
-  r <- try (initSDLWith fontAsset "throughline — crash" (1280, 800) 1.0 Autumn)
+  font <- fontAsset
+  r <- try (initSDLWith font "throughline — crash" (1280, 800) 1.0 Autumn)
          :: IO (Either SomeException SDLContext)
   case r of
     Left _    -> pure ()

@@ -30,6 +30,7 @@ import           Engine.Headless       (ActionSource, StepHook, coreLoop)
 import           Engine.Runtime        (RuntimeUI(..))
 import           GameTypes
 import           MonadStack
+import           Paths_throughline     (getDataFileName)
 
 import           SDL.Animation
 import           SDL.ClickMap          (hitTest)
@@ -48,11 +49,15 @@ import           SDL.Debug             (learningModeLines)
 #ifndef RELEASE_BUILD
 import           SDL.Debug             (cycleDebug)
 #endif
-import           SDL.Layout            (ScenarioDisplay(..), LayoutConfig(..))
+import           SDL.Layout            (ScenarioDisplay(..), LayoutConfig(..),
+                                        SessionNoun(..))
+import           SDL.Sprites           (Sprite, SpriteRegistry(..))
 
--- | Font asset path (relative to working directory).
-fontPath :: FilePath
-fontPath = "assets/JetBrainsMono-Regular.ttf"
+-- | Font asset path — resolved through 'getDataFileName' so the
+-- .ttf travels with the package (Cabal data-file) rather than being
+-- looked up relative to the consumer's working directory.
+fontPath :: IO FilePath
+fontPath = getDataFileName "assets/JetBrainsMono-Regular.ttf"
 
 -- | Build an SDLContext honoring the player's current settings —
 -- viewport preset, font-scale, palette mode.  Used for every runner
@@ -61,10 +66,11 @@ fontPath = "assets/JetBrainsMono-Regular.ttf"
 initSDLFromSettings :: String -> IO SDLContext
 initSDLFromSettings title = do
   settings <- loadSettings
+  font     <- fontPath
   let vp    = sViewport settings
       scale = viewportRecommendedFontScale vp * sFontScale settings
       mode  = if sHighContrast settings then HighContrast else Autumn
-  initSDLWith fontPath title (viewportSize vp) scale mode
+  initSDLWith font title (viewportSize vp) scale mode
 
 -- | Construct an SDL2-based RuntimeUI from a ScenarioDisplay.  The
 -- scenario name is threaded through so the journal's
@@ -154,12 +160,14 @@ sdlActionSource ctx scenName display countRef actionsRef lastLocRef actions = do
   logRef   <- asks envMessageLog
   debugRef <- asks envDebug
   traceRef <- asks envAxiomTrace
-  let layout     = sdLayout display
-      statusLine = sdStatusLine display
-      sparkleFn  = sdLocationSparkle display world you
-      zoneTintFn = sdZoneTintFor display world
-      sensoryFn  = sdSensoryFor display world
-      render frame = renderWorldSDL ctx layout statusLine sparkleFn zoneTintFn frame
+  let layout      = sdLayout display
+      statusLine  = sdStatusLine display
+      sparkleFn   = sdLocationSparkle display world you
+      zoneTintFn  = sdZoneTintFor display world
+      sensoryFn   = sdSensoryFor display world
+      terrainPool = srTerrain (sdSprites display)
+      render frame = renderWorldSDL ctx layout statusLine sparkleFn zoneTintFn
+                                    terrainPool frame
                                     you world actions logRef debugRef traceRef
       currentLoc = Map.lookup you (worldLocations world)
   liftIO $ writeIORef actionsRef actions
@@ -224,7 +232,7 @@ sdlActionSource ctx scenName display countRef actionsRef lastLocRef actions = do
         Nothing -> pure Nothing
         Just c
           | c == quitKeyChar  -> do
-              confirmed <- confirmQuit ctx
+              confirmed <- confirmQuit ctx (sdSession display)
               drainSDLEvents
               render' finalReveal
               if confirmed
@@ -296,21 +304,24 @@ buildHUDClicks ctx hud =
      | (col, row, w, h, c) <- gridHits
      ]
 
--- | Ask the player to confirm a mid-hunt quit.  Every action autosaves
--- so leaving truly costs nothing, but a stray Escape keypress shouldn't
--- send them back to the launcher — confirmation protects against that.
--- Accepts key presses and clicks on either option row.
-confirmQuit :: SDLContext -> IO Bool
-confirmQuit ctx = do
+-- | Ask the player to confirm a mid-session quit.  Every action
+-- autosaves so leaving truly costs nothing, but a stray Escape
+-- keypress shouldn't send them back to the launcher — confirmation
+-- protects against that.  Accepts key presses and clicks on either
+-- option row.
+confirmQuit :: SDLContext -> SessionNoun -> IO Bool
+confirmQuit ctx noun = do
   clearSDL ctx
-  let fc = sdlFont ctx
-  renderText fc "Quit hunt?"                              textColor (3, 2)
+  let fc      = sdlFont ctx
+      header  = "Quit " <> sessionSingular noun <> "?"
+      keepOpt = "n) No, keep " <> sessionVerbing noun
+  renderText fc header                                    textColor (3, 2)
   renderText fc ""                                        dimTextColor     (3, 3)
   renderText fc "Your progress has been saved."           dimTextColor     (3, 4)
   renderText fc "You can pick up where you left off."     dimTextColor     (3, 5)
   renderText fc ""                                        dimTextColor     (3, 6)
   renderText fc "y) Yes, quit"                            textColor (4, 8)
-  renderText fc "n) No, keep hunting"                     textColor (4, 9)
+  renderText fc keepOpt                                   textColor (4, 9)
   presentSDL ctx
   let yesRect = confirmRowRect fc 8 'y'
       noRect  = confirmRowRect fc 9 'n'
@@ -409,7 +420,7 @@ journalOverlayLoop ctx scenName playerId display world tab =
       | c == '2'               = loop TabPast    0
       | c == '3'               = loop TabCatalog 0
       | c == 's' || c == 'S'   = do
-          shareWithFriends ctx scenName playerId
+          shareWithFriends ctx scenName (sdSession display) playerId
           loop t scroll
       | c == scrollUpKeyChar   = loop t (scroll + 1)
       | c == scrollDownKeyChar = loop t (max 0 (scroll - 1))
@@ -426,11 +437,13 @@ journalOverlayLoop ctx scenName playerId display world tab =
 -- configured shared folder from settings, broadcasts the current
 -- log to it, and shows a short status screen so the player knows
 -- whether the message got through.
-shareWithFriends :: SDLContext -> String -> PlayerId -> IO ()
-shareWithFriends ctx scenName playerId = do
+shareWithFriends :: SDLContext -> String -> SessionNoun -> PlayerId -> IO ()
+shareWithFriends ctx scenName noun playerId = do
   settings <- loadSettings
   clearSDL ctx
   let fc = sdlFont ctx
+      theirLine     = "all point at.  Their " <> sessionPlural noun <> " will"
+      friendsLine   = "Your friends' " <> sessionPlural noun <> " will merge"
   case sSharedFolder settings of
     Nothing -> do
       renderText fc "No shared folder configured."     warningColor (3, 2)
@@ -438,7 +451,7 @@ shareWithFriends ctx scenName playerId = do
       renderText fc "Pick a folder in Settings first"  dimTextColor      (3, 4)
       renderText fc "— a Dropbox / Drive / Syncthing"  dimTextColor      (3, 5)
       renderText fc "path that you and your friends"   dimTextColor      (3, 6)
-      renderText fc "all point at.  Their hunts will"  dimTextColor      (3, 7)
+      renderText fc theirLine                          dimTextColor      (3, 7)
       renderText fc "merge into yours automatically."  dimTextColor      (3, 8)
       renderText fc ""                                 dimTextColor      (3, 9)
       renderText fc "press any key or click to return" chromeColor     (3, 11)
@@ -447,19 +460,19 @@ shareWithFriends ctx scenName playerId = do
       pure ()
     Just dir -> do
       result <- broadcastLog dir scenName playerId
-      renderShareResult fc result
+      renderShareResult fc friendsLine result
       presentSDL ctx
       _ <- awaitInputSDL (sdlWindow ctx)
       pure ()
   where
-    renderShareResult fc result = case result of
+    renderShareResult fc friendsLine result = case result of
       Broadcast path -> do
         renderText fc "Sent."                              textColor  (3, 2)
         renderText fc ""                                   dimTextColor      (3, 3)
         renderText fc "Your log was copied to:"            dimTextColor      (3, 4)
         renderText fc path                                 dimTextColor      (3, 5)
         renderText fc ""                                   dimTextColor      (3, 6)
-        renderText fc "Your friends' hunts will merge"     dimTextColor      (3, 7)
+        renderText fc friendsLine                          dimTextColor      (3, 7)
         renderText fc "into yours next time their logs"    dimTextColor      (3, 8)
         renderText fc "are visible in that folder."        dimTextColor      (3, 9)
         renderText fc ""                                   dimTextColor      (3, 10)
@@ -703,10 +716,12 @@ sdlStepHook ctx display countRef actionsRef before after _diff = do
       -- Typewrite: reveal one character at a time, full re-render each tick.
       -- Pass old messages only so renderWorldFrame doesn't show new ones in history.
       let oldMsgs = drop (newCount - prevCount) allMsgs  -- allMsgs is newest-first
-          layout     = sdLayout display
-          statusLine = sdStatusLine display
-          sparkleFn  = sdLocationSparkle display after you
-          zoneTintFn = sdZoneTintFor display after
+          layout      = sdLayout display
+          statusLine  = sdStatusLine display
+          sparkleFn   = sdLocationSparkle display after you
+          zoneTintFn  = sdZoneTintFor display after
+          terrainPool = srTerrain (sdSprites display)
+          findLookup  = srFinds (sdSprites display)
       oldLogRef <- newIORef oldMsgs
       -- On a movement action the HUD is hidden during typewriter
       -- ('hiddenReveal') so the reveal animation can take over
@@ -716,7 +731,8 @@ sdlStepHook ctx display countRef actionsRef before after _diff = do
       let movedHere = Map.lookup you (worldLocations before)
                    /= Map.lookup you (worldLocations after)
           hudFrame  = if movedHere then hiddenReveal else finalReveal
-      typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn hudFrame you after lastActions
+      typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn terrainPool
+                         hudFrame you after lastActions
                          oldLogRef debugRef traceRef
                          fc labelW newEntryLines
       -- Drain lingering key events, brief pause, then done
@@ -726,7 +742,7 @@ sdlStepHook ctx display countRef actionsRef before after _diff = do
       -- the scenario wrote this tick with a centered visual of the
       -- find.  Modal is silent (no-op) when the find has no sprite,
       -- so trees and other unillustrated kinds slip through.
-      mapM_ (\(kindLbl, name) -> findRevealOverlay ctx kindLbl name [])
+      mapM_ (\(kindLbl, name) -> findRevealOverlay ctx findLookup kindLbl name [])
             (revealableFinds newJournal)
       -- Day-end transition: if the tick crossed a day boundary (the
       -- scenario wrote a "— ... —" marker this tick), pause on a
@@ -788,14 +804,15 @@ typewriteFullFrame
   :: SDLContext -> LayoutConfig -> (GameWorld -> CharacterId -> Maybe String)
   -> (Location -> Int)
   -> (Location -> Maybe Color)
+  -> (String -> [Sprite])
   -> RevealFrame           -- ^ HUD frame to render under the typewriter
   -> CharacterId -> GameWorld -> [AnyAction]
   -> IORef [NarrativeEntry] -> IORef DebugMode -> IORef [AxiomTrace]
   -> FontContext -> Int
   -> [(Color, Int, String)]   -- ^ (color, delayMs, plainLine) for each new line
   -> IO ()
-typewriteFullFrame _   _      _          _         _          _     _   _     _           _      _        _        _  _      []    = pure ()
-typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn frame you world actions logRef debugRef traceRef fc labelW newLines = do
+typewriteFullFrame _   _      _          _         _          _           _     _   _     _           _      _        _        _  _      []    = pure ()
+typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn terrainPool frame you world actions logRef debugRef traceRef fc labelW newLines = do
   let cols     = gridCols ctx
       rows     = gridRows ctx
       contentW = cols - fromIntegral marginLeft * 2 - 8
@@ -838,7 +855,7 @@ typewriteFullFrame ctx layout statusLine sparkleFn zoneTintFn frame you world ac
     -- Render one frame: full world + all revealed characters so far
     renderTick :: [(Color, String, CInt)] -> IO ()
     renderTick revealed = do
-      renderWorldFrame ctx layout statusLine sparkleFn zoneTintFn frame you world actions logRef debugRef traceRef
+      renderWorldFrame ctx layout statusLine sparkleFn zoneTintFn terrainPool frame you world actions logRef debugRef traceRef
       mapM_ (\(clr, txt, row) ->
         renderText fc txt clr (marginLeft, row)
         ) revealed

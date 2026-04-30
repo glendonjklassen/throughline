@@ -7,6 +7,11 @@
 module SDL.Sprites
   ( Sprite(..)
   , Pixel(..)
+  , SpriteRegistry(..)
+  , emptySpriteRegistry
+  , combineSpriteRegistries
+  , forestRegistry
+  , indoorRegistry
   , spritesForClass
   , spriteByName
   , spriteBounds
@@ -35,6 +40,43 @@ data Sprite = Sprite
 
 instance Show Pixel where
   show (Pixel x y _) = "Pixel " <> show x <> " " <> show y
+
+-- | A scenario-supplied vocabulary of sprites, split into the two
+-- ways the engine reaches for them.  'srFinds' powers the
+-- find-reveal modal (a discovered character / object name → sprite);
+-- 'srTerrain' powers the spatial-HUD scatter (a terrain "class"
+-- string → ordered pool of sprites the renderer cycles through).
+--
+-- A scenario that doesn't ship sprite art uses 'emptySpriteRegistry'
+-- — no reveal modals, no scatter, just the prose treatment.
+data SpriteRegistry = SpriteRegistry
+  { srFinds   :: String -> Maybe Sprite
+  , srTerrain :: String -> [Sprite]
+  }
+
+-- | No sprite art at all.  Find-reveal modals are silent (no-op),
+-- spatial-HUD scatter renders nothing.
+emptySpriteRegistry :: SpriteRegistry
+emptySpriteRegistry = SpriteRegistry
+  { srFinds   = const Nothing
+  , srTerrain = const []
+  }
+
+-- | Layer two registries: the second's 'srFinds' wins on names it
+-- knows, falling back to the first; the second's 'srTerrain' wins on
+-- non-empty pools, falling back to the first.  Useful for layering
+-- scenario-specific finds on top of an engine-shipped terrain pool
+-- (e.g. DeerHunt's animals + signatures over the generic forest
+-- terrain pool).
+combineSpriteRegistries :: SpriteRegistry -> SpriteRegistry -> SpriteRegistry
+combineSpriteRegistries base overlay = SpriteRegistry
+  { srFinds   = \name -> case srFinds overlay name of
+                           Just s  -> Just s
+                           Nothing -> srFinds base name
+  , srTerrain = \cls  -> case srTerrain overlay cls of
+                           [] -> srTerrain base cls
+                           xs -> xs
+  }
 
 -- | Sprite "pixel" size on screen.  3 gives sprites ~24px across,
 -- chunky and readable against monospace text.
@@ -190,6 +232,20 @@ colBone     = Color 184 172 152 150   -- weathered bone / antler
 colFur      = Color  72  56  40 150   -- brown fur (deer, hare)
 colFurPale  = Color 120 104  72 140   -- winter fur highlight
 colFeather  = Color  40  36  38 160   -- raven / grouse dark plumage
+
+-- Indoor / manmade palette.  Cooler and a touch more saturated than
+-- the rural set so a scatter on a sales-floor location reads as
+-- "human-built surface" at a glance — flat tones, no warm browns.
+colLaminate, colSeam, colTile, colGrout, colConcrete,
+  colCarpetA, colCarpetB, colScuff :: Color
+colLaminate = Color 156 132  98 130   -- pale wood-grain laminate plank
+colSeam     = Color  92  76  56 140   -- darker seam between planks
+colTile     = Color 142 142 142 130   -- floor tile, neutral grey
+colGrout    = Color  70  70  72 140   -- grout line between tiles
+colConcrete = Color 110 110 112 130   -- raw concrete, slight blue cast
+colCarpetA  = Color  88  74  86 130   -- muted carpet weave, plum
+colCarpetB  = Color  72  88  82 130   -- muted carpet weave, sage
+colScuff    = Color  46  44  44 150   -- scuff mark, sole black
 
 -- | Small grass tuft: 3 stalks leaning slightly.
 grassTuft :: Sprite
@@ -607,17 +663,142 @@ spriteByName n
     startsWith p = take (length p) n == p
 
 -- ---------------------------------------------------------------------------
--- Per-class sprite pools
+-- Indoor / manmade scatter primitives
+-- ---------------------------------------------------------------------------
+--
+-- Tiny textural fragments that read as "human-built surface" on the
+-- spatial HUD.  Each is sized in the same ~6-8 px envelope as the
+-- rural primitives so they coexist visually if a scenario mixes
+-- indoor and outdoor regions.
+
+-- | Laminate plank: a short horizontal stretch with a darker seam
+-- mark, like wood-grain flooring viewed from above.
+laminatePlank :: Sprite
+laminatePlank = Sprite "laminatePlank"
+  [ Pixel 0 0 colLaminate
+  , Pixel 1 0 colLaminate
+  , Pixel 2 0 colLaminate
+  , Pixel 3 0 colLaminate
+  , Pixel 4 0 colLaminate
+  , Pixel 1 1 colSeam       -- subtle grain
+  , Pixel 3 1 colSeam
+  ]
+
+-- | Tile corner: an L-junction of grout where four floor tiles meet.
+tileCorner :: Sprite
+tileCorner = Sprite "tileCorner"
+  [ Pixel 0 1 colGrout
+  , Pixel 1 1 colGrout
+  , Pixel 2 1 colGrout
+  , Pixel 3 1 colGrout
+  , Pixel 1 0 colGrout
+  , Pixel 1 2 colGrout
+  , Pixel 2 0 colTile
+  , Pixel 2 2 colTile
+  , Pixel 0 0 colTile
+  , Pixel 0 2 colTile
+  ]
+
+-- | Concrete chip: a tight angular cluster, like a small spall or
+-- aggregate exposed in the slab.
+concreteChip :: Sprite
+concreteChip = Sprite "concreteChip"
+  [ Pixel 1 0 colConcrete
+  , Pixel 2 0 colConcrete
+  , Pixel 0 1 colConcrete
+  , Pixel 1 1 colScuff
+  , Pixel 2 1 colConcrete
+  , Pixel 1 2 colConcrete
+  ]
+
+-- | Carpet fleck: scattered weave dots in two muted tones, the way a
+-- commercial carpet pattern reads at distance.
+carpetWeave :: Sprite
+carpetWeave = Sprite "carpetWeave"
+  [ Pixel 0 0 colCarpetA
+  , Pixel 2 0 colCarpetB
+  , Pixel 1 1 colCarpetA
+  , Pixel 3 1 colCarpetB
+  , Pixel 0 2 colCarpetB
+  , Pixel 2 2 colCarpetA
+  ]
+
+-- | Scuff mark: a short angled smear on a polished floor.
+floorScuff :: Sprite
+floorScuff = Sprite "floorScuff"
+  [ Pixel 0 1 colScuff
+  , Pixel 1 1 colScuff
+  , Pixel 2 0 colScuff
+  , Pixel 3 0 colScuff
+  ]
+
+-- | Asphalt patch: irregular dark cluster, parking-lot texture.
+asphaltPatch :: Sprite
+asphaltPatch = Sprite "asphaltPatch"
+  [ Pixel 0 0 colScuff
+  , Pixel 1 0 colConcrete
+  , Pixel 2 1 colScuff
+  , Pixel 0 1 colConcrete
+  , Pixel 1 1 colScuff
+  , Pixel 2 0 colConcrete
+  , Pixel 1 2 colScuff
+  ]
+
+-- ---------------------------------------------------------------------------
+-- Per-class sprite pools (legacy direct lookups)
 -- ---------------------------------------------------------------------------
 
 -- | Return the sprite vocabulary for a given class-like string.
--- Keyed by the same class names the generator emits (last word of the
--- region name: "Field", "Road", "Bush", "Ridge", "Creek").
+-- Keyed by the rural class names DeerHunt's generator emits (last
+-- word of the region name: "Field", "Road", "Bush", "Ridge",
+-- "Creek").  Retained for backward compatibility; new callers should
+-- read from a 'SpriteRegistry' on the 'ScenarioDisplay' so other
+-- scenarios can ship their own vocabulary.
 spritesForClass :: String -> [Sprite]
-spritesForClass name = case name of
-  "Field"      -> [stubble, stalk, dirtClump, grassTuft]
-  "Road"       -> [gravel, stubble, fencePost, dirtClump]
-  "Bush"       -> [bushClump, poplarSmall, grassTuft, stubble]
-  "Ridge"      -> [oakSmall, rockSmall, rockLarge, grassTuft]
-  "Creek"      -> [waterGlint, cattail, rockSmall, bushClump]
-  _            -> [grassTuft, dirtClump]
+spritesForClass = srTerrain forestRegistry
+
+-- ---------------------------------------------------------------------------
+-- Registries
+-- ---------------------------------------------------------------------------
+
+-- | Engine-shipped registry for outdoor / rural scenarios.  Pools
+-- are keyed on DeerHunt's generated class names ("Field", "Road",
+-- "Bush", "Ridge", "Creek"); the find-name lookup covers the
+-- DeerHunt cast (animals, signature finds, abandoned objects).  A
+-- scenario can layer its own finds on top with
+-- 'combineSpriteRegistries'.
+forestRegistry :: SpriteRegistry
+forestRegistry = SpriteRegistry
+  { srFinds   = spriteByName
+  , srTerrain = pool
+  }
+  where
+    pool name = case name of
+      "Field" -> [stubble, stalk, dirtClump, grassTuft]
+      "Road"  -> [gravel, stubble, fencePost, dirtClump]
+      "Bush"  -> [bushClump, poplarSmall, grassTuft, stubble]
+      "Ridge" -> [oakSmall, rockSmall, rockLarge, grassTuft]
+      "Creek" -> [waterGlint, cattail, rockSmall, bushClump]
+      _       -> [grassTuft, dirtClump]
+
+-- | Engine-shipped registry for indoor / manmade scenarios.  Pools
+-- key on common interior region words ("Counter", "Booth", "Floor",
+-- "Office", "Stockroom", "Lot", "Entrance", "Home").  Empty
+-- 'srFinds' — indoor scenarios surface finds via prose; if one
+-- wants a reveal modal it layers its own lookup on top.
+indoorRegistry :: SpriteRegistry
+indoorRegistry = SpriteRegistry
+  { srFinds   = const Nothing
+  , srTerrain = pool
+  }
+  where
+    pool name = case name of
+      "Counter"   -> [laminatePlank, floorScuff, tileCorner]
+      "Booth"     -> [carpetWeave, floorScuff, laminatePlank]
+      "Floor"     -> [tileCorner, floorScuff, carpetWeave]
+      "Office"    -> [carpetWeave, floorScuff, laminatePlank]
+      "Stockroom" -> [concreteChip, floorScuff, tileCorner]
+      "Lot"       -> [asphaltPatch, concreteChip, floorScuff]
+      "Entrance"  -> [tileCorner, asphaltPatch, floorScuff]
+      "Home"      -> [carpetWeave, laminatePlank, floorScuff]
+      _           -> [tileCorner, floorScuff]

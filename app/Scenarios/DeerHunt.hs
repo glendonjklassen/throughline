@@ -10,6 +10,7 @@ import           Engine.Core.Time       (currentHour)
 import           Engine.Core.World      (characterLocation)
 import           SDL.Layout
 import           SDL.Palette  (Color, zoneTintDefault)
+import           SDL.Sprites  (forestRegistry)
 import           SDL.Text
 import           GameTypes
 import           Scenarios.DeerHunt.Actions     (allActions)
@@ -66,6 +67,8 @@ deerHuntDisplay = ScenarioDisplay
   , sdSensoryFor      = deerHuntSensory
   , sdCatalog         = discoveryCatalog
   , sdDayLabel        = formatHuntDate
+  , sdSession         = SessionNoun "hunt" "hunts" "hunting"
+  , sdSprites         = forestRegistry
   }
 
 -- | Current time line for the top status bar.  Shows the
