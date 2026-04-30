@@ -32,18 +32,19 @@ import           SDL.Palette
 import           SDL.Primitives   (fillRectPx)
 import           SDL.Renderer     (SDLContext (..), gridCols, gridRows,
                                    clearSDL, presentSDL)
-import           SDL.Sprites      (Sprite, spriteByName, spriteBounds,
+import           SDL.Sprites      (Sprite, spriteBounds,
                                    drawSpriteScaled, drawSparkleParticles)
 import           SDL.Text         (wrapWords)
 
 
--- | Show a reveal modal for the named find, if a sprite exists.
--- Blocks until the player presses a key.  Silent (no-op) if the name
--- has no sprite — those finds keep their existing prose-only
--- treatment.
-findRevealOverlay :: SDLContext -> String -> String -> [String] -> IO ()
-findRevealOverlay ctx kindLabel name proseLines =
-  for_ (spriteByName name) (playReveal ctx kindLabel proseLines)
+-- | Show a reveal modal for the named find, if the registry lookup
+-- finds a sprite.  Blocks until the player presses a key.  Silent
+-- (no-op) when the lookup returns 'Nothing' — those finds keep their
+-- existing prose-only treatment.
+findRevealOverlay :: SDLContext -> (String -> Maybe Sprite)
+                  -> String -> String -> [String] -> IO ()
+findRevealOverlay ctx lookupFind kindLabel name proseLines =
+  for_ (lookupFind name) (playReveal ctx kindLabel proseLines)
 
 
 -- ---------------------------------------------------------------------------

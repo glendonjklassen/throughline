@@ -2,6 +2,7 @@ module Scenarios.Diner (diner, dinerDisplay) where
 
 import           Engine.Core.Conditions (checkCondition)
 import           SDL.Layout
+import           SDL.Sprites    (indoorRegistry)
 import           SDL.Text
 import           GameTypes
 import           Scenarios.Diner.Axioms    (allAxioms, dawnRule)
@@ -35,6 +36,8 @@ dinerDisplay = ScenarioDisplay
   , sdSensoryFor      = \_ _ _ -> Nothing
   , sdCatalog         = const []
   , sdDayLabel        = \n -> "Day " <> show n
+  , sdSession         = defaultSessionNoun
+  , sdSprites         = indoorRegistry
   }
 
 endScreen :: GameWorld -> [String]

@@ -43,7 +43,7 @@ import           SDL.FontContext
 import           SDL.Palette
 import           SDL.Text (stripAnsi, wrapWords)
 import           SDL.Primitives (drawCellUnderline)
-import           SDL.Sprites    (drawSparkleParticles, drawSprite, spritesForClass)
+import           SDL.Sprites    (Sprite, drawSparkleParticles, drawSprite)
 import           SDL.SpatialHUD (SpatialHUD(..), HUDCell(..),
                                  TrailMark(..), SpritePlacement(..),
                                  layoutHUD, hudGenRowCount,
@@ -299,6 +299,7 @@ renderWorldSDL
   -> (GameWorld -> CharacterId -> Maybe String)
   -> (Location -> Int)
   -> (Location -> Maybe Color)
+  -> (String -> [Sprite])              -- ^ terrain-class → scatter pool
   -> RevealFrame
   -> CharacterId
   -> GameWorld
@@ -307,7 +308,7 @@ renderWorldSDL
   -> IORef DebugMode
   -> IORef [AxiomTrace]
   -> IO ()
-renderWorldSDL ctx _layout statusLine sparkleFn zoneTintFn frame you world actions logRef debugRef traceRef = do
+renderWorldSDL ctx _layout statusLine sparkleFn zoneTintFn terrainPool frame you world actions logRef debugRef traceRef = do
   clearSDL ctx
   allMsgs   <- readIORef logRef
   debugMode <- readIORef debugRef
@@ -350,7 +351,7 @@ renderWorldSDL ctx _layout statusLine sparkleFn zoneTintFn frame you world actio
     ) (zip [0 :: Int ..] genRows)
   let spatialLeft = fromIntegral ((cols - shBoxWidth hud) `div` 2)
   when hasSpatial $
-    drawSpatialHUD fc cols sparkleFn zoneTintFn frame
+    drawSpatialHUD fc cols sparkleFn zoneTintFn terrainPool frame
                    you world hud spatialLeft (fromIntegral loSpatialTop)
 
   -- History (bottom, 2nd largest)
@@ -374,6 +375,7 @@ renderWorldFrame
   -> (GameWorld -> CharacterId -> Maybe String)
   -> (Location -> Int)
   -> (Location -> Maybe Color)
+  -> (String -> [Sprite])
   -> RevealFrame
   -> CharacterId
   -> GameWorld
@@ -382,7 +384,7 @@ renderWorldFrame
   -> IORef DebugMode
   -> IORef [AxiomTrace]
   -> IO ()
-renderWorldFrame ctx _layout statusLine sparkleFn zoneTintFn frame you world actions logRef debugRef traceRef = do
+renderWorldFrame ctx _layout statusLine sparkleFn zoneTintFn terrainPool frame you world actions logRef debugRef traceRef = do
   clearSDL ctx
   allMsgs   <- readIORef logRef
   debugMode <- readIORef debugRef
@@ -422,7 +424,7 @@ renderWorldFrame ctx _layout statusLine sparkleFn zoneTintFn frame you world act
     ) (zip [0 :: Int ..] genRows)
   let spatialLeft = fromIntegral ((cols - shBoxWidth hud) `div` 2)
   when hasSpatial $
-    drawSpatialHUD fc cols sparkleFn zoneTintFn frame
+    drawSpatialHUD fc cols sparkleFn zoneTintFn terrainPool frame
                    you world hud spatialLeft (fromIntegral loSpatialTop)
 
   drawHLine fc cols (fromIntegral loHistSep)
@@ -508,6 +510,7 @@ drawSpatialHUD
   -> Int                              -- ^ total cols (for edge clamping)
   -> (Location -> Int)
   -> (Location -> Maybe Color)
+  -> (String -> [Sprite])
   -> RevealFrame
   -> CharacterId
   -> GameWorld
@@ -515,7 +518,7 @@ drawSpatialHUD
   -> CInt        -- ^ spatialLeft (col)
   -> CInt        -- ^ spatialTopRow (row)
   -> IO ()
-drawSpatialHUD fc totalCols sparkleFn zoneTintFn frame you world hud spatialLeft spatialTopRow = do
+drawSpatialHUD fc totalCols sparkleFn zoneTintFn terrainPool frame you world hud spatialLeft spatialTopRow = do
   -- Precompute each neighbor label's pixel bounding box so the terrain
   -- scatter can avoid them.  Boxes are generous (padded ±6 px) so
   -- sprites never crowd the text.
@@ -539,7 +542,7 @@ drawSpatialHUD fc totalCols sparkleFn zoneTintFn frame you world hud spatialLeft
                   (panelPxW, panelPxH)
                   labelBBoxes
   mapM_ (\sp -> do
-    let pool = spritesForClass (spClass sp)
+    let pool = terrainPool (spClass sp)
     case pool of
       [] -> pure ()
       xs -> drawSprite fc

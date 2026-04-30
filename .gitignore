@@ -1,7 +1,11 @@
 # Stack build artifacts
 .stack-work/
-*.cabal
 stack.yaml.lock
+
+# throughline.cabal is generated from package.yaml by hpack but tracked
+# in git: Stack is removing on-the-fly hpack for git extra-deps
+# (commercialhaskell/stack#5210), so consumers need a real .cabal in
+# the tree.  Regenerate after every package.yaml change.
 
 # Haskell build outputs
 *.hi
