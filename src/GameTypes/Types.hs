@@ -202,7 +202,7 @@ data Character = Character
   , charName    :: String
   , charEffects :: [Effect]
   , charTags    :: ORSet Tag
-  } deriving (Generic)
+  } deriving (Eq, Generic)
 
 -- ---------------------------------------------------------------------------
 -- World
@@ -233,7 +233,7 @@ data GameWorld = GameWorld
     -- ^ Which in-scenario day the player is on.  Starts at 1 on
     -- scenario open and increments each time the day rolls over.
     -- Scenarios that don't use multi-day structure can leave it at 1.
-  } deriving (Generic)
+  } deriving (Eq, Generic)
 
 -- ---------------------------------------------------------------------------
 -- Conditions
@@ -515,7 +515,7 @@ data Snapshot = Snapshot
   , snapActions    :: [AnyAction]
   , snapRules      :: [AxiomRule]
   , snapMergeRules :: [MergeAxiomRule]
-  } deriving (Generic)
+  } deriving (Eq, Generic)
 
 -- ---------------------------------------------------------------------------
 -- LogStore abstraction
