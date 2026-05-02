@@ -11,7 +11,7 @@ when the merge path is exercised" placeholder with a concrete plan.
 Player B's logs or snapshots out of a shared folder (or Nostr relay,
 or future sync transport) and attempts to merge.  It is **not**
 about the relic oracle — that has a trusted arbiter and is covered
-by [`relic-infrastructure.md §5`](./relic-infrastructure.md).
+by `Engine.Sync.Relic` and `api/relic-oracle.openapi.yaml`.
 
 **Status.** Proposal.  Describes what to build, not code that's
 landed.  Existing signature verification in
@@ -413,7 +413,7 @@ This is the big one.  Likely ~1k lines touching every scenario.
 
 The two threat models complement each other and share some DNA:
 
-| Concern | Relic oracle (§5 of relic-infrastructure.md) | This doc |
+| Concern | Relic oracle (`Engine.Sync.Relic` + `api/relic-oracle.openapi.yaml`) | This doc |
 | ------- | --- | --- |
 | Trust root | Pinned oracle pubkeys in binary | Pinned revocation manifest + per-session signer trust |
 | Identity | Ed25519 pubkey | Ed25519 pubkey (same) |

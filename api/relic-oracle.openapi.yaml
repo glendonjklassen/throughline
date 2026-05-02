@@ -21,8 +21,7 @@ info:
     stays client-side.  The oracle is the cryptographic serialization
     point, not a game server.
 
-    See [`proposals/relic-infrastructure.md`](../proposals/relic-infrastructure.md)
-    for the full design rationale, and [`proposals/unique-finds.md`](../proposals/unique-finds.md)
+    See [`proposals/unique-finds.md`](../proposals/unique-finds.md)
     for the three-tier unique-finds system this implements Tier 3 of.
 
     ### Client Verification Requirements (NORMATIVE)
@@ -733,9 +732,7 @@ components:
       type: string
       enum: [lore, named-character, map-reveal, capability]
       description: |
-        Shape of the bundle's body.  See
-        [`proposals/relic-infrastructure.md`](../proposals/relic-infrastructure.md)
-        for the semantics of each kind.
+        Shape of the bundle's body.
 
     Bundle:
       type: object

@@ -60,7 +60,7 @@ Scenarios don't run in isolation. World-level diffs — EngineTag changes, stat 
 
 This surfaces system weirdness that traditional engines hide: timeline mismatches, existence conflicts, stat divergence from merges. The design leans into these — each one gets named, made lore, and handled narratively rather than papered over.
 
-Detection primitives live in `Engine.CRDT.*`: PN-Counter bucket comparison for stat provenance, ORSet set difference for existence. Full design in [`proposals/shared-universe.md`](proposals/shared-universe.md).
+Detection primitives live in `Engine.CRDT.*`: PN-Counter bucket comparison for stat provenance, ORSet set difference for existence. The vision and priorities live in [`CLAUDE.md`](CLAUDE.md).
 
 ---
 

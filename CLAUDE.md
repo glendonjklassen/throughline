@@ -45,12 +45,11 @@ Humans and AI create scenarios. They share engine-level state via CRDTs. Scenari
 
 ### Implementation priority order
 
-1. Rich engine model (highest leverage — every engine concept is one less thing every scenario reinvents)
-2. ~~Scenario serializability~~ — **structural work shipped 2026-05-02.** `GameWorld ->` wrapper is gone, full JSON round-trip on the `Snapshot` handoff package, `mergeActions`/`mergeRules`/`mergeMergeRules` wired into the runtime. Scenario code axioms remain (PN-Counter "set absolute" is CRDT-incompatible, so a few are blocked on a separate modeling project). See `proposals/serialization.md` for the shipped audit.
-3. Cross-scenario state (world log, diff classification, world state loading at scenario start)
-4. System weirdness handling (detection mechanisms, naming, narrative responses as lore develops)
+1. Rich engine model — promote scenario patterns to engine-owned tags and axioms when multiple scenarios independently reach for the same concept. Hunger and Fatigue are already engine-level; the rest waits for demand from real scenarios rather than building infrastructure ahead of use.
+2. Cross-scenario state — world log alongside scenario log, engine-level diffs flow to it, world state loads at scenario start. Depends on #1 (engine vocabulary determines what flows to the world log).
+3. System weirdness handling — name and narrate merge artifacts (timeline mismatches, existence conflicts, stat divergence). Detection primitives exist in `Engine.CRDT.*`; narrative responses develop as we encounter them.
 
-Full proposal with technical details at `proposals/shared-universe.md`.
+Scenario serializability shipped 2026-05-02: the `GameWorld ->` wrapper is gone, the `Snapshot` handoff package round-trips through JSON, and `mergeActions`/`mergeRules`/`mergeMergeRules` are wired into the runtime. A few scenario code axioms remain — the PN-Counter "set absolute" semantics they rely on are CRDT-incompatible, which is a modeling problem rather than a serialization one.
 
 ---
 
