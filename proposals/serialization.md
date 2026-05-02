@@ -1,5 +1,36 @@
 # Proposal: Serializable Scenarios
 
+> **Status (2026-05-02): structural goals shipped; full axiom conversion deferred.**
+>
+> What landed:
+> - `LocationGraph` + region/coordinate data (`Region`, `lgEdges`, `lgRegions`, `lgCoords`) on `GameWorld`
+> - Condition extensions: `CoLocated`, `InRegion`, `InSameRegion`, `Chance`, `HasCoLocated`
+> - Spatial random `EffectBody` variants: `SetLocationRandom`, `SetLocationAdjacent`, `SetLocationAdjacentPrefer`
+> - `Narration` data type (with `NarrationPool`)
+> - `AxiomRule` / `MergeAxiomRule` evaluator (`Engine.Core.AxiomRule`) with the `self` substitution convention
+> - `scenarioActions :: [AnyAction]` — the `GameWorld ->` wrapper is gone; gating runs through `actionCondition`
+> - `Snapshot` extended with `snapActions`, `snapRules`, `snapMergeRules` (legacy snapshots without these fields still load — they default to empty)
+> - JSON instances for the full handoff package, with round-trip tests in `Engine.JSONRoundTripSpec`
+> - `mergeActions` / `mergeRules` / `mergeMergeRules` / `mergeLocationGraphs` wired into `offerMerge` and the live merge path
+> - `Eq` derivations on `Character`, `GameWorld`, `Snapshot` (round-trip tests need them; harmless otherwise)
+>
+> What did NOT land — and why:
+> - **Scenario axiom conversion is partial.** `dawnRule`, `smallAskRule`, `kyleAuditRule`, `earlyReportRule` are `AxiomRule`s. The rest of TopBuy and DeerHunt's axioms remain as code `Axiom`s.
+> - The original "19/19 convert" audit was aspirational. Two recurring blockers turned up:
+>   1. **"Set absolute" stat semantics are CRDT-incompatible.** `shiftAxiom`'s `strDelta = 5 - currentStrength` cannot be expressed as a serializable effect, because `Capacity` stats are `PNCounter PlayerId` and PN-Counters don't have a set operation that survives merge. Adding `SetStat` to `EffectBody` would silently break convergence under multi-player merge. (See note below.) This is a **modeling problem**, not a serialization problem.
+>   2. **State-reading triggers.** `tensionAxiom` (TopBuy + DeerHunt) reads 8 world tags in priority order to compute a single tension level; `deerMovementAxiom` and `spookAxiom` carry HuntWorld closures and probabilistic logic that don't fit the declarative rule shape without substantially expanding the trigger language.
+> - Per the proposal's own "What stays as code" section, this is acceptable. Code axioms remain a supported escape hatch.
+
+## CRDT note: "set absolute" is not a missing primitive
+
+`Capacity` and relationship stats are stored as `PNCounter PlayerId`. PN-Counters merge by per-player max of additive and subtractive buckets. There is no set operation that converges:
+
+> Player A sees Strength = 3 and "sets to 5" → emits +2 in A's bucket.
+> Player B sees Strength = 7 and "sets to 5" → emits −2 in B's bucket.
+> After merge, neither player has Strength = 5 — the buckets sum independently.
+
+Any axiom that wants reset-style semantics (`shiftAxiom` is the canonical example) is **already subtly wrong under multi-player merge**, regardless of serialization. Single-player works because there's only one bucket. Fixing this is a separate modeling project (see `proposals/shared-universe.md` — capacity-as-derived, LWW registers, or shift-tagged overage are the candidates).
+
 ## Motivation
 
 A scenario today is a Haskell value with embedded functions — it can't be saved to disk, transferred between players, or handed off between scenarios at runtime. The goal is to make everything — actions, axiom rules, state, and topology — into pure, serializable data so that a scenario handoff package can travel as JSON. Randomness is included via deterministic `Chance` conditions and random spatial effects, both seeded from the Lamport clock.

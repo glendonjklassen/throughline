@@ -1,9 +1,10 @@
+{-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Engine.JSONRoundTripSpec (spec) where
 
 import           Test.Hspec
 import           Test.QuickCheck
-import           Data.Aeson         (encode, decode, ToJSON, FromJSON)
+import           Data.Aeson         (encode, decode, object, (.=), ToJSON, FromJSON)
 import qualified Data.ByteString            as BS
 import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Data.List.NonEmpty (NonEmpty(..))
@@ -12,7 +13,7 @@ import           Data.Word          (Word8)
 import           Engine.CRDT.ORSet
 import           Engine.CRDT.PNCounter
 import           GameTypes
-import           TestFixtures ()
+import           TestFixtures   (emptyWorld, twoCharWorld)
 
 -- ---------------------------------------------------------------------------
 -- Helper
@@ -212,3 +213,36 @@ spec = describe "JSON round-trips" $ do
 
   it "AnyAction round-trips" $ property $
     \(a :: AnyAction) -> roundTrip a
+
+  -- -------------------------------------------------------------------------
+  -- Snapshot — the serializable scenario handoff package.
+  -- This is the headline guarantee of the serialization proposal: a snapshot
+  -- bundles a world plus the scenario's actions, rules, and merge rules, and
+  -- a recipient can reconstruct the full bundle by JSON round-trip alone.
+  -- -------------------------------------------------------------------------
+
+  it "Snapshot with empty world round-trips" $
+    roundTrip (Snapshot emptyWorld 0 [] [] []) `shouldBe` True
+
+  it "Snapshot with non-trivial world round-trips" $
+    roundTrip (Snapshot twoCharWorld 17 [] [] []) `shouldBe` True
+
+  it "Snapshot carries actions/rules/mergeRules through round-trip" $ property $
+    \(acts :: [AnyAction]) (rs :: [AxiomRule]) (mrs :: [MergeAxiomRule]) (off :: Int) ->
+      let s = Snapshot twoCharWorld off acts rs mrs
+      in roundTrip s
+
+  it "Snapshot round-trips at Int extremes (minBound, maxBound)" $ do
+    roundTrip (Snapshot emptyWorld (minBound :: Int) [] [] []) `shouldBe` True
+    roundTrip (Snapshot emptyWorld (maxBound :: Int) [] [] []) `shouldBe` True
+
+  -- A snapshot written before snapActions/snapRules/snapMergeRules existed
+  -- omits all three.  FromJSON defaults them to empty lists so legacy
+  -- player saves keep loading.
+  it "legacy Snapshot without scenario fields loads with empty action/rule lists" $
+    let canonical = Snapshot emptyWorld 0 [] [] []
+        legacy    = encode (object
+          [ "snapWorld"  .= emptyWorld
+          , "snapOffset" .= (0 :: Int)
+          ])
+    in ((decode legacy :: Maybe Snapshot) == Just canonical) `shouldBe` True

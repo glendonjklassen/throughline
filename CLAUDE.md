@@ -46,7 +46,7 @@ Humans and AI create scenarios. They share engine-level state via CRDTs. Scenari
 ### Implementation priority order
 
 1. Rich engine model (highest leverage — every engine concept is one less thing every scenario reinvents)
-2. Scenario serializability (remove `GameWorld ->` wrapper from actions, JSON for all non-axiom types)
+2. ~~Scenario serializability~~ — **structural work shipped 2026-05-02.** `GameWorld ->` wrapper is gone, full JSON round-trip on the `Snapshot` handoff package, `mergeActions`/`mergeRules`/`mergeMergeRules` wired into the runtime. Scenario code axioms remain (PN-Counter "set absolute" is CRDT-incompatible, so a few are blocked on a separate modeling project). See `proposals/serialization.md` for the shipped audit.
 3. Cross-scenario state (world log, diff classification, world state loading at scenario start)
 4. System weirdness handling (detection mechanisms, naming, narrative responses as lore develops)
 
