@@ -93,6 +93,8 @@ library:
     - Engine.Core.Conditions
     - Engine.Core.Time
     - Engine.Core.World
+    - Engine.Sync.Identity
+    - Engine.Sync.Progress
     - SDL.Launcher
     - SDL.Layout
     - SDL.Palette
