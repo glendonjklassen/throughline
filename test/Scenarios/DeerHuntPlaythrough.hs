@@ -18,7 +18,6 @@ import           Engine.Core.Axioms.Merge (systemMergeAxioms)
 import           Engine.Sync.EventLog   (mergeLogs, replayFrom)
 import           GameTypes
 import           MonadStack              (AppError)
-import           Scenarios.DeerHunt     (deerHunt)
 import           Scenarios.DeerHunt.Axioms (hunterArrivalMergeAxiom)
 import           Scenarios.DeerHunt.Constants
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
@@ -86,7 +85,7 @@ fieldEnd = snd fieldWalk
 
 pinnedDeerHunt :: CharacterId -> Scenario
 pinnedDeerHunt you =
-  let base = deerHunt fixtureSeed you
+  let base = deerHuntForTests fixtureSeed you
       pinned = filter (\a -> axiomId a `notElem`
                   [ ScenarioAxiom "deerMovement"
                   , ScenarioAxiom "spook"

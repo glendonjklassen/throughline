@@ -357,12 +357,14 @@ test-suite throughline-test
       Scenarios.DeerHunt.Section
       Scenarios.DeerHunt.Signature
       Scenarios.DeerHunt.Terrain
+      Scenarios.DeerHunt.WhiteStag
       Scenarios.DeerHunt.World
       Scenarios.DeerHuntSpec
       Scenarios.DeerHuntPlaythrough
       Scenarios.DeerHuntSyncSpec
       Scenarios.DeerHuntGenerationSpec
       Scenarios.DeerHuntSignatureSpec
+      Scenarios.DeerHuntWhiteStagSpec
       Scenarios.DeerHuntTestFixtures
       Scenarios.DinerSpec
       Scenarios.DinerSyncSpec

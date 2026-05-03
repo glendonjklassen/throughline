@@ -183,9 +183,12 @@ drawCompassRose fc cols row exits =
 marginLeft :: CInt
 marginLeft = 2
 
--- | Top bar height (rows): status + compass + separator line.
+-- | Top bar height (rows): location/time, compass rose, status line,
+-- separator.  The status line gets its own row so the proximity-sense
+-- suffix and other long status text don't paint over the compass
+-- labels (which are centered on the row above).
 topBarRows :: Int
-topBarRows = 3
+topBarRows = 4
 
 
 -- ---------------------------------------------------------------------------
@@ -260,10 +263,12 @@ computeLayout rows topH learnH genRowCount hasSpatial =
       , loHistRows     = histRows
       }
 
--- | Draw the top bar: centred location name, right-aligned time,
--- compass rose on the next row, separator on the third.  Same three
--- rows for every frame type (full render, back-buffer render,
--- typewriter tick).
+-- | Draw the top bar: centred location name + right-aligned time on
+-- row 0, compass rose on row 1, scenario status line on row 2,
+-- separator on row 3.  The status line owns its own row so long text
+-- (e.g. DeerHunt's "you feel him close" proximity-sense suffix) can
+-- never paint over the compass labels.  Same four rows for every
+-- frame type (full render, back-buffer render, typewriter tick).
 drawTopBar
   :: FontContext
   -> Int
@@ -283,10 +288,10 @@ drawTopBar fc cols you world statusLine = do
     "" -> pure ()
     _  -> renderText fc timeStr dimTextColor (timeCol, 0)
   drawCompassRose fc cols 1 compassDirs
-  drawHLine fc cols 2
   case statusLine world you of
-    Just s  -> renderText fc s dimTextColor (marginLeft, 1)
+    Just s  -> renderText fc s dimTextColor (marginLeft, 2)
     Nothing -> pure ()
+  drawHLine fc cols 3
 
 -- ---------------------------------------------------------------------------
 -- World rendering — new layout

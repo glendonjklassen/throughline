@@ -7,27 +7,23 @@
 --
 -- This module owns the stag's tag vocabulary, stature math,
 -- pubkey-derived rendering, encounter axiom, action surface, and the
--- end-of-hunt classifier the launcher uses to update the per-identity
--- progress file.
+-- end-of-hunt classifier 'Scenarios.DeerHunt.deerHuntOnEnd' uses to
+-- update the per-identity progress file.
 --
 -- Eligibility is computed in 'Engine.Sync.Progress.lifetimeFindEligible';
 -- this module decides what happens given an eligible hunt.
 --
--- __Status (WIP, 2026-05-02):__ this module compiles and is unit-
--- testable in isolation, but it is __not yet wired into
--- 'Scenarios.DeerHunt'__.  Remaining work, in order:
+-- The wiring is end-to-end as of 2026-05-02:
 --
---   1. Change 'SDL.Launcher.ScenarioEntry.entryMake' to pass through
---      'Progress' and 'Ed25519.PublicKey'.
---   2. Add 'encounterAxiom' to the DeerHunt scenario's axiom list and
---      'whiteStagActions' to its action list when @StagThisHunt@.
---   3. Add an end-of-hunt hook in the launcher that calls
---      'classifyEndOfHunt' on the final world and dispatches to the
---      right 'Engine.Sync.Progress' transition
---      ('recordLifetimeClaim', 'recordLifetimePass',
---      'recordLifetimeLinger').
---   4. Add e2e scenario tests covering claim, pass, fail-claim,
---      linger, and lost-stag paths.
+--   * 'SDL.Launcher.ScenarioEntry' threads 'Engine.Sync.Progress' and
+--     the player's @Ed25519.PublicKey@ into 'entryMake'.
+--   * 'Scenarios.DeerHunt.deerHunt' calls 'presenceFor' to decide
+--     whether the hunt contains the stag and at what stature, adds
+--     'encounterAxiom' to the scenario's axiom list, and exposes
+--     'whiteStagActions' on the action list (gated by world tags).
+--   * 'Scenarios.DeerHunt.deerHuntOnEnd' calls 'classifyEndOfHunt' at
+--     end-of-hunt and dispatches to the right
+--     'Engine.Sync.Progress' transition.
 module Scenarios.DeerHunt.WhiteStag
   ( -- * Stature
     Stature (..)

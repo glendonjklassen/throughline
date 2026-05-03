@@ -17,13 +17,17 @@ module SDL.Launcher
 
 import           Control.Exception      (SomeException, try)
 
+import qualified Crypto.PubKey.Ed25519  as Ed25519
 import           Data.Maybe             (fromMaybe)
 import qualified Data.Version           as Version
 
-import           Engine.Runtime         (runScenarioWith)
-import           Engine.Sync.Identity   (defaultIdentityPath, loadOrCreate, playerIdOf)
-import           Engine.Sync.Progress   (Progress, defaultProgressPath, recordHunt)
-import           GameTypes              (CharacterId(..), PlayerId, Scenario, scenarioName)
+import           Engine.Runtime         (runScenarioWithEnd)
+import           Engine.Sync.Identity   (defaultIdentityPath, identityPublicKey,
+                                         loadOrCreate, playerIdOf)
+import           Engine.Sync.Progress   (Progress, defaultProgress,
+                                         defaultProgressPath, recordHunt)
+import           GameTypes              (CharacterId, GameWorld, PlayerId,
+                                         Scenario)
 import           Paths_throughline      (getDataFileName, version)
 import           SDL.ClickMap           (ClickMap, gridRowRect, hitTest)
 import           SDL.CrashHandler       (withCrashHandler)
@@ -45,16 +49,25 @@ import           SDL.SettingsMenu       (settingsMenu)
 
 -- | What the launcher needs to know about one scenario.  'label' and
 -- 'tagline' are the player-facing strings; 'display' is wired into
--- the runner for scenario-specific rendering; 'make' is the seed-
--- and-playerId-parameterized scenario constructor; 'howToPlay' lets
--- a scenario ship a custom help screen, falling back to generic help
--- when absent.
+-- the runner for scenario-specific rendering; 'entryMake' is the
+-- seed/identity/progress-parameterized scenario constructor;
+-- 'entryHowToPlay' lets a scenario ship a custom help screen,
+-- falling back to generic help when absent; 'entryOnEnd' lets a
+-- scenario hook end-of-hunt bookkeeping (e.g. lifetime-find progress
+-- transitions) — fires only when the scenario reached its terminal
+-- condition, not when the player quit mid-hunt.
 data ScenarioEntry = ScenarioEntry
-  { entryLabel     :: String
-  , entryTagline   :: String
-  , entryDisplay   :: ScenarioDisplay
-  , entryMake      :: Int -> CharacterId -> Scenario
-  , entryHowToPlay :: Maybe [String]
+  { entryLabel        :: String
+  , entryTagline      :: String
+  , entryScenarioName :: String
+    -- ^ The 'scenarioName' the bundled scenario will report.  Held
+    -- here so the launcher can resolve save-file paths without having
+    -- to construct a full 'Scenario' (which now requires identity +
+    -- progress) just to read its name.
+  , entryDisplay      :: ScenarioDisplay
+  , entryMake         :: Int -> CharacterId -> Progress -> Ed25519.PublicKey -> Scenario
+  , entryHowToPlay    :: Maybe [String]
+  , entryOnEnd        :: Maybe (PlayerId -> Ed25519.PublicKey -> GameWorld -> IO ())
   }
 
 -- | Font asset path — same for every bundle, shipped alongside the
@@ -105,9 +118,15 @@ launcherMain entries = do
       -- is the scaffolding for Tier-2 lifetime finds — stature reads
       -- off 'progressHuntCount', rotation bumps 'progressEpoch'.
       -- Failures here must not prevent a hunt from starting, so any
-      -- I/O error is swallowed.
+      -- I/O error is swallowed; the scenario then reads a default
+      -- (epoch 1, hunt 0) progress for the rest of the hunt.
       progressPath <- defaultProgressPath
-      _ <- try (recordHunt pid progressPath) :: IO (Either SomeException Progress)
+      progResult   <- try (recordHunt pid progressPath)
+                        :: IO (Either SomeException Progress)
+      progress <- case progResult of
+        Right p -> pure p
+        Left _  -> defaultProgress
+      let pubkey = identityPublicKey ident
       -- The shared-folder scanner fires once at scenario start (and
       -- again if a live-merge pass re-reads).  If the player hasn't
       -- configured a shared folder, the action returns an empty
@@ -115,11 +134,13 @@ launcherMain entries = do
       let sharedScan n = case sSharedFolder settings of
             Nothing  -> pure []
             Just dir -> scanSharedLogs dir n pid
-          -- scenarioName doesn't depend on seed/you — probe with
-          -- dummies to get the string for the runner.
-          scenName = scenarioName (entryMake entry 0 dummyChar)
-      runScenarioWith (sdlUI scenName (entryDisplay entry)) sharedScan
-                      (entryMake entry)
+          scenName = entryScenarioName entry
+          mkScenario seed you = entryMake entry seed you progress pubkey
+          onTerminal finalW = case entryOnEnd entry of
+            Nothing   -> pure ()
+            Just hook -> hook pid pubkey finalW
+      runScenarioWithEnd (sdlUI scenName (entryDisplay entry))
+                         sharedScan onTerminal mkScenario
 
 -- ---------------------------------------------------------------------------
 -- Single-scenario bundle: title screen with Continue / New hunt
@@ -203,7 +224,7 @@ pickSingle ctx pid entry status = loop
                                               (entryLabel entry)
               if confirmed
                 then do
-                  resetScenarioSave pid (scenarioName (entryMake entry 0 dummyChar))
+                  resetScenarioSave pid (entryScenarioName entry)
                   pure (Just entry)
                 else do
                   cm' <- renderSingleMenu ctx entry status
@@ -219,13 +240,6 @@ pickSingle ctx pid entry status = loop
       _ <- settingsMenu ctx
       cm' <- renderSingleMenu ctx entry status
       loop cm'
-
--- | A placeholder CharacterId used only to ask a scenario for its 'scenarioName'.
--- Scenario names are static strings that never depend on the player
--- CharacterId passed at construction, so feeding in a throwaway value is
--- safe and saves the launcher from having to know the real one early.
-dummyChar :: CharacterId
-dummyChar = Truth
 
 -- ---------------------------------------------------------------------------
 -- Multi-scenario bundle: dev launcher with numeric picker
@@ -321,7 +335,7 @@ renderMultiMenu ctx entries statuses = do
 
 scenarioEntryStatus :: PlayerId -> ScenarioEntry -> IO SaveStatus
 scenarioEntryStatus pid e =
-  scenarioSaveStatus pid (scenarioName (entryMake e 0 dummyChar))
+  scenarioSaveStatus pid (entryScenarioName e)
 
 -- | Short human-readable version tag pulled from the cabal file at
 -- build time.  Shown in the footer of the launcher menus so players

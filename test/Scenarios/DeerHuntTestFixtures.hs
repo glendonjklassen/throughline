@@ -15,6 +15,9 @@ module Scenarios.DeerHuntTestFixtures
   , fixtureHuntWorld
   , fixtureStart
   , fixtureDeerStart
+  , fixturePubkey
+  , fixtureProgress
+  , deerHuntForTests
   , pickByClass
   , pickAdjacentByClass
   , walkPath
@@ -24,13 +27,20 @@ module Scenarios.DeerHuntTestFixtures
   , withoutRollover
   ) where
 
-import           Data.List       (find)
-import qualified Data.Map.Strict as Map
-import           Data.Maybe      (fromMaybe)
-import qualified Data.Set        as Set
+import           Crypto.Error            (CryptoFailable (..))
+import qualified Crypto.PubKey.Ed25519   as Ed25519
+import qualified Data.ByteString         as BS
+import           Data.List               (find)
+import qualified Data.Map.Strict         as Map
+import           Data.Maybe              (fromMaybe)
+import qualified Data.Set                as Set
+import           Data.Time               (UTCTime (..), fromGregorian,
+                                          secondsToDiffTime)
 
+import           Engine.Sync.Progress    (LifetimeFindState (..), Progress (..))
 import           GameTypes
 
+import           Scenarios.DeerHunt            (deerHunt)
 import           Scenarios.DeerHunt.Generation (GeneratedMap(..), TerrainClass(..))
 import           Scenarios.DeerHunt.World      (HuntWorld(..), huntWorld, hwClass,
                                                 hwLocsOfClass, hwStart, hwDeerStart)
@@ -51,6 +61,38 @@ fixtureStart = hwStart fixtureHuntWorld
 -- | The deer's starting location for the fixture hunt.
 fixtureDeerStart :: Location
 fixtureDeerStart = hwDeerStart fixtureHuntWorld
+
+-- | A deterministic Ed25519 public key for tests.  Derived from a
+-- fixed 32-byte secret seed so every test run sees the same key —
+-- the white stag's pubkey-derived rendering and eligibility roll need
+-- a stable input to be reproducible across CI.
+fixturePubkey :: Ed25519.PublicKey
+fixturePubkey = case Ed25519.secretKey (BS.replicate 32 7 :: BS.ByteString) of
+  CryptoPassed sk -> Ed25519.toPublic sk
+  CryptoFailed e  -> error ("fixturePubkey: secretKey failed: " <> show e)
+
+-- | A baseline 'Progress' suitable for tests that don't care about
+-- the white stag.  @huntCount = 0@ means the gamma roll is never
+-- eligible (per 'gammaThreshold'), so the stag won't appear in the
+-- world.  Tests that need a stag-eligible hunt should construct
+-- their own 'Progress' (typically with a hunt count whose roll for
+-- 'fixturePubkey' lands under the threshold) and pass it directly
+-- to 'Scenarios.DeerHunt.deerHunt'.
+fixtureProgress :: Progress
+fixtureProgress = Progress
+  { progressEpoch        = 1
+  , progressHuntCount    = 0
+  , progressLifetimeFind = FindPending
+  , progressUpdatedAt    = UTCTime (fromGregorian 2026 1 1) (secondsToDiffTime 0)
+  }
+
+-- | Build the DeerHunt scenario with the test fixture's progress and
+-- pubkey.  Drop-in replacement for callers that previously did
+-- @deerHunt fixtureSeed you@ before the white-stag wiring required
+-- per-identity context.  Tests asserting white-stag behavior should
+-- call 'deerHunt' directly with crafted progress.
+deerHuntForTests :: Int -> CharacterId -> Scenario
+deerHuntForTests seed you = deerHunt seed you fixtureProgress fixturePubkey
 
 -- | Pick an arbitrary location of a given terrain class from the
 -- fixture map.  Errors (loudly) if no location of that class exists —

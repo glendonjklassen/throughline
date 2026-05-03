@@ -4,7 +4,7 @@ A tiered system for rare, identity-bound discoveries that make each hunt feel pe
 
 The core tension this proposal resolves: true uniqueness pulls against per-hunt reward. A BTC-style lottery is globally scarce but individually unsatisfying; a guaranteed per-hunt reward is satisfying but not scarce. The resolution is to **stratify rarity into two tiers**, each with a different uniqueness guarantee and a different probability shape.
 
-> **Status (2026-05-02): Tier 1 shipped, Tier 2 in flight.** A previous Tier 3 (cross-player relic finds via oracle/Nostr) was removed from scope — the engine-side relic infrastructure stays in `Engine.Sync.Relic.*` but no scenario integration is planned here. Reintroduce when shared-universe demand is real.
+> **Status (2026-05-02): Tier 1 + Tier 2 shipped.** A previous Tier 3 (cross-player relic finds via oracle/Nostr) was removed from scope — the engine-side relic infrastructure stays in `Engine.Sync.Relic.*` but no scenario integration is planned here. Reintroduce when shared-universe demand is real.
 
 ## Tier 1 — Signature Find (per-hunt unique)
 

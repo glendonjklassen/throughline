@@ -5,6 +5,7 @@ module Engine.Runtime
   ( RuntimeUI(..)
   , runScenario
   , runScenarioWith
+  , runScenarioWithEnd
   , offerMerge
   , sessionsRootDir
   ) where
@@ -52,7 +53,21 @@ runScenarioWith
   -> (String -> IO [(PlayerId, [LogEntry], Maybe Snapshot)])
   -> (Int -> CharacterId -> Scenario)
   -> IO ()
-runScenarioWith ui extraForeign mkScenario = do
+runScenarioWith ui extraForeign = runScenarioWithEnd ui extraForeign (\_ -> pure ())
+
+-- | Like 'runScenarioWith', but also calls a post-scenario hook with
+-- the final 'GameWorld' when the scenario reaches its terminal
+-- condition.  The hook fires after the end screen and before the
+-- snapshot save, and is the launcher's hook for end-of-hunt
+-- bookkeeping (e.g. lifetime-find progress transitions).  The hook
+-- does NOT fire when the player quits with @q@.
+runScenarioWithEnd
+  :: RuntimeUI
+  -> (String -> IO [(PlayerId, [LogEntry], Maybe Snapshot)])
+  -> (GameWorld -> IO ())
+  -> (Int -> CharacterId -> Scenario)
+  -> IO ()
+runScenarioWithEnd ui extraForeign onTerminal mkScenario = do
   args <- getArgs
   let newSession  = "--new-session" `elem` args || "-ns" `elem` args
       sessionDir  = parseSessionDir args
@@ -124,9 +139,13 @@ runScenarioWith ui extraForeign mkScenario = do
       Left err          -> uiOnError ui (show err)
       Right (_, finalW) -> do
         -- Only show end screen if the scenario reached a terminal condition.
-        -- If the player quit (q), skip it — immediate exit.
-        when (checkCondition finalW (scenarioTerminal scenario)) $
+        -- If the player quit (q), skip it — immediate exit.  The
+        -- onTerminal hook is gated the same way: end-of-hunt
+        -- bookkeeping (e.g. lifetime-find progress) only runs for
+        -- hunts that actually ended, not for quit-mid-hunt sessions.
+        when (checkCondition finalW (scenarioTerminal scenario)) $ do
           uiOnEnd ui finalW
+          onTerminal finalW
         finalLog <- lsLoadOwn store
         lsSaveSnap store (Snapshot finalW (length finalLog)
                            (scenarioActions scenario)

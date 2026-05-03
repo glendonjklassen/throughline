@@ -30,7 +30,6 @@ import           Engine.Sync.Causality     (buildMergeDiff, runMergeAxioms)
 import           Engine.Sync.EventLog      (mergeLogs, nullLogStore, replayFrom)
 import           GameTypes
 import           MonadStack                (AppError)
-import           Scenarios.DeerHunt        (deerHunt)
 import           Scenarios.DeerHunt.Axioms (hunterArrivalMergeAxiom)
 import           Scenarios.DeerHunt.Constants
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
@@ -84,25 +83,25 @@ fieldEnd = snd fieldWalk
 -- | Snapshot merge: run both hunters independently, CRDT-merge final worlds.
 snapshotMerge :: [ActionId] -> [ActionId] -> IO GameWorld
 snapshotMerge scriptA scriptB = do
-  Right (worldA, _) <- runHeadlessScript (deerHunt fixtureSeed) pidA scriptA
-  Right (worldB, _) <- runHeadlessScript (deerHunt fixtureSeed) pidB scriptB
+  Right (worldA, _) <- runHeadlessScript (deerHuntForTests fixtureSeed) pidA scriptA
+  Right (worldB, _) <- runHeadlessScript (deerHuntForTests fixtureSeed) pidB scriptB
   pure (mergeWorlds worldA worldB)
 
 -- | Log merge: merge initial worlds as base, merge logs, replay.
 logMerge :: [ActionId] -> [ActionId] -> IO (Either AppError GameWorld)
 logMerge scriptA scriptB = do
-  let scenA = deerHunt fixtureSeed youA
-      scenB = deerHunt fixtureSeed youB
+  let scenA = deerHuntForTests fixtureSeed youA
+      scenB = deerHuntForTests fixtureSeed youB
       base  = mergeWorlds (scenarioInitial scenA) (scenarioInitial scenB)
-  Right (_, logA) <- runHeadlessScript (deerHunt fixtureSeed) pidA scriptA
-  Right (_, logB) <- runHeadlessScript (deerHunt fixtureSeed) pidB scriptB
+  Right (_, logA) <- runHeadlessScript (deerHuntForTests fixtureSeed) pidA scriptA
+  Right (_, logB) <- runHeadlessScript (deerHuntForTests fixtureSeed) pidB scriptB
   let (_, divergent) = mergeLogs logA logB
   replayFrom scenA base divergent
 
 -- | Check if the wave action is available for a given hunter in the world.
 canWave :: CharacterId -> GameWorld -> Bool
 canWave you world =
-  let scen    = deerHunt fixtureSeed you
+  let scen    = deerHuntForTests fixtureSeed you
       actions = scenarioActions scen
       waveActions = filter (\a -> anyActionId a == ActionId "wave") actions
   in any (checkCondition world . anyActionCondition) waveActions
@@ -114,7 +113,7 @@ canWave you world =
 
 pinnedDeerHunt :: CharacterId -> Scenario
 pinnedDeerHunt you =
-  let base = deerHunt fixtureSeed you
+  let base = deerHuntForTests fixtureSeed you
       pinned = filter (\a -> axiomId a `notElem`
                   [ ScenarioAxiom "deerMovement"
                   , ScenarioAxiom "spook"

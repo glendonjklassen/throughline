@@ -16,7 +16,6 @@ import           MonadStack                (AppError, Env)
 
 import           TestFixtures              (mkScenarioEnv, step)
 
-import           Scenarios.DeerHunt           (deerHunt)
 import           Scenarios.DeerHunt.Actions   (huntGraph)
 import           Scenarios.DeerHunt.Constants
 import           Scenarios.DeerHunt.Generation (TerrainClass(..))
@@ -94,7 +93,7 @@ spec = do
     it "solo clean kill: DeerKilled" $ do
       let tick = findTick (`doesShotHit` you) (mkShootableWorld you) shootLoc
           w0 = mkShootableWorld you shootLoc tick
-          scenario = withoutRollover ((deerHunt fixtureSeed you) { scenarioInitial = w0 })
+          scenario = withoutRollover ((deerHuntForTests fixtureSeed you) { scenarioInitial = w0 })
       env <- mkScenarioEnv you scenario
       wFinal <- step env (ActionId "takeTheShot") w0
       checkCondition wFinal (HasWorldTag deerKilled) `shouldBe` True
@@ -104,7 +103,7 @@ spec = do
     it "missed shot: DeerGone" $ do
       let tick = findTick (\w -> not (doesShotHit w you)) (mkShootableWorld you) shootLoc
           w0 = mkShootableWorld you shootLoc tick
-          scenario = withoutRollover ((deerHunt fixtureSeed you) { scenarioInitial = w0 })
+          scenario = withoutRollover ((deerHuntForTests fixtureSeed you) { scenarioInitial = w0 })
       env <- mkScenarioEnv you scenario
       wFinal <- step env (ActionId "takeTheShot") w0
       checkCondition wFinal (HasWorldTag deerGone)   `shouldBe` True
@@ -115,7 +114,7 @@ spec = do
           mkW = mkShootableWorldWith you other
           tick = findTick (\w -> doesShotHit w you && not (isFriendlyFire w)) mkW shootLoc
           w0 = mkShootableWorldWith you other shootLoc tick
-          scenario = withoutRollover ((deerHunt fixtureSeed you) { scenarioInitial = w0 })
+          scenario = withoutRollover ((deerHuntForTests fixtureSeed you) { scenarioInitial = w0 })
       env <- mkScenarioEnv you scenario
       wFinal <- step env (ActionId "takeTheShot") w0
       checkCondition wFinal (HasWorldTag deerKilled) `shouldBe` True
@@ -126,7 +125,7 @@ spec = do
           mkW = mkShootableWorldWith you other
           tick = findTick (\w -> doesShotHit w you && isFriendlyFire w) mkW shootLoc
           w0 = mkShootableWorldWith you other shootLoc tick
-          scenario = (deerHunt fixtureSeed you) { scenarioInitial = w0 }
+          scenario = (deerHuntForTests fixtureSeed you) { scenarioInitial = w0 }
       env <- mkScenarioEnv you scenario
       wFinal <- step env (ActionId "takeTheShot") w0
       checkCondition wFinal (HasWorldTag hunterShot) `shouldBe` True
@@ -134,7 +133,7 @@ spec = do
 
     it "tension rises with deer spotted" $ do
       let w0 = mkShootableWorld you shootLoc 42
-          scenario = (deerHunt fixtureSeed you) { scenarioInitial = w0 }
+          scenario = (deerHuntForTests fixtureSeed you) { scenarioInitial = w0 }
       env <- mkScenarioEnv you scenario
       w1 <- step env (ActionId "sit:on") w0
       getTension w1 `shouldSatisfy` (>= 8)
@@ -142,7 +141,7 @@ spec = do
     it "experience increases with fresh sign" $ do
       -- Player near deer: find a field location in the same region as the
       -- deer's starting class, then co-locate for the sign trigger.
-      let scenario = deerHunt fixtureSeed you
+      let scenario = deerHuntForTests fixtureSeed you
           fieldLoc = pickByClass CField
           w0 = (scenarioInitial scenario)
                  { worldLocations = Map.fromList
@@ -156,7 +155,7 @@ spec = do
       endExp `shouldSatisfy` (>= startExp)
 
     it "can navigate between adjacent nodes" $ do
-      let scenario = deerHunt fixtureSeed you
+      let scenario = deerHuntForTests fixtureSeed you
           w0 = scenarioInitial scenario
           -- Find any edge out of the start location.
           (path, _) = walkPath fixtureStart CField 1
@@ -172,7 +171,7 @@ spec = do
     let you' = Named "test-player"
 
     it "has no duplicate ActionIds" $
-      isRight (validateScenario (deerHunt fixtureSeed you')) `shouldBe` True
+      isRight (validateScenario (deerHuntForTests fixtureSeed you')) `shouldBe` True
 
     it "has a connected scene graph" $
       isRight (validateSceneGraph (huntGraph fixtureHuntWorld)) `shouldBe` True
@@ -197,7 +196,7 @@ spec = do
             , dayNumberTag 0, timeTag 10
             ]
           w0 = (mkShootableWorld you shootLoc tick) { worldTags = baseTags }
-          scenario = withoutRollover ((deerHunt fixtureSeed you) { scenarioInitial = w0 })
+          scenario = withoutRollover ((deerHuntForTests fixtureSeed you) { scenarioInitial = w0 })
       env <- mkScenarioEnv you scenario
       checkCondition w0 (HasWorldTag deerSpotted) `shouldBe` False
       w1 <- step env (ActionId "look") w0
@@ -206,7 +205,7 @@ spec = do
       checkCondition w2 (HasWorldTag deerKilled) `shouldBe` True
 
     it "walk from start, look, and shoot" $ do
-      let base     = deerHunt fixtureSeed you
+      let base     = deerHuntForTests fixtureSeed you
           pinned   = filter (\a -> axiomId a `notElem`
                       [ ScenarioAxiom "deerMovement"
                       , ScenarioAxiom "spook"
@@ -249,7 +248,7 @@ spec = do
 
     it "headless random walk reaches a terminal condition" $ do
       let seeds = [42, 0, 7, 100, 2025]
-          scenarioFor cid = withoutRollover (deerHunt fixtureSeed cid)
+          scenarioFor cid = withoutRollover (deerHuntForTests fixtureSeed cid)
       results <- mapM (runHeadlessRandom scenarioFor (PlayerId "integration-test") 1000) seeds
       let anyTerminated = any terminatedOk results
       anyTerminated `shouldBe` True
@@ -292,7 +291,7 @@ spec = do
 
     describe "tension with fresh sign" $ do
       it "tension is 6 when fresh sign is present" $ do
-        let base = deerHunt fixtureSeed you
+        let base = deerHuntForTests fixtureSeed you
             pinned = filter (\a -> axiomId a /= ScenarioAxiom "deerMovement"
                                 && axiomId a /= ScenarioAxiom "spook")
                            (scenarioAxioms base)
@@ -316,7 +315,7 @@ spec = do
         getTension w2 `shouldBe` 6
 
     it "full playthrough: walk from start, find deer, shoot" $ do
-      let scenario = withoutRollover (deerHunt fixtureSeed you)
+      let scenario = withoutRollover (deerHuntForTests fixtureSeed you)
           w0 = scenarioInitial scenario
           (path, _) = walkPath fixtureStart CField 3
       env <- mkScenarioEnv you scenario
