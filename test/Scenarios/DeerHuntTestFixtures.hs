@@ -83,6 +83,7 @@ fixtureProgress = Progress
   { progressEpoch        = 1
   , progressHuntCount    = 0
   , progressLifetimeFind = FindPending
+  , progressCompetencies = Set.empty
   , progressUpdatedAt    = UTCTime (fromGregorian 2026 1 1) (secondsToDiffTime 0)
   }
 

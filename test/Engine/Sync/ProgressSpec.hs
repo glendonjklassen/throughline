@@ -248,7 +248,10 @@ spec = describe "Engine.Sync.Progress" $ do
       pk <- mkPubKey
       -- Across many (epoch, n) combinations we should see at least one
       -- difference; we're not asserting any specific bit pattern.
+      -- Sweep is sized so the all-miss outcome is vanishingly rare
+      -- (~10^-7 for any pubkey under the calibrated gamma table) —
+      -- the smaller [1..3] x [1..30] earlier produced a real ~6% flake.
       let rolls = [ lifetimeFindEligible pk e n FindPending
-                  | e <- [1..3], n <- [1..30] ]
+                  | e <- [1..10], n <- [1..50] ]
       length (filter id rolls)  `shouldSatisfy` (> 0)
       length (filter not rolls) `shouldSatisfy` (> 0)

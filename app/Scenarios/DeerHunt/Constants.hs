@@ -87,6 +87,8 @@ data DeerHuntSeasonTag
   | FoundSignBed         -- ^ First time finding a bed
   | FoundSignRub         -- ^ First time finding a rub
   | FoundSignScrape      -- ^ First time finding a scrape
+  | WaitedStillMilestone -- ^ Player held 'Stillness' at or above 'waitedStillThreshold' for at least one tick this hunt.  Latches; consumed at end-of-hunt by 'deerHuntOnEnd' to grant 'WaitingWithoutAct'.
+  | WaitedSitNarrated    -- ^ Player has already received the once-per-hunt narrate beat that fires when an experienced sitter (carrying 'WaitingWithoutAct') sits down for the first time.
   | WindAngle Int        -- ^ Wind direction in hundredths of degrees (0–36000)
   | WindStrength Int     -- ^ Wind strength in hundredths (0–100, maps to 0.0–1.0)
   deriving (Show, Eq, Ord)
@@ -160,6 +162,31 @@ foundSignRub = scenarioTag FoundSignRub
 
 foundSignScrape :: Tag
 foundSignScrape = scenarioTag FoundSignScrape
+
+-- | Latches when the player's 'Stillness' first hits
+-- 'waitedStillThreshold' during a hunt.  Persistent for the hunt;
+-- consumed by the end-of-hunt competency-grant logic.
+waitedStillMilestone :: Tag
+waitedStillMilestone = scenarioTag WaitedStillMilestone
+
+-- | One-shot marker so the experienced-sitter narrate beat fires
+-- exactly once per hunt.
+waitedSitNarrated :: Tag
+waitedSitNarrated = scenarioTag WaitedSitNarrated
+
+-- | Stillness value at which a hunt qualifies as having demonstrated
+-- 'Engine.Competency.WaitingWithoutAct'.  6 ticks ≈ 30 in-game
+-- minutes of unbroken sitting.  Tunable; tighten if the competency
+-- starts feeling too easy to earn.
+waitedStillThreshold :: Int
+waitedStillThreshold = 6
+
+-- | Distinct sign-discovery tags ('FoundSignTracks/Bed/Rub/Scrape')
+-- the player needs to have on their final world to be granted
+-- 'Engine.Competency.AnimalSignReading'.  Three of four covers most
+-- competent hunts without trivialising the threshold.
+animalSignReadingThreshold :: Int
+animalSignReadingThreshold = 3
 
 dayOver :: Tag
 dayOver = scenarioTag DayOver
