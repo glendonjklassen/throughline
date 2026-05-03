@@ -1,13 +1,25 @@
-module Scenarios.DeerHunt (deerHunt, deerHuntDisplay) where
+module Scenarios.DeerHunt
+  ( deerHunt
+  , deerHuntDisplay
+  , deerHuntName
+  , deerHuntOnEnd
+  ) where
 
-import qualified Data.Map.Strict as Map
-import qualified Data.Set        as Set
+import           Control.Exception      (SomeException, try)
+import qualified Crypto.PubKey.Ed25519  as Ed25519
+import qualified Data.Map.Strict        as Map
+import qualified Data.Set               as Set
 
 import           Engine.Author.Discovery (Discovery (..), discoveryTag)
-import           Engine.Author.DSL      (hasTag, olderThanDays, worldTagList)
+import           Engine.Author.DSL      (hasTag, olderThanDays, tagsFromList,
+                                         worldTagList)
 import           Engine.Core.Conditions (checkCondition)
 import           Engine.Core.Time       (currentHour)
 import           Engine.Core.World      (characterLocation)
+import           Engine.Sync.Progress   (Progress (..), defaultProgressPath,
+                                         recordLifetimeClaim,
+                                         recordLifetimeLinger,
+                                         recordLifetimePass)
 import           SDL.Layout
 import           SDL.Palette  (Color, zoneTintDefault)
 import           SDL.Sprites  (forestRegistry)
@@ -26,20 +38,48 @@ import           Scenarios.DeerHunt.Signature   (SignatureArchetype(..),
                                                  parseSignatureLocTag,
                                                  parseSignatureArchetypeTag,
                                                  signatureFoundTag)
+import           Scenarios.DeerHunt.WhiteStag   (EndOfHuntOutcome (..),
+                                                 classifyEndOfHunt,
+                                                 encounterAxiom,
+                                                 initialStagTags,
+                                                 presenceFor,
+                                                 whiteStagActions)
 import           Scenarios.DeerHunt.World       (HuntWorld (..), PositionHint(..),
                                                  huntWorld, hwClass)
 
--- | Build a full DeerHunt scenario from a seed.  The 'HuntWorld' is
+-- | The scenario name DeerHunt reports.  Re-exported so the launcher
+-- can resolve save-file paths without constructing a full 'Scenario'
+-- (which now requires identity + progress).
+deerHuntName :: String
+deerHuntName = "Deer Hunt"
+
+-- | Build a full DeerHunt scenario from a seed plus the player's
+-- per-identity 'Progress' and public key.  The 'HuntWorld' is
 -- constructed once here and captured by every axiom, action, and
 -- display hook that needs to consult the generated map.
-deerHunt :: Int -> CharacterId -> Scenario
-deerHunt seed you =
-  let hw = huntWorld seed
+--
+-- The progress + pubkey wire the Tier-2 lifetime find (white stag):
+-- 'presenceFor' decides whether this hunt contains the stag and at
+-- what stature, the encounter axiom + actions are added unconditionally
+-- (gated by world tags), and the initial stag tags are seeded into the
+-- world for hunts where the stag is in play.
+deerHunt :: Int -> CharacterId -> Progress -> Ed25519.PublicKey -> Scenario
+deerHunt seed you progress pubkey =
+  let hw       = huntWorld seed
+      presence = presenceFor pubkey
+                             (progressEpoch progress)
+                             (progressHuntCount progress)
+                             (progressLifetimeFind progress)
+                             hw
+      base     = initialWorld hw you
+      stagTags = initialStagTags presence
   in Scenario
-       { scenarioName         = "Deer Hunt"
-       , scenarioInitial      = initialWorld hw you
-       , scenarioActions      = allActions hw you
+       { scenarioName         = deerHuntName
+       , scenarioInitial      = base
+           { worldTags = tagsFromList (stagTags ++ worldTagList base) }
+       , scenarioActions      = allActions hw you ++ whiteStagActions you
        , scenarioAxioms       = allAxioms hw you
+                                ++ [encounterAxiom you pubkey presence]
        , scenarioMergeAxioms  = [hunterArrivalMergeAxiom you]
        , scenarioRules        = [dawnRule you]
        , scenarioMergeRules   = []
@@ -51,6 +91,30 @@ deerHunt seed you =
          -- keep re-adjudicating.  Matches Deer Hunt's "not this
          -- year" narrative cadence.
        }
+
+-- | End-of-hunt hook for DeerHunt — classifies the final world and
+-- dispatches to the right 'Engine.Sync.Progress' transition for the
+-- lifetime find.  Wired into 'ScenarioEntry.entryOnEnd' so it runs
+-- only when the hunt actually terminated (not on quit-mid-hunt).
+--
+-- I/O failures are swallowed: a flaky disk shouldn't crash the
+-- post-hunt screen.  The pubkey is unused by the dispatch itself
+-- (the WhiteStag tags carry the resolution) but is part of the hook
+-- signature for symmetry with future scenarios that may want it.
+deerHuntOnEnd :: PlayerId -> Ed25519.PublicKey -> GameWorld -> IO ()
+deerHuntOnEnd pid _pubkey finalW = do
+  path <- defaultProgressPath
+  let outcome = classifyEndOfHunt finalW
+      action  = case outcome of
+        NoStagInPlay         -> Nothing
+        StagClaimedThisHunt  -> Just (recordLifetimeClaim   pid path)
+        StagPassedThisHunt   -> Just (recordLifetimePass    pid path)
+        StagLingered         -> Just (recordLifetimeLinger  pid path)
+  case action of
+    Nothing  -> pure ()
+    Just act -> do
+      _ <- try act :: IO (Either SomeException Progress)
+      pure ()
 
 -- | The scenario's display hooks.  Unlike 'deerHunt' these can't close
 -- over a 'HuntWorld' built from a seed because the SDL runtime doesn't

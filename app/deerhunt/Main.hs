@@ -6,12 +6,19 @@ module Main where
 
 import           SDL.Launcher            (ScenarioEntry(..), runLauncher)
 
-import           Scenarios.DeerHunt      (deerHunt, deerHuntDisplay)
+import           Scenarios.DeerHunt      (deerHunt, deerHuntDisplay,
+                                          deerHuntName, deerHuntOnEnd)
 import           Scenarios.DeerHunt.Help (deerHuntHelp)
 
 main :: IO ()
 main = runLauncher
-  [ ScenarioEntry "Deer Hunt"
-      "Mid-November. Southern Manitoba. One square mile. One buck."
-      deerHuntDisplay deerHunt (Just deerHuntHelp)
+  [ ScenarioEntry
+      { entryLabel        = "Deer Hunt"
+      , entryTagline      = "Mid-November. Southern Manitoba. One square mile. One buck."
+      , entryScenarioName = deerHuntName
+      , entryDisplay      = deerHuntDisplay
+      , entryMake         = deerHunt
+      , entryHowToPlay    = Just deerHuntHelp
+      , entryOnEnd        = Just deerHuntOnEnd
+      }
   ]

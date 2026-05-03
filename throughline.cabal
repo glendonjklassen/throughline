@@ -43,6 +43,8 @@ library
     , Engine.Core.Conditions
     , Engine.Core.Time
     , Engine.Core.World
+    , Engine.Sync.Identity
+    , Engine.Sync.Progress
     , SDL.Launcher
     , SDL.Layout
     , SDL.Palette
@@ -180,6 +182,7 @@ executable deerhunt-exe
       Scenarios.Customer
       Scenarios.Customer.Constants
       Scenarios.Customer.WalkScene
+      Scenarios.DeerHunt.WhiteStag
       Scenarios.Diner
       Scenarios.Diner.Axioms
       Scenarios.Diner.Constants
@@ -264,6 +267,7 @@ executable throughline-exe
       Scenarios.DeerHunt.Section
       Scenarios.DeerHunt.Signature
       Scenarios.DeerHunt.Terrain
+      Scenarios.DeerHunt.WhiteStag
       Scenarios.DeerHunt.World
       Scenarios.Diner
       Scenarios.Diner.Axioms
@@ -353,12 +357,14 @@ test-suite throughline-test
       Scenarios.DeerHunt.Section
       Scenarios.DeerHunt.Signature
       Scenarios.DeerHunt.Terrain
+      Scenarios.DeerHunt.WhiteStag
       Scenarios.DeerHunt.World
       Scenarios.DeerHuntSpec
       Scenarios.DeerHuntPlaythrough
       Scenarios.DeerHuntSyncSpec
       Scenarios.DeerHuntGenerationSpec
       Scenarios.DeerHuntSignatureSpec
+      Scenarios.DeerHuntWhiteStagSpec
       Scenarios.DeerHuntTestFixtures
       Scenarios.DinerSpec
       Scenarios.DinerSyncSpec

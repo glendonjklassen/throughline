@@ -46,6 +46,7 @@ import qualified Scenarios.DeerHuntPlaythrough
 import qualified Scenarios.DeerHuntSyncSpec
 import qualified Scenarios.DeerHuntGenerationSpec
 import qualified Scenarios.DeerHuntSignatureSpec
+import qualified Scenarios.DeerHuntWhiteStagSpec
 import qualified Scenarios.TopBuySpec
 
 main :: IO ()
@@ -89,6 +90,7 @@ main = hspec $ do
   Scenarios.DeerHuntSyncSpec.spec
   Scenarios.DeerHuntGenerationSpec.spec
   Scenarios.DeerHuntSignatureSpec.spec
+  Scenarios.DeerHuntWhiteStagSpec.spec
   Scenarios.TopBuySpec.spec
   Scenarios.DinerSpec.spec
   Scenarios.DinerSyncSpec.spec

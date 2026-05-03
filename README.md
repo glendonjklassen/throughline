@@ -87,7 +87,6 @@ The engine is supposed to handle most of what narratives need — hunger, fatigu
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — three-layer model
 - [CLAUDE.md](./CLAUDE.md) — vision, pillars, priorities
 - [docs/multiplayer.md](./docs/multiplayer.md) — sync internals
-- [proposals/shared-universe.md](./proposals/shared-universe.md) — forward-looking design
 
 ## On AI usage
 

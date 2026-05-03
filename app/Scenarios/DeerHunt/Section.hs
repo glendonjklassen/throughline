@@ -7,8 +7,8 @@
 -- encodes a specific southern-Manitoba section (road along the east
 -- edge, bush in the NW, fields in between, a creek cutting SE).
 -- Expressing it as data means two things: we can re-roll for variety
--- without losing the "feel" of the place, and we can ship scenarios as
--- pure data (pillar 4 of the shared-universe plan).
+-- without losing the "feel" of the place, and the section can travel
+-- with the scenario as pure data.
 module Scenarios.DeerHunt.Section
   ( SectionDescriptor(..)
   , TerrainPrimitive(..)

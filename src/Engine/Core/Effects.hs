@@ -250,8 +250,8 @@ applyWorldDiff diff = do
 
 -- | OR-Set merge for active effects: union by liveId, deduplicating shared entries.
 -- An effect present in both sides (same UUID) is kept once.
--- NOTE: nubBy is O(n²). If active effect counts grow large (e.g. shared-universe
--- scenarios with many concurrent players), replace with a Map-based dedup.
+-- NOTE: nubBy is O(n²). If active effect counts grow large under
+-- many-player merges, replace with a Map-based dedup.
 mergeActiveEffects :: [LiveEffect] -> [LiveEffect] -> [LiveEffect]
 mergeActiveEffects as bs = nubBy (\x y -> liveId x == liveId y) (as ++ bs)
 

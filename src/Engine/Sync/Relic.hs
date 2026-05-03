@@ -10,9 +10,7 @@
 -- @http-client@ (or Nostr, or player-hosted-oracle) backend
 -- without touching scenario code.
 --
--- See "Engine.Sync.Relic.Shamir" for the secret-sharing primitives
--- and [`proposals/relic-infrastructure.md`](../proposals/relic-infrastructure.md)
--- for the overall design.
+-- See "Engine.Sync.Relic.Shamir" for the secret-sharing primitives.
 --
 -- The default 'stubTransport' returns 'NotConfigured' for every
 -- call, which is the right shape for the current build: players
