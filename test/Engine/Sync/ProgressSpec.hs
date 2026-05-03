@@ -214,7 +214,7 @@ spec = describe "Engine.Sync.Progress" $ do
     let mkPubKey :: IO Ed25519.PublicKey
         mkPubKey = do
           drg <- Crypto.drgNew
-          let (sk, _) = Crypto.withDRG drg (Ed25519.generateSecretKey)
+          let (sk, _) = Crypto.withDRG drg Ed25519.generateSecretKey
           pure (Ed25519.toPublic sk)
 
     it "FindClaimed is never eligible" $ do
