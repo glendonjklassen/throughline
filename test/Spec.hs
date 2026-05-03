@@ -13,6 +13,7 @@ import qualified Engine.Core.EffectsSpec
 import qualified Engine.Sync.EventLogSpec
 import qualified Engine.Sync.IdentitySpec
 import qualified Engine.Sync.ProgressSpec
+import qualified Engine.CompetencySpec
 import qualified Engine.Sync.RelicSpec
 import qualified Engine.Sync.Relic.ShamirSpec
 import qualified Engine.Author.NarrativeSpec
@@ -47,6 +48,7 @@ import qualified Scenarios.DeerHuntSyncSpec
 import qualified Scenarios.DeerHuntGenerationSpec
 import qualified Scenarios.DeerHuntSignatureSpec
 import qualified Scenarios.DeerHuntWhiteStagSpec
+import qualified Scenarios.DeerHuntCompetencySpec
 import qualified Scenarios.TopBuySpec
 
 main :: IO ()
@@ -64,6 +66,7 @@ main = hspec $ do
   Engine.Sync.EventLogSpec.spec
   Engine.Sync.IdentitySpec.spec
   Engine.Sync.ProgressSpec.spec
+  Engine.CompetencySpec.spec
   Engine.Sync.RelicSpec.spec
   Engine.Sync.Relic.ShamirSpec.spec
   Engine.CRDT.ORSetSpec.spec
@@ -91,6 +94,7 @@ main = hspec $ do
   Scenarios.DeerHuntGenerationSpec.spec
   Scenarios.DeerHuntSignatureSpec.spec
   Scenarios.DeerHuntWhiteStagSpec.spec
+  Scenarios.DeerHuntCompetencySpec.spec
   Scenarios.TopBuySpec.spec
   Scenarios.DinerSpec.spec
   Scenarios.DinerSyncSpec.spec

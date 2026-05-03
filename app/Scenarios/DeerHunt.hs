@@ -3,20 +3,26 @@ module Scenarios.DeerHunt
   , deerHuntDisplay
   , deerHuntName
   , deerHuntOnEnd
+    -- * Competency wiring (exposed for testing)
+  , competenciesEarned
+  , experiencedSitterAxiom
   ) where
 
 import           Control.Exception      (SomeException, try)
 import qualified Crypto.PubKey.Ed25519  as Ed25519
+import           Data.Foldable          (for_)
 import qualified Data.Map.Strict        as Map
 import qualified Data.Set               as Set
 
 import           Engine.Author.Discovery (Discovery (..), discoveryTag)
-import           Engine.Author.DSL      (hasTag, olderThanDays, tagsFromList,
-                                         worldTagList)
+import           Engine.Author.DSL      (hasTag, immediate, olderThanDays,
+                                         tagsFromList, worldTagList)
 import           Engine.Core.Conditions (checkCondition)
 import           Engine.Core.Time       (currentHour)
 import           Engine.Core.World      (characterLocation)
+import           Engine.Competency      (Competency (..))
 import           Engine.Sync.Progress   (Progress (..), defaultProgressPath,
+                                         grantCompetency, hasCompetency,
                                          recordLifetimeClaim,
                                          recordLifetimeLinger,
                                          recordLifetimePass)
@@ -80,6 +86,7 @@ deerHunt seed you progress pubkey =
        , scenarioActions      = allActions hw you ++ whiteStagActions you
        , scenarioAxioms       = allAxioms hw you
                                 ++ [encounterAxiom you pubkey presence]
+                                ++ [experiencedSitterAxiom you progress]
        , scenarioMergeAxioms  = [hunterArrivalMergeAxiom you]
        , scenarioRules        = [dawnRule you]
        , scenarioMergeRules   = []
@@ -91,6 +98,33 @@ deerHunt seed you progress pubkey =
          -- keep re-adjudicating.  Matches Deer Hunt's "not this
          -- year" narrative cadence.
        }
+
+-- | One-shot narrate beat that fires the first time a player who
+-- already carries 'WaitingWithoutAct' (from a prior hunt) sits down
+-- in the current hunt.  Hands-off otherwise: if the player doesn't
+-- have the competency, the axiom never fires; if they do but never
+-- sit, no beat.
+--
+-- The intent is the smallest readable signal that competency
+-- continuity is wired end-to-end.  When this stops feeling like
+-- enough, escalate: change the conversation pool, gate an option,
+-- shift the proximity-sense thresholds, etc.
+experiencedSitterAxiom :: CharacterId -> Progress -> Axiom
+experiencedSitterAxiom _you progress = Axiom
+  { axiomId       = ScenarioAxiom "experiencedSitter"
+  , axiomPriority = 6
+  , axiomEvaluate = \world _actions diff ->
+      let hasIt        = hasCompetency WaitingWithoutAct progress
+          startedSit   = playerSitting `elem` diffWorldTagsAdded diff
+          alreadyToldThisHunt = hasTag world waitedSitNarrated
+      in if not hasIt || not startedSit || alreadyToldThisHunt
+         then []
+         else [ immediate (Narrate
+                  "You settle in the way you have before. Knees know it. \
+                  \Hips know it. The wait isn't a wait yet.")
+              , immediate (AddWorldTag waitedSitNarrated)
+              ]
+  }
 
 -- | End-of-hunt hook for DeerHunt — classifies the final world and
 -- dispatches to the right 'Engine.Sync.Progress' transition for the
@@ -104,17 +138,40 @@ deerHunt seed you progress pubkey =
 deerHuntOnEnd :: PlayerId -> Ed25519.PublicKey -> GameWorld -> IO ()
 deerHuntOnEnd pid _pubkey finalW = do
   path <- defaultProgressPath
+  -- White stag: lifetime-find dispatch (existing behaviour).
   let outcome = classifyEndOfHunt finalW
       action  = case outcome of
         NoStagInPlay         -> Nothing
         StagClaimedThisHunt  -> Just (recordLifetimeClaim   pid path)
         StagPassedThisHunt   -> Just (recordLifetimePass    pid path)
         StagLingered         -> Just (recordLifetimeLinger  pid path)
-  case action of
-    Nothing  -> pure ()
-    Just act -> do
+  for_ action swallow
+  -- Competencies earned this hunt: read the world's milestone /
+  -- sign-discovery tags and grant.  Every grant is idempotent on the
+  -- engine side, so re-grants from save-resume are harmless.
+  mapM_ (swallow . grantCompetency pid path) (competenciesEarned finalW)
+  where
+    swallow act = do
       _ <- try act :: IO (Either SomeException Progress)
       pure ()
+
+-- | Inspect a hunt's final 'GameWorld' and return the competencies the
+-- player should be granted.  Pure so it's unit-testable; the IO
+-- write happens in 'deerHuntOnEnd'.
+competenciesEarned :: GameWorld -> [Competency]
+competenciesEarned finalW =
+     [ WaitingWithoutAct | hasTag finalW waitedStillMilestone ]
+  ++ [ AnimalSignReading | signTypesFound finalW >= animalSignReadingThreshold ]
+
+-- | How many distinct sign-discovery types the player has on their
+-- final world (out of the four 'foundSignXxx' tags).
+signTypesFound :: GameWorld -> Int
+signTypesFound w =
+  length (filter (hasTag w) [ foundSignTracks
+                            , foundSignBed
+                            , foundSignRub
+                            , foundSignScrape
+                            ])
 
 -- | The scenario's display hooks.  Unlike 'deerHunt' these can't close
 -- over a 'HuntWorld' built from a seed because the SDL runtime doesn't

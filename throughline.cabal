@@ -5,7 +5,7 @@ cabal-version: 2.0
 -- see: https://github.com/sol/hpack
 
 name:           throughline
-version:        0.13.4
+version:        0.13.5
 description:    A narrative engine written in Haskell for modeling experience with specificity through composable effects and world state.
 homepage:       https://github.com/glendonjklassen/throughline
 author:         Glendon Klassen
@@ -40,6 +40,7 @@ library
     , Engine.Author.Rumor
     , Engine.Author.Scene
     , Engine.Author.Transition
+    , Engine.Competency
     , Engine.Core.Conditions
     , Engine.Core.Time
     , Engine.Core.World
@@ -87,6 +88,7 @@ library throughline-internal
       Engine.Author.Scene
       Engine.Author.Transition
       Engine.Author.Validate
+      Engine.Competency
       Engine.Core.AxiomRule
       Engine.Core.Axioms
       Engine.Core.Axioms.Biological
@@ -365,6 +367,7 @@ test-suite throughline-test
       Scenarios.DeerHuntGenerationSpec
       Scenarios.DeerHuntSignatureSpec
       Scenarios.DeerHuntWhiteStagSpec
+      Scenarios.DeerHuntCompetencySpec
       Scenarios.DeerHuntTestFixtures
       Scenarios.DinerSpec
       Scenarios.DinerSyncSpec
@@ -395,6 +398,7 @@ test-suite throughline-test
       Engine.Sync.EventLogSpec
       Engine.Sync.IdentitySpec
       Engine.Sync.ProgressSpec
+      Engine.CompetencySpec
       Engine.Sync.Relic.ShamirSpec
       Engine.Sync.RelicSpec
       SDL.AchievementsSpec

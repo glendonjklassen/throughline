@@ -30,6 +30,8 @@ module Engine.Sync.Progress
   , gammaThreshold
   , decayThreshold
   , lifetimeFindEligible
+  , hasCompetency
+  , grantCompetency
   ) where
 
 import qualified Crypto.PubKey.Ed25519   as Ed25519
@@ -44,12 +46,15 @@ import qualified Data.ByteString.Lazy    as BL
 import           Crypto.Hash             (Digest, SHA256, hash)
 import qualified Data.Map.Strict         as Map
 import           Data.Map.Strict         (Map)
+import qualified Data.Set                as Set
+import           Data.Set                (Set)
 import           Data.Time.Clock         (UTCTime, getCurrentTime)
 import           Data.Word               (Word8)
 import           System.Directory        (createDirectoryIfMissing, doesFileExist,
                                           getHomeDirectory)
 import           System.FilePath         ((</>), takeDirectory)
 
+import           Engine.Competency       (Competency)
 import           GameTypes               (PlayerId (..))
 
 -- | Per-identity play progress.  Starts at 'defaultProgress' on first
@@ -67,6 +72,12 @@ data Progress = Progress
     -- ^ State machine for the lifetime find (the white stag in
     -- DeerHunt, similar mechanics in other scenarios).  See
     -- 'LifetimeFindState' for transitions.
+  , progressCompetencies  :: !(Set Competency)
+    -- ^ Boolean, monotone, per-identity competencies the player
+    -- has demonstrated in any scenario.  See 'Engine.Competency'
+    -- for the vocabulary and per-entry contracts.  Once added,
+    -- never removed (no decay) — the natural unit for Steam
+    -- achievements when that build is wired.
   , progressUpdatedAt     :: !UTCTime
     -- ^ Wall-clock timestamp of the last mutation.  Informational —
     -- not used for invariants, but surfaced in the progress file so
@@ -101,6 +112,7 @@ instance ToJSON Progress where
     [ "epoch"        .= progressEpoch p
     , "huntCount"    .= progressHuntCount p
     , "lifetimeFind" .= progressLifetimeFind p
+    , "competencies" .= Set.toAscList (progressCompetencies p)
     , "updatedAt"    .= progressUpdatedAt p
     ]
 
@@ -109,6 +121,7 @@ instance FromJSON Progress where
     <$> o .:? "epoch"        .!= 1
     <*> o .:? "huntCount"    .!= 0
     <*> o .:? "lifetimeFind" .!= FindPending
+    <*> (Set.fromList <$> o .:? "competencies" .!= [])
     <*> o .:  "updatedAt"
 
 instance ToJSON LifetimeFindState where
@@ -150,6 +163,7 @@ defaultProgress = do
     { progressEpoch        = 1
     , progressHuntCount    = 0
     , progressLifetimeFind = FindPending
+    , progressCompetencies = Set.empty
     , progressUpdatedAt    = now
     }
 
@@ -313,6 +327,34 @@ recordLifetimeLinger pid path = do
 -- | Pass count at which the find transitions to 'FindLost'.
 lostThreshold :: Int
 lostThreshold = 10
+
+-- ---------------------------------------------------------------------------
+-- Competencies
+-- ---------------------------------------------------------------------------
+
+-- | Pure check: does this 'Progress' carry the named competency?
+-- Used by scenario factories at construction time to gate or tint
+-- behavior — the factory already takes 'Progress' (for the lifetime
+-- find), so reads are free of new plumbing.
+hasCompetency :: Competency -> Progress -> Bool
+hasCompetency c p = Set.member c (progressCompetencies p)
+
+-- | Mark a competency as earned.  Idempotent: granting a competency
+-- the player already has is a no-op (set semantics).  Persists to
+-- disk; callers should treat I/O failures as non-fatal (the
+-- per-bundle @entryOnEnd@ hook in 'SDL.Launcher' wraps this in
+-- 'try').
+grantCompetency :: PlayerId -> FilePath -> Competency -> IO Progress
+grantCompetency pid path c = do
+  now  <- getCurrentTime
+  all' <- loadAll path
+  base <- maybe defaultProgress pure (Map.lookup pid all')
+  let next = base
+        { progressCompetencies = Set.insert c (progressCompetencies base)
+        , progressUpdatedAt    = now
+        }
+  saveAll path (Map.insert pid next all')
+  pure next
 
 -- ---------------------------------------------------------------------------
 -- Eligibility math

@@ -488,7 +488,10 @@ signDiscoveryAxiom you = Axiom
       | otherwise = "Hair snagged on the wire. Coarse, tipped grey — mature buck, rubbing through."
 
 -- | Track stillness while sitting. Increments each tick while PlayerSitting
--- is active, resets to 0 when the player moves.
+-- is active, resets to 0 when the player moves.  Latches the
+-- 'waitedStillMilestone' world tag the first time stillness reaches
+-- 'waitedStillThreshold' — that latch is what 'deerHuntOnEnd' reads
+-- to decide whether to grant the 'WaitingWithoutAct' competency.
 stillnessAxiom :: CharacterId -> Axiom
 stillnessAxiom you = Axiom
   { axiomId       = ScenarioAxiom "stillness"
@@ -497,12 +500,17 @@ stillnessAxiom you = Axiom
       let isSitting   = hasTag world playerSitting
           playerMoved = any (\ld -> locationDeltaChar ld == you) (diffLocations diff)
           current     = getStillness you world
+          incrementing = isSitting && not playerMoved && current < 10
+          atOrPastThreshold = current + 1 >= waitedStillThreshold
+          latchMilestone = incrementing
+                        && atOrPastThreshold
+                        && not (hasTag world waitedStillMilestone)
       in if huntOver world then []
          else if playerMoved && current > 0
               -- Reset to 0: modify by negative current value
               then [modifyStat you (Capacity Stillness) (negate current)]
-         else [modifyStat you (Capacity Stillness) 1
-              | isSitting && not playerMoved && current < 10]
+         else  [modifyStat you (Capacity Stillness) 1 | incrementing]
+            ++ [immediate (AddWorldTag waitedStillMilestone) | latchMilestone]
   }
 
 -- ---------------------------------------------------------------------------

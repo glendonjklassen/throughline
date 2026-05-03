@@ -1,5 +1,5 @@
 name:                throughline
-version:             0.13.4
+version:             0.13.5
 homepage:            "https://github.com/glendonjklassen/throughline"
 license:             MIT
 author:              "Glendon Klassen"
@@ -90,6 +90,7 @@ library:
     - Engine.Author.Rumor
     - Engine.Author.Scene
     - Engine.Author.Transition
+    - Engine.Competency
     - Engine.Core.Conditions
     - Engine.Core.Time
     - Engine.Core.World
@@ -210,6 +211,7 @@ tests:
     - Scenarios.DeerHuntGenerationSpec
     - Scenarios.DeerHuntSignatureSpec
     - Scenarios.DeerHuntWhiteStagSpec
+    - Scenarios.DeerHuntCompetencySpec
     - Scenarios.DeerHuntTestFixtures
     - Scenarios.DinerSpec
     - Scenarios.DinerSyncSpec
@@ -240,6 +242,7 @@ tests:
     - Engine.Sync.EventLogSpec
     - Engine.Sync.IdentitySpec
     - Engine.Sync.ProgressSpec
+    - Engine.CompetencySpec
     - Engine.Sync.Relic.ShamirSpec
     - Engine.Sync.RelicSpec
     - SDL.AchievementsSpec
